@@ -24,17 +24,6 @@
       ]
     }
   ],
-  "env": {
-    "NEXT_PUBLIC_BUILD_TIMESTAMP": {
-      "type": "string",
-      "value": "${new Date().toISOString()}"
-    }
-  },
-  "build": {
-    "env": {
-      "NEXT_PUBLIC_BUILD_ID": "build-${new Date().getTime()}"
-    }
-  },
   "github": {
     "enabled": true,
     "silent": false
