@@ -1,0 +1,52 @@
+{
+  "version": 2,
+  "buildCommand": "npm run build",
+  "installCommand": "npm install",
+  "framework": "nextjs",
+  "regions": ["cdg1"],
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=0, must-revalidate"
+        }
+      ]
+    },
+    {
+      "source": "/api/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-cache, no-store, must-revalidate"
+        }
+      ]
+    }
+  ],
+  "env": {
+    "NEXT_PUBLIC_BUILD_TIMESTAMP": {
+      "type": "string",
+      "value": "${new Date().toISOString()}"
+    }
+  },
+  "build": {
+    "env": {
+      "NEXT_PUBLIC_BUILD_ID": "build-${new Date().getTime()}"
+    }
+  },
+  "github": {
+    "enabled": true,
+    "silent": false
+  },
+  "crons": [
+    {
+      "path": "/api/cron/cache-cleanup",
+      "schedule": "0 0 * * *"
+    }
+  ],
+  "buildCache": {
+    "disabled": true
+  }
+}
+
