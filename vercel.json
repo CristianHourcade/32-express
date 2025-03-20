@@ -44,9 +44,6 @@
       "path": "/api/cron/cache-cleanup",
       "schedule": "0 0 * * *"
     }
-  ],
-  "buildCache": {
-    "disabled": true
-  }
+  ]
 }
 
