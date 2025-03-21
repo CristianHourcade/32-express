@@ -9,6 +9,7 @@ import { createSale } from "@/lib/redux/slices/salesSlice"
 import { getShifts } from "@/lib/redux/slices/shiftSlice"
 import { Search, ShoppingCart, Plus, Minus, Trash2, X, Check, AlertTriangle } from "lucide-react"
 import Link from "next/link"
+import { supabase } from "@/lib/supabase" // Importar Supabase para la búsqueda remota
 
 type CartItem = {
   productId: string
@@ -27,6 +28,10 @@ export default function NewSalePage() {
   const { employees } = useSelector((state: RootState) => state.employees)
 
   const [searchQuery, setSearchQuery] = useState("")
+  // Estados para búsqueda remota
+  const [searchResults, setSearchResults] = useState<any[]>([])
+  const [isSearching, setIsSearching] = useState(false)
+
   const [cart, setCart] = useState<CartItem[]>([])
   const [paymentMethod, setPaymentMethod] = useState<"cash" | "card" | "transfer" | "mercadopago" | "rappi">("cash")
   const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false)
@@ -40,83 +45,85 @@ export default function NewSalePage() {
     dispatch(getShifts())
   }, [dispatch])
 
-  // Filter products by employee's business
+  // Filtrar productos del negocio del empleado (búsqueda local para otras partes si se requiere)
   const businessId = user?.businessId
   const businessProducts = useMemo(
     () => products.filter((product) => product.businessId === businessId),
     [products, businessId],
   )
 
-  // Modificar la forma en que se busca el turno activo
-  // Reemplazar el useMemo existente para activeShift con:
+  // --- Búsqueda remota usando Supabase ---
+  useEffect(() => {
+    const fetchSearchResults = async () => {
+      // Si el query está vacío, limpiar resultados
+      if (!searchQuery.trim()) {
+        setSearchResults([])
+        return
+      }
 
-  // Primero, agregar este useMemo para encontrar el empleado actual
-  const currentEmployee = useMemo(() => {
-    console.log("🔍 NewSale: Finding current employee")
-    console.log("🔍 NewSale: User data:", user)
-    console.log("🔍 NewSale: All employees:", employees)
+      setIsSearching(true)
+      try {
+        const { data, error } = await supabase
+          .from("products")
+          .select("*")
+          // Se filtra también por business_id para obtener solo los productos de este negocio
+          .eq("business_id", businessId)
+          // Se usa OR para buscar en name, code y description
+          .or(`name.ilike.%${searchQuery}%,code.ilike.%${searchQuery}%,description.ilike.%${searchQuery}%`)
+          .limit(20)
 
-    if (!user) {
-      console.log("🔍 NewSale: No user found")
-      return null
+        if (error) throw error
+
+        // Mapear los resultados al formato esperado (ajusta según tu modelo)
+        const formattedResults = data.map((item) => ({
+          id: item.id,
+          name: item.name,
+          code: item.code,
+          description: item.description,
+          sellingPrice: item.selling_price,
+          stock: item.stock,
+          minStock: item.min_stock,
+          businessId: item.business_id,
+          // Puedes agregar otros campos si es necesario
+        }))
+
+        setSearchResults(formattedResults)
+      } catch (error) {
+        console.error("Error searching products:", error)
+        setSearchResults([])
+      } finally {
+        setIsSearching(false)
+      }
     }
+    fetchSearchResults()
+  }, [searchQuery, businessId])
+  // --- Fin búsqueda remota ---
 
-    // Buscar el empleado por el ID de usuario (auth_id)
+  // Mantener la lógica para buscar productos (se activa al escribir en el input)
+  // Ahora searchQuery activa la búsqueda remota en lugar de filtrar localmente
+
+  // ... (Resto de la lógica del componente, como currentEmployee, activeShift, etc.)
+  const currentEmployee = useMemo(() => {
+    if (!user) return null
     const empById = employees.find((emp) => emp.userId === user.id)
-    console.log("🔍 NewSale: Employee found by userId:", empById)
-
-    // Si no se encuentra por ID, intentar buscar por email como fallback
-    // Hacemos la comparación insensible a mayúsculas/minúsculas
     const empByEmail = !empById ? employees.find((emp) => emp.email.toLowerCase() === user.email.toLowerCase()) : null
-    console.log("🔍 NewSale: Employee found by email:", empByEmail)
-
-    const foundEmployee = empById || empByEmail
-    console.log("🔍 NewSale: Final employee found:", foundEmployee)
-    return foundEmployee
+    return empById || empByEmail
   }, [employees, user])
 
-  // Luego, modificar cómo se busca el turno activo
   const activeShift = useMemo(() => {
-    console.log("🔍 NewSale: Finding active shift")
-    console.log("🔍 NewSale: Current employee:", currentEmployee)
-    console.log("🔍 NewSale: All shifts:", shifts)
-
-    if (!currentEmployee) {
-      console.log("🔍 NewSale: No current employee, can't find shift")
-      return null
-    }
-
-    const shift = shifts.find((shift) => shift.employeeId === currentEmployee.id && shift.active)
-    console.log("🔍 NewSale: Active shift found:", shift)
-    return shift
+    if (!currentEmployee) return null
+    return shifts.find((shift) => shift.employeeId === currentEmployee.id && shift.active)
   }, [shifts, currentEmployee])
 
-  // Filter products by search query
-  const filteredProducts = useMemo(() => {
-    if (!searchQuery) return []
-
-    const query = searchQuery.toLowerCase()
-    return businessProducts.filter(
-      (product) =>
-        product.name.toLowerCase().includes(query) ||
-        product.code.toLowerCase().includes(query) ||
-        product.description.toLowerCase().includes(query),
-    )
-  }, [businessProducts, searchQuery])
-
+  // Funciones para el carrito
   const addToCart = (product) => {
-    // Check if product is already in cart
     const existingItemIndex = cart.findIndex((item) => item.productId === product.id)
-
     if (existingItemIndex >= 0) {
-      // Update quantity if already in cart
       const updatedCart = [...cart]
       updatedCart[existingItemIndex].quantity += 1
-      updatedCart[existingItemIndex].total =
-        updatedCart[existingItemIndex].quantity * updatedCart[existingItemIndex].price
+      updatedCart[existingItemIndex].total = updatedCart[existingItemIndex].quantity * updatedCart[existingItemIndex].price
       setCart(updatedCart)
     } else {
-      // Add new item to cart
       setCart([
         ...cart,
         {
@@ -132,7 +139,6 @@ export default function NewSalePage() {
 
   const updateCartItemQuantity = (index: number, newQuantity: number) => {
     if (newQuantity < 1) return
-
     const updatedCart = [...cart]
     updatedCart[index].quantity = newQuantity
     updatedCart[index].total = newQuantity * updatedCart[index].price
@@ -146,28 +152,14 @@ export default function NewSalePage() {
   const cartTotal = useMemo(() => cart.reduce((sum, item) => sum + item.total, 0), [cart])
 
   const handleCompleteSale = async () => {
-    console.log("🔍 NewSale: Starting sale completion")
-    console.log("🔍 NewSale: Active shift:", activeShift)
-    console.log("🔍 NewSale: Current user:", user)
-    console.log("🔍 NewSale: Current employee:", currentEmployee)
-    console.log("🔍 NewSale: Cart items:", cart)
-
-    if (!activeShift || !user || cart.length === 0) {
-      console.log("🔍 NewSale: Missing required data for sale")
-      console.log("🔍 NewSale: activeShift exists:", !!activeShift)
-      console.log("🔍 NewSale: user exists:", !!user)
-      console.log("🔍 NewSale: cart has items:", cart.length > 0)
-      return
-    }
+    if (!activeShift || !user || cart.length === 0) return
 
     setIsProcessing(true)
-
     try {
-      // Preparar los datos de la venta
       const saleData = {
         businessId: businessId!,
         businessName: activeShift.businessName,
-        employeeId: currentEmployee ? currentEmployee.id : user.id, // Usar el ID del empleado si está disponible, de lo contrario usar el ID del usuario
+        employeeId: currentEmployee ? currentEmployee.id : user.id,
         employeeName: user.name,
         items: cart,
         total: cartTotal,
@@ -175,14 +167,9 @@ export default function NewSalePage() {
         timestamp: new Date().toISOString(),
         shiftId: activeShift.id,
       }
-
-      console.log("🔍 NewSale: Sale data to be sent:", saleData)
-
-      // Create the sale
       const result = await dispatch(createSale(saleData))
-      console.log("🔍 NewSale: Sale creation result:", result)
 
-      // Update product stock
+      // Actualizar stock de cada producto
       for (const item of cart) {
         const product = products.find((p) => p.id === item.productId)
         if (product) {
@@ -197,18 +184,15 @@ export default function NewSalePage() {
         }
       }
 
-      // Show success message and reset cart
       setSuccessMessage("Venta registrada correctamente")
       setCart([])
       setPaymentMethod("cash")
       setIsConfirmModalOpen(false)
-
-      // Clear success message after 3 seconds
       setTimeout(() => {
         setSuccessMessage("")
       }, 3000)
     } catch (error) {
-      console.error("🔍 NewSale: Error completing sale:", error)
+      console.error("Error completing sale:", error)
     } finally {
       setIsProcessing(false)
     }
@@ -227,13 +211,13 @@ export default function NewSalePage() {
     )
   }
 
-  // Format currency
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS" }).format(amount)
   }
 
   return (
     <div className="space-y-6">
+      {/* Cabecera y mensaje */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
           <h1 className="text-2xl font-bold">Nueva Venta</h1>
@@ -246,7 +230,7 @@ export default function NewSalePage() {
         </Link>
       </div>
 
-      {/* No Active Shift Warning */}
+      {/* Advertencia si no hay turno activo */}
       {!activeShift && (
         <div className="bg-red-50 dark:bg-red-900/20 border-l-4 border-red-500 p-4 rounded-md">
           <div className="flex">
@@ -268,7 +252,7 @@ export default function NewSalePage() {
         </div>
       )}
 
-      {/* Success Message */}
+      {/* Mensaje de éxito */}
       {successMessage && (
         <div className="bg-green-50 dark:bg-green-900/20 border-l-4 border-green-500 p-4 rounded-md">
           <div className="flex">
@@ -283,7 +267,7 @@ export default function NewSalePage() {
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Product Search and Results */}
+        {/* Buscador de productos y resultados */}
         <div className="lg:col-span-2 space-y-4">
           <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm p-4">
             <div className="relative">
@@ -301,7 +285,7 @@ export default function NewSalePage() {
             </div>
           </div>
 
-          {/* Search Results */}
+          {/* Resultados de la búsqueda remota */}
           {searchQuery && (
             <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm overflow-hidden">
               <div className="p-4 border-b border-gray-200 dark:border-gray-700">
@@ -311,41 +295,33 @@ export default function NewSalePage() {
                 <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
                   <thead className="bg-gray-50 dark:bg-gray-700">
                     <tr>
-                      <th
-                        scope="col"
-                        className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider"
-                      >
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                         Producto
                       </th>
-                      <th
-                        scope="col"
-                        className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider"
-                      >
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                         Código
                       </th>
-                      <th
-                        scope="col"
-                        className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider"
-                      >
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                         Precio
                       </th>
-                      <th
-                        scope="col"
-                        className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider"
-                      >
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                         Stock
                       </th>
-                      <th
-                        scope="col"
-                        className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider"
-                      >
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                         Acciones
                       </th>
                     </tr>
                   </thead>
                   <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                    {filteredProducts.length > 0 ? (
-                      filteredProducts.map((product) => (
+                    {isSearching ? (
+                      <tr>
+                        <td colSpan={5} className="px-6 py-4 text-center text-sm text-gray-500 dark:text-gray-400">
+                          <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-700 mx-auto"></div>
+                          <p className="mt-2">Buscando productos...</p>
+                        </td>
+                      </tr>
+                    ) : searchResults.length > 0 ? (
+                      searchResults.map((product) => (
                         <tr key={product.id} className="hover:bg-gray-50 dark:hover:bg-gray-700">
                           <td className="px-6 py-4 whitespace-nowrap">
                             <div className="text-sm font-medium text-gray-900 dark:text-white">{product.name}</div>
@@ -363,8 +339,8 @@ export default function NewSalePage() {
                                 product.stock <= 0
                                   ? "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300"
                                   : product.stock <= product.minStock
-                                    ? "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300"
-                                    : "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300"
+                                  ? "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300"
+                                  : "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300"
                               }`}
                             >
                               {product.stock}
@@ -395,7 +371,7 @@ export default function NewSalePage() {
           )}
         </div>
 
-        {/* Shopping Cart */}
+        {/* Carrito de compras */}
         <div className="space-y-4">
           <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm p-4">
             <div className="flex items-center justify-between mb-4">
@@ -453,7 +429,9 @@ export default function NewSalePage() {
                   </div>
 
                   <div className="space-y-3">
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Método de Pago</label>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                      Método de Pago
+                    </label>
                     <div className="grid grid-cols-2 gap-2">
                       <button
                         type="button"
@@ -533,7 +511,7 @@ export default function NewSalePage() {
         </div>
       </div>
 
-      {/* Confirm Sale Modal */}
+      {/* Modal de confirmación de venta */}
       {isConfirmModalOpen && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg max-w-md w-full">
@@ -560,23 +538,23 @@ export default function NewSalePage() {
                       paymentMethod === "cash"
                         ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300"
                         : paymentMethod === "card"
-                          ? "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300"
-                          : paymentMethod === "transfer"
-                            ? "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-300"
-                            : paymentMethod === "mercadopago"
-                              ? "bg-sky-100 text-sky-800 dark:bg-sky-900 dark:text-sky-300"
-                              : "bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-300"
+                        ? "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300"
+                        : paymentMethod === "transfer"
+                        ? "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-300"
+                        : paymentMethod === "mercadopago"
+                        ? "bg-sky-100 text-sky-800 dark:bg-sky-900 dark:text-sky-300"
+                        : "bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-300"
                     }`}
                   >
                     {paymentMethod === "cash"
                       ? "Efectivo"
                       : paymentMethod === "card"
-                        ? "Tarjeta"
-                        : paymentMethod === "transfer"
-                          ? "Transferencia"
-                          : paymentMethod === "mercadopago"
-                            ? "MercadoPago"
-                            : "Rappi"}
+                      ? "Tarjeta"
+                      : paymentMethod === "transfer"
+                      ? "Transferencia"
+                      : paymentMethod === "mercadopago"
+                      ? "MercadoPago"
+                      : "Rappi"}
                   </span>
                 </div>
               </div>
@@ -595,4 +573,3 @@ export default function NewSalePage() {
     </div>
   )
 }
-

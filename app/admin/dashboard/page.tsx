@@ -1,9 +1,9 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, useMemo } from "react"
 import { useDispatch, useSelector } from "react-redux"
 import type { AppDispatch, RootState } from "@/lib/redux/store"
-import { fetchBusinesses } from "@/lib/redux/slices/businessSlice" // Changed from getBusinesses
+import { fetchBusinesses } from "@/lib/redux/slices/businessSlice"
 import { getEmployees } from "@/lib/redux/slices/employeeSlice"
 import { getProducts } from "@/lib/redux/slices/productSlice"
 import { getShifts, getActiveShifts } from "@/lib/redux/slices/shiftSlice"
@@ -17,57 +17,111 @@ export default function AdminDashboard() {
   const { shifts, loading: shiftsLoading } = useSelector((state: RootState) => state.shifts)
   const { sales, loading: salesLoading } = useSelector((state: RootState) => state.sales)
 
-  // Estados para ordenación
-  const [sortColumn, setSortColumn] = useState<string>("salesCount")
+  // Estados para ordenación en la tabla de Productos Principales
+  const [sortColumn, setSortColumn] = useState<"salesCount" | "totalRevenue">("salesCount")
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc")
+  // Estado para filtrar productos principales por negocio
+  const [selectedBusinessForTopProducts, setSelectedBusinessForTopProducts] = useState<string>("")
 
   useEffect(() => {
-    dispatch(fetchBusinesses()) // Changed from getBusinesses
+    dispatch(fetchBusinesses())
     dispatch(getEmployees())
     dispatch(getProducts())
     dispatch(getShifts())
-    dispatch(getActiveShifts()) // Obtener turnos activos específicamente
-    dispatch(getSales()) // Añadido para cargar las ventas
+    dispatch(getActiveShifts()) // Obtener turnos activos
+    dispatch(getSales())       // Cargar ventas
   }, [dispatch])
 
-  // Calcular productos con stock bajo
-  const lowStockProducts = products.filter((product) => product.stock <= product.minStock).slice(0, 20) // Limit to maximum 20 products
+  // Calcular productos con stock bajo (solo para la alerta)
+  const lowStockProducts = products.filter((product) => product.stock <= product.minStock).slice(0, 20)
 
-  // Obtener turnos activos y ordenarlos por cantidad de ventas (de mayor a menor)
+  // Ordenar turnos activos por cantidad de ventas (campo shift.sales, si lo manejas)
   const activeShifts = shifts.filter((shift) => shift.active).sort((a, b) => b.sales - a.sales)
 
-  // Función para manejar el cambio de ordenación
-  const handleSort = (column: string) => {
-    if (sortColumn === column) {
-      // Si ya estamos ordenando por esta columna, cambiamos la dirección
-      setSortDirection(sortDirection === "asc" ? "desc" : "asc")
-    } else {
-      // Si es una nueva columna, establecemos la columna y dirección por defecto (descendente)
-      setSortColumn(column)
-      setSortDirection("desc")
-    }
-  }
+  // --------------------------------------------
+  // LÓGICA PARA ACUMULAR PRODUCTOS MÁS VENDIDOS
+  // --------------------------------------------
+  const topProducts = useMemo(() => {
+    // Mapa para acumular info: productId => { ...datos acumulados... }
+    const productMap = new Map<
+      string,
+      {
+        productName: string
+        businessId: string
+        purchasePrice: number
+        sellingPrice: number
+        totalQuantity: number
+        totalRevenue: number
+      }
+    >()
 
-  // Obtener los 10 productos principales ordenados según la columna y dirección seleccionadas
-  const topProducts = [...products]
-    .sort((a, b) => {
+    // Filtrar ventas si se selecciona un negocio
+    const relevantSales = selectedBusinessForTopProducts
+      ? sales.filter((sale) => sale.businessId === selectedBusinessForTopProducts)
+      : sales
+
+    // Recorrer las ventas y sus items para acumular
+    for (const sale of relevantSales) {
+      for (const item of sale.items) {
+        // Buscar el producto en el store de products
+        const prod = products.find((p) => p.id === item.productId)
+        if (!prod) continue
+
+        // Si no existe en el mapa, lo inicializamos
+        if (!productMap.has(item.productId)) {
+          productMap.set(item.productId, {
+            productName: item.productName,
+            businessId: prod.businessId,
+            purchasePrice: prod.purchasePrice,
+            sellingPrice: prod.sellingPrice,
+            totalQuantity: 0,
+            totalRevenue: 0,
+          })
+        }
+        const data = productMap.get(item.productId)!
+        data.totalQuantity += item.quantity
+        data.totalRevenue += item.total
+      }
+    }
+
+    // Convertir el mapa a array para poder ordenarlo
+    let arr = Array.from(productMap.values())
+
+    // Ordenar según la columna y dirección seleccionadas
+    arr.sort((a, b) => {
       if (sortColumn === "salesCount") {
-        return sortDirection === "asc" ? a.salesCount - b.salesCount : b.salesCount - a.salesCount
+        return sortDirection === "asc" ? a.totalQuantity - b.totalQuantity : b.totalQuantity - a.totalQuantity
       } else if (sortColumn === "totalRevenue") {
         return sortDirection === "asc" ? a.totalRevenue - b.totalRevenue : b.totalRevenue - a.totalRevenue
       }
       return 0
     })
-    .slice(0, 10)
 
-  // Calcular las ventas por negocio
+    // Tomar solo los 10 primeros
+    const top10 = arr.slice(0, 10)
+
+    // Debug en consola
+    console.log("🔍 [AdminDashboard] topProducts calculados a partir de sales:", top10)
+    return top10
+  }, [sales, products, selectedBusinessForTopProducts, sortColumn, sortDirection])
+
+  // --------------------------------------------
+  // LÓGICA PARA NEGOCIOS CON SUS VENTAS
+  // --------------------------------------------
   const calculateBusinessSales = () => {
-    console.log("🔍 Dashboard: Calculating business sales with sales data:", sales.length)
+    // Mapa para almacenar las ventas por negocio
+    const businessSalesMap = new Map<
+      string,
+      {
+        todaySales: number
+        totalAmount: number
+        paymentMethods: {
+          [key: string]: number
+        }
+      }
+    >()
 
-    // Crear un mapa para almacenar las ventas por negocio
-    const businessSalesMap = new Map()
-
-    // Inicializar el mapa con los negocios existentes
+    // Inicializar con los negocios existentes
     businesses.forEach((business) => {
       businessSalesMap.set(business.id, {
         todaySales: 0,
@@ -84,14 +138,6 @@ export default function AdminDashboard() {
 
     // Procesar las ventas
     sales.forEach((sale) => {
-      console.log("🔍 Dashboard: Processing sale:", {
-        id: sale.id,
-        businessId: sale.businessId,
-        total: sale.total,
-        paymentMethod: sale.paymentMethod,
-        timestamp: sale.timestamp,
-      })
-
       const businessData = businessSalesMap.get(sale.businessId)
       if (businessData) {
         // Verificar si la venta es de hoy
@@ -108,18 +154,16 @@ export default function AdminDashboard() {
 
         businessData.totalAmount += sale.total
 
-        // Actualizar el método de pago
+        // Actualizar método de pago
         if (sale.paymentMethod in businessData.paymentMethods) {
           businessData.paymentMethods[sale.paymentMethod] += sale.total
         }
-      } else {
-        console.log("🔍 Dashboard: Business not found for sale:", sale.businessId)
       }
     })
 
-    // Actualizar los negocios con los datos calculados
+    // Retornar un array de negocios con sus stats
     return businesses.map((business) => {
-      const salesData = businessSalesMap.get(business.id) || {
+      const data = businessSalesMap.get(business.id) || {
         todaySales: 0,
         totalAmount: 0,
         paymentMethods: {
@@ -130,22 +174,22 @@ export default function AdminDashboard() {
           rappi: 0,
         },
       }
-
       return {
         ...business,
-        todaySales: salesData.todaySales,
-        totalAmount: salesData.totalAmount,
-        paymentMethods: salesData.paymentMethods,
+        todaySales: data.todaySales,
+        totalAmount: data.totalAmount,
+        paymentMethods: data.paymentMethods,
       }
     })
   }
 
-  // Calcular los negocios con sus ventas
   const businessesWithSales = calculateBusinessSales()
 
-  // Calcular el total de ventas por método de pago para cada turno
-  const calculateShiftTotals = (shift) => {
-    // Filtrar las ventas que pertenecen a este turno
+  // --------------------------------------------
+  // LÓGICA PARA TURNOS ACTIVOS (ejemplo)
+  // --------------------------------------------
+  const calculateShiftTotals = (shift: any) => {
+    // Filtrar las ventas de este turno
     const shiftSales = sales.filter((sale) => sale.shiftId === shift.id)
 
     // Inicializar los métodos de pago
@@ -157,23 +201,19 @@ export default function AdminDashboard() {
       rappi: 0,
     }
 
-    // Calcular el total por método de pago
     shiftSales.forEach((sale) => {
       if (sale.paymentMethod in paymentMethods) {
         paymentMethods[sale.paymentMethod] += sale.total
       }
     })
 
-    // Calcular el total general
-    const totalSales = Object.values(paymentMethods).reduce((sum, value) => sum + value, 0)
-
-    return {
-      paymentMethods,
-      totalSales,
-    }
+    const totalSales = Object.values(paymentMethods).reduce((sum, val) => sum + val, 0)
+    return { paymentMethods, totalSales }
   }
 
-  const isLoading = businessesLoading || employeesLoading || productsLoading || shiftsLoading || salesLoading
+  // Verificar si está cargando
+  const isLoading =
+    businessesLoading || employeesLoading || productsLoading || shiftsLoading || salesLoading
 
   if (isLoading) {
     return (
@@ -186,7 +226,7 @@ export default function AdminDashboard() {
     )
   }
 
-  // Función para traducir los métodos de pago
+  // Funciones de apoyo para estilos / traducciones
   const translatePaymentMethod = (method: string) => {
     const translations = {
       cash: "Efectivo",
@@ -198,7 +238,6 @@ export default function AdminDashboard() {
     return translations[method] || method
   }
 
-  // Función para obtener la clase CSS del método de pago
   const getPaymentMethodClass = (method: string) => {
     const classes = {
       cash: "bg-green-100 dark:bg-green-900 p-2 rounded",
@@ -210,11 +249,24 @@ export default function AdminDashboard() {
     return classes[method] || "bg-gray-100 dark:bg-gray-700 p-2 rounded"
   }
 
-  // Componente para el encabezado de columna ordenable
-  const SortableHeader = ({ column, label }: { column: string; label: string }) => (
+  // Encabezado ordenable
+  const SortableHeader = ({
+    column,
+    label,
+  }: {
+    column: "salesCount" | "totalRevenue"
+    label: string
+  }) => (
     <th
       className="table-header-cell cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700"
-      onClick={() => handleSort(column)}
+      onClick={() => {
+        if (sortColumn === column) {
+          setSortDirection(sortDirection === "asc" ? "desc" : "asc")
+        } else {
+          setSortColumn(column)
+          setSortDirection("desc")
+        }
+      }}
     >
       <div className="flex items-center">
         {label}
@@ -223,11 +275,14 @@ export default function AdminDashboard() {
     </th>
   )
 
+  // --------------------------------------------
+  // RENDER
+  // --------------------------------------------
   return (
     <div className="space-y-6">
       <h1 className="text-2xl font-bold">Dashboard</h1>
 
-      {/* Tarjetas de Negocios */}
+      {/* Negocios */}
       <div>
         <h2 className="text-xl font-semibold mb-4">Negocios</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -247,7 +302,9 @@ export default function AdminDashboard() {
               <div className="mb-2">
                 <p className="text-sm text-gray-500 dark:text-gray-400">Ticket Promedio</p>
                 <p className="font-medium">
-                  ${business.todaySales > 0 ? (business.totalAmount / business.todaySales).toFixed(2) : "0.00"}
+                  {business.todaySales > 0
+                    ? `$${(business.totalAmount / business.todaySales).toFixed(2)}`
+                    : "0.00"}
                 </p>
               </div>
               <div className="mt-3">
@@ -322,7 +379,9 @@ export default function AdminDashboard() {
                         <tr key={product.id} className="table-row">
                           <td className="table-cell font-medium">{product.name}</td>
                           <td className="table-cell">{business?.name || "Desconocido"}</td>
-                          <td className="table-cell text-red-600 dark:text-red-400 font-medium">{product.stock}</td>
+                          <td className="table-cell text-red-600 dark:text-red-400 font-medium">
+                            {product.stock}
+                          </td>
                           <td className="table-cell">{product.minStock}</td>
                           <td className="table-cell">
                             <div className="flex items-center">
@@ -356,9 +415,24 @@ export default function AdminDashboard() {
         </div>
       </div>
 
-      {/* Productos Principales */}
+      {/* Productos Principales (ahora basados en la data de las ventas) */}
       <div>
-        <h2 className="text-xl font-semibold mb-4">Productos Principales</h2>
+        <div className="flex justify-between items-center mb-4">
+          <h2 className="text-xl font-semibold">Productos Principales</h2>
+          {/* Select para filtrar por negocio */}
+          <select
+            className="input max-w-xs"
+            value={selectedBusinessForTopProducts}
+            onChange={(e) => setSelectedBusinessForTopProducts(e.target.value)}
+          >
+            <option value="">Todos los negocios</option>
+            {businesses.map((business) => (
+              <option key={business.id} value={business.id}>
+                {business.name}
+              </option>
+            ))}
+          </select>
+        </div>
         <div className="card">
           <div className="table-container">
             <table className="table">
@@ -372,16 +446,20 @@ export default function AdminDashboard() {
                 </tr>
               </thead>
               <tbody className="table-body">
-                {topProducts.map((product) => {
-                  const business = businesses.find((b) => b.id === product.businessId)
-                  const marginPercentage =
-                    ((product.sellingPrice - product.purchasePrice) / product.purchasePrice) * 100
+                {topProducts.map((item, idx) => {
+                  const business = businesses.find((b) => b.id === item.businessId)
+                  // Calcular margen de ganancia
+                  let marginPercentage = 0
+                  if (item.purchasePrice > 0) {
+                    marginPercentage =
+                      ((item.sellingPrice - item.purchasePrice) / item.purchasePrice) * 100
+                  }
                   return (
-                    <tr key={product.id} className="table-row">
-                      <td className="table-cell font-medium">{product.name}</td>
+                    <tr key={idx} className="table-row">
+                      <td className="table-cell font-medium">{item.productName}</td>
                       <td className="table-cell">{business?.name || "Desconocido"}</td>
-                      <td className="table-cell">{product.salesCount}</td>
-                      <td className="table-cell">${product.totalRevenue.toFixed(2)}</td>
+                      <td className="table-cell">{item.totalQuantity}</td>
+                      <td className="table-cell">${item.totalRevenue.toFixed(2)}</td>
                       <td className="table-cell">{marginPercentage.toFixed(2)}%</td>
                     </tr>
                   )
@@ -397,9 +475,7 @@ export default function AdminDashboard() {
         <h2 className="text-xl font-semibold mb-4">Turnos Activos</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {activeShifts.map((shift) => {
-            // Calcular los totales reales por método de pago para este turno
             const shiftTotals = calculateShiftTotals(shift)
-
             return (
               <div key={shift.id} className="card">
                 <div className="flex justify-between items-start mb-3">
@@ -422,7 +498,9 @@ export default function AdminDashboard() {
                   </div>
                   <div className="flex justify-between bg-gray-100 dark:bg-gray-800 p-2 rounded-md">
                     <p className="text-sm font-semibold">Venta Total</p>
-                    <p className="font-bold text-green-600 dark:text-green-400">${shiftTotals.totalSales.toFixed(2)}</p>
+                    <p className="font-bold text-green-600 dark:text-green-400">
+                      ${shiftTotals.totalSales.toFixed(2)}
+                    </p>
                   </div>
                   <div className="mt-3">
                     <p className="text-sm text-gray-500 dark:text-gray-400 mb-1">Métodos de Pago</p>
@@ -439,7 +517,9 @@ export default function AdminDashboard() {
                     <div className="grid grid-cols-3 gap-2">
                       <div className={getPaymentMethodClass("mercadopago")}>
                         <p className="text-xs text-gray-500 dark:text-gray-400">Mercadopago</p>
-                        <p className="font-medium">${shiftTotals.paymentMethods.mercadopago.toFixed(2)}</p>
+                        <p className="font-medium">
+                          ${shiftTotals.paymentMethods.mercadopago.toFixed(2)}
+                        </p>
                       </div>
                       <div className={getPaymentMethodClass("rappi")}>
                         <p className="text-xs text-gray-500 dark:text-gray-400">Rappi</p>
@@ -447,7 +527,9 @@ export default function AdminDashboard() {
                       </div>
                       <div className={getPaymentMethodClass("transfer")}>
                         <p className="text-xs text-gray-500 dark:text-gray-400">Transferencia</p>
-                        <p className="font-medium">${shiftTotals.paymentMethods.transfer.toFixed(2)}</p>
+                        <p className="font-medium">
+                          ${shiftTotals.paymentMethods.transfer.toFixed(2)}
+                        </p>
                       </div>
                     </div>
                   </div>
@@ -465,4 +547,3 @@ export default function AdminDashboard() {
     </div>
   )
 }
-

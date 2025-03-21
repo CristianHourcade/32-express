@@ -1,9 +1,15 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, useMemo } from "react"
 import { useDispatch, useSelector } from "react-redux"
 import type { AppDispatch, RootState } from "@/lib/redux/store"
-import { fetchBusinesses, addBusiness, editBusiness, removeBusiness } from "@/lib/redux/slices/businessSlice"
+import {
+  fetchBusinesses,
+  addBusiness,
+  editBusiness,
+  removeBusiness,
+} from "@/lib/redux/slices/businessSlice"
+import { getProducts } from "@/lib/redux/slices/productSlice"
 import { Button } from "@/components/ui/button"
 import { PlusCircle, Search, Edit, Trash2, Building2 } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -13,6 +19,8 @@ import type { Business, CreateBusinessData, UpdateBusinessData } from "@/service
 export default function BusinessPage() {
   const dispatch = useDispatch<AppDispatch>()
   const { businesses, loading, error } = useSelector((state: RootState) => state.businesses)
+  const { products, loading: productsLoading } = useSelector((state: RootState) => state.products)
+
   const [searchQuery, setSearchQuery] = useState("")
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false)
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
@@ -21,6 +29,7 @@ export default function BusinessPage() {
 
   useEffect(() => {
     dispatch(fetchBusinesses())
+    dispatch(getProducts())
   }, [dispatch])
 
   // Filtrar negocios según la búsqueda
@@ -28,7 +37,29 @@ export default function BusinessPage() {
     business.name.toLowerCase().includes(searchQuery.toLowerCase()),
   )
 
-  // Manejar la creación de un nuevo negocio
+  // Calcula para cada negocio:
+  // - Mercadería Invertida: suma de (purchasePrice * stock)
+  // - Venta Potencial: suma de (sellingPrice * stock)
+  // - Ganancia Proyectada: Venta Potencial - Mercadería Invertida
+  const businessFinancials = useMemo(() => {
+    const map = new Map<string, { merchandiseInvested: number; potentialSale: number; projectedProfit: number }>()
+    businesses.forEach((business) => {
+      const businessProducts = products.filter((p) => p.businessId === business.id)
+      const merchandiseInvested = businessProducts.reduce(
+        (sum, p) => sum + p.purchasePrice * p.stock,
+        0,
+      )
+      const potentialSale = businessProducts.reduce(
+        (sum, p) => sum + p.sellingPrice * p.stock,
+        0,
+      )
+      const projectedProfit = potentialSale - merchandiseInvested
+      map.set(business.id, { merchandiseInvested, potentialSale, projectedProfit })
+    })
+    return map
+  }, [businesses, products])
+
+  // Handlers para creación, edición y eliminación
   const handleCreateBusiness = async (data: CreateBusinessData) => {
     try {
       await dispatch(addBusiness(data)).unwrap()
@@ -38,10 +69,8 @@ export default function BusinessPage() {
     }
   }
 
-  // Manejar la edición de un negocio
   const handleEditBusiness = async (data: UpdateBusinessData) => {
     if (!selectedBusiness) return
-
     try {
       await dispatch(editBusiness({ id: selectedBusiness.id, data })).unwrap()
       setIsEditDialogOpen(false)
@@ -51,10 +80,8 @@ export default function BusinessPage() {
     }
   }
 
-  // Manejar la eliminación de un negocio
   const handleDeleteBusiness = async () => {
     if (!selectedBusiness) return
-
     try {
       await dispatch(removeBusiness(selectedBusiness.id)).unwrap()
       setIsDeleteDialogOpen(false)
@@ -64,7 +91,7 @@ export default function BusinessPage() {
     }
   }
 
-  if (loading) {
+  if (loading || productsLoading) {
     return (
       <div className="flex justify-center items-center h-64">
         <div className="text-center">
@@ -80,7 +107,9 @@ export default function BusinessPage() {
       <div className="bg-red-50 dark:bg-red-900/20 border-l-4 border-red-500 p-4 rounded">
         <div className="flex">
           <div className="ml-3">
-            <p className="text-sm text-red-700 dark:text-red-400">Error al cargar los negocios: {error}</p>
+            <p className="text-sm text-red-700 dark:text-red-400">
+              Error al cargar los negocios: {error}
+            </p>
           </div>
         </div>
       </div>
@@ -89,10 +118,13 @@ export default function BusinessPage() {
 
   return (
     <div className="space-y-6">
+      {/* Encabezado */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold">Gestión de Negocios</h1>
-          <p className="text-slate-600 dark:text-slate-400">Administra los negocios de tu empresa</p>
+          <p className="text-slate-600 dark:text-slate-400">
+            Administra los negocios de tu empresa
+          </p>
         </div>
         <div className="flex gap-2">
           <div className="relative">
@@ -122,54 +154,81 @@ export default function BusinessPage() {
                   Nombre
                 </th>
                 <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 dark:text-slate-300 uppercase tracking-wider">
+                  Mercadería Invertida
+                </th>
+                <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 dark:text-slate-300 uppercase tracking-wider">
+                  Venta Potencial
+                </th>
+                <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 dark:text-slate-300 uppercase tracking-wider">
+                  Ganancia Proyectada
+                </th>
+                <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 dark:text-slate-300 uppercase tracking-wider">
                   Acciones
                 </th>
               </tr>
             </thead>
             <tbody className="bg-white dark:bg-slate-800 divide-y divide-slate-200 dark:divide-slate-700">
               {filteredBusinesses.length > 0 ? (
-                filteredBusinesses.map((business) => (
-                  <tr key={business.id} className="hover:bg-slate-50 dark:hover:bg-slate-700/50">
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="flex items-center">
-                        <div className="flex-shrink-0 h-10 w-10 bg-slate-100 dark:bg-slate-700 rounded-full flex items-center justify-center">
-                          <Building2 className="h-5 w-5 text-slate-500 dark:text-slate-400" />
+                filteredBusinesses.map((business) => {
+                  const financials = businessFinancials.get(business.id) || {
+                    merchandiseInvested: 0,
+                    potentialSale: 0,
+                    projectedProfit: 0,
+                  }
+                  return (
+                    <tr key={business.id} className="hover:bg-slate-50 dark:hover:bg-slate-700/50">
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="flex items-center">
+                          <div className="flex-shrink-0 h-10 w-10 bg-slate-100 dark:bg-slate-700 rounded-full flex items-center justify-center">
+                            <Building2 className="h-5 w-5 text-slate-500 dark:text-slate-400" />
+                          </div>
+                          <div className="ml-4">
+                            <div className="text-sm font-medium text-slate-900 dark:text-white">
+                              {business.name}
+                            </div>
+                          </div>
                         </div>
-                        <div className="ml-4">
-                          <div className="text-sm font-medium text-slate-900 dark:text-white">{business.name}</div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-right text-sm text-slate-700 dark:text-slate-300">
+                        ${financials.merchandiseInvested.toFixed(2)}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-right text-sm text-slate-700 dark:text-slate-300">
+                        ${financials.potentialSale.toFixed(2)}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-bold text-green-600">
+                        ${financials.projectedProfit.toFixed(2)}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                        <div className="flex justify-end gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              setSelectedBusiness(business)
+                              setIsEditDialogOpen(true)
+                            }}
+                          >
+                            <Edit className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="text-red-600 hover:text-red-700 dark:text-red-500 dark:hover:text-red-400"
+                            onClick={() => {
+                              setSelectedBusiness(business)
+                              setIsDeleteDialogOpen(true)
+                            }}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
                         </div>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                      <div className="flex justify-end gap-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => {
-                            setSelectedBusiness(business)
-                            setIsEditDialogOpen(true)
-                          }}
-                        >
-                          <Edit className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="text-red-600 hover:text-red-700 dark:text-red-500 dark:hover:text-red-400"
-                          onClick={() => {
-                            setSelectedBusiness(business)
-                            setIsDeleteDialogOpen(true)
-                          }}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </td>
-                  </tr>
-                ))
+                      </td>
+                    </tr>
+                  )
+                })
               ) : (
                 <tr>
-                  <td colSpan={2} className="px-6 py-4 text-center text-slate-500 dark:text-slate-400">
+                  <td colSpan={5} className="px-6 py-4 text-center text-slate-500 dark:text-slate-400">
                     No se encontraron negocios
                   </td>
                 </tr>
@@ -231,4 +290,3 @@ export default function BusinessPage() {
     </div>
   )
 }
-

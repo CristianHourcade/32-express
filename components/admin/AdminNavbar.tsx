@@ -138,16 +138,6 @@ export default function AdminNavbar() {
                   </Link>
                 )
               })}
-              <Link
-                href="/admin/logs"
-                className={cn(
-                  "flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors",
-                  pathname === "/admin/logs" ? "bg-primary text-primary-foreground" : "hover:bg-muted",
-                )}
-              >
-                <ClipboardList className="h-4 w-4" />
-                <span>Logs</span>
-              </Link>
             </nav>
           </div>
           <div className="flex-shrink-0 flex border-t border-slate-200 dark:border-slate-800 p-4">
