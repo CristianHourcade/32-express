@@ -225,6 +225,8 @@ async function checkEmployeeExists(email: string) {
 
     const { data, error } = await supabaseAdmin.from("employees").select("*").eq("email", email).single()
 
+    console.log("data",data)
+    console.log("errro",error)
     if (error && error.code !== "PGRST116") {
       // PGRST116 es el código para "no se encontraron resultados"
       logger.error("Error checking if employee exists", { email, error: error.message })
