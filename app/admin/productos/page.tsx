@@ -21,6 +21,13 @@ function calculateProfitMargin(purchasePrice: number, sellingPrice: number) {
   return (((sellingPrice - purchasePrice) / purchasePrice) * 100).toFixed(2)
 }
 
+function formatNumber(num: number) {
+  return new Intl.NumberFormat("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(num)
+}
+
 export default function ProductsPage() {
   const dispatch = useDispatch<AppDispatch>()
   const { products, loading: productsLoading } = useSelector(
@@ -29,6 +36,10 @@ export default function ProductsPage() {
   const { businesses, loading: businessesLoading } = useSelector(
     (state: RootState) => state.businesses,
   )
+  const businessId = useSelector((state: RootState) => state.auth.user?.businessId)
+
+  // Eliminamos la definición duplicada; ahora definimos "allProductsByBusiness" UNA SOLA VEZ
+  const [allProductsByBusiness, setAllProductsByBusiness] = useState<Map<string, Product[]>>(new Map())
 
   // Estados para búsqueda y filtro
   const [searchQuery, setSearchQuery] = useState("")
@@ -49,7 +60,7 @@ export default function ProductsPage() {
     name: "",
     code: "",
     purchasePrice: 0,
-    sellingPrice: 0,
+    sellingPrice: 0, // Se calculará automáticamente o se podrá editar manualmente
     stock: 0,
     minStock: 0,
     description: "",
@@ -58,10 +69,16 @@ export default function ProductsPage() {
   const [marginPercent, setMarginPercent] = useState(0)
   const [manualSellingPriceEnabled, setManualSellingPriceEnabled] = useState(false)
 
-  // Estado para refrescar solo la tabla de productos
+  // Estado para refrescar solo la tabla de productos (spinner)
   const [isRefreshing, setIsRefreshing] = useState(false)
 
-  const businessId = useSelector((state: RootState) => state.auth.user?.businessId)
+  // Estado para modal de eliminación
+  const [currentProductForDelete, setCurrentProductForDelete] = useState<Product | null>(null)
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false)
+
+  // Estados para ordenamiento (definidos una sola vez)
+  const [sortField, setSortField] = useState<"stock" | null>("stock")
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc")
 
   useEffect(() => {
     dispatch(getProducts())
@@ -107,9 +124,7 @@ export default function ProductsPage() {
         .select("*")
         .or(`name.ilike.%${query}%,code.ilike.%${query}%,description.ilike.%${query}%`)
         .limit(20)
-
       if (error) throw error
-
       const formattedResults: Product[] = data.map((item) => ({
         id: item.id,
         name: item.name,
@@ -123,7 +138,6 @@ export default function ProductsPage() {
         salesCount: item.sales_count || 0,
         totalRevenue: item.total_revenue || 0,
       }))
-
       setSearchResults(formattedResults)
     } catch (error) {
       console.error("Error searching products:", error)
@@ -170,7 +184,6 @@ export default function ProductsPage() {
           ),
         )
       }
-      // Refrescar productos sin bloquear toda la pantalla
       setIsRefreshing(true)
       await dispatch(getProducts())
       setIsRefreshing(false)
@@ -217,6 +230,24 @@ export default function ProductsPage() {
     setIsProductModalOpen(true)
   }
 
+  const openDeleteModal = (product: Product) => {
+    setCurrentProductForDelete(product)
+    setIsDeleteModalOpen(true)
+  }
+
+  const handleDelete = async () => {
+    if (!currentProductForDelete) return
+    try {
+      await dispatch(removeProduct(currentProductForDelete.id)).unwrap()
+      setIsDeleteModalOpen(false)
+      setIsRefreshing(true)
+      await dispatch(getProducts())
+      setIsRefreshing(false)
+    } catch (error) {
+      console.error("Error deleting product:", error)
+    }
+  }
+
   const handleProductFormChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>,
   ) => {
@@ -224,9 +255,7 @@ export default function ProductsPage() {
     setProductFormData((prev) => ({
       ...prev,
       [name]:
-        name === "purchasePrice" ||
-        name === "stock" ||
-        name === "minStock"
+        name === "purchasePrice" || name === "stock" || name === "minStock"
           ? Number(value)
           : value,
     }))
@@ -245,51 +274,97 @@ export default function ProductsPage() {
   }
 
   const handleProductFormSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
+    e.preventDefault()
     try {
       if (editingProduct) {
-        // Espera a que se complete la edición y desenvuelve la promesa
-        await dispatch(editProduct({ ...editingProduct, ...productFormData })).unwrap();
+        await dispatch(editProduct({ ...editingProduct, ...productFormData })).unwrap()
       } else {
-        // Espera a que se cree el producto y desenvuelve la promesa
         await dispatch(
           createProduct({
             ...productFormData,
             createdAt: new Date().toISOString(),
             salesCount: 0,
             totalRevenue: 0,
-          })
-        ).unwrap();
+          }),
+        ).unwrap()
       }
-      setTimeout(async () => {
-
-        // Activa el spinner en la tabla y refetch de productos
-        setIsRefreshing(true);
-        await dispatch(getProducts());
-        setIsRefreshing(false);
-        setIsProductModalOpen(false);
-      }, 2000)
+      setIsRefreshing(true)
+      await dispatch(getProducts())
+      setIsRefreshing(false)
+      setIsProductModalOpen(false)
     } catch (error) {
-      console.error("Error updating/creating product:", error);
+      console.error("Error updating/creating product:", error)
     }
-  };
-  
+  }
 
-  const isLoading = productsLoading || businessesLoading
-  const currentBusiness = businesses.find((business) => business.id === businessId)
-
-  // Seleccionar lista de productos según búsqueda o estado
+  // --- Definir "displayProducts" y "filteredProducts" ---
   const displayProducts = searchQuery
     ? searchResults
     : showAllProducts
-      ? products
-      : lowStockProducts
+    ? // Si se muestran todos los productos, usamos la lista completa del negocio seleccionado
+      selectedBusinessId
+      ? allProductsByBusiness.get(selectedBusinessId) || []
+      : []
+    : lowStockProducts
 
   const filteredProducts = useMemo(() => {
     return displayProducts.filter((product) =>
       selectedBusinessId ? product.businessId === selectedBusinessId : true,
     )
   }, [displayProducts, selectedBusinessId])
+
+  // --- Ordenamiento por "stock" ---
+  const sortedProducts = useMemo(() => {
+    const productsToSort = [...filteredProducts]
+    if (sortField === "stock") {
+      productsToSort.sort((a, b) =>
+        sortOrder === "asc" ? a.stock - b.stock : b.stock - a.stock,
+      )
+    }
+    return productsToSort
+  }, [filteredProducts, sortField, sortOrder])
+
+  // --- Consulta completa por negocio ---
+  useEffect(() => {
+    async function fetchProductsForEachBusiness() {
+      const newMap = new Map<string, Product[]>()
+      await Promise.all(
+        businesses.map(async (business) => {
+          const { data, error } = await supabase
+            .from("products")
+            .select("*")
+            .eq("business_id", business.id)
+          if (error) {
+            console.error("Error fetching products for business", business.id, error)
+            newMap.set(business.id, [])
+          } else {
+            const formattedProducts: Product[] = (data || []).map((item) => ({
+              id: item.id,
+              name: item.name,
+              code: item.code,
+              description: item.description,
+              purchasePrice: item.purchase_price,
+              sellingPrice: item.selling_price,
+              stock: item.stock,
+              minStock: item.min_stock,
+              businessId: item.business_id,
+              salesCount: item.sales_count || 0,
+              totalRevenue: item.total_revenue || 0,
+            }))
+            newMap.set(business.id, formattedProducts)
+          }
+        }),
+      )
+      setAllProductsByBusiness(newMap)
+    }
+    // Se ejecuta cuando se activa "Mostrar todos los productos" y hay un negocio seleccionado
+    if (showAllProducts && selectedBusinessId) {
+      fetchProductsForEachBusiness()
+    }
+  }, [businesses, showAllProducts, selectedBusinessId])
+
+  const isLoading = productsLoading || businessesLoading
+  const currentBusiness = businesses.find((business) => business.id === businessId)
 
   if (isLoading) {
     return (
@@ -377,7 +452,13 @@ export default function ProductsPage() {
 
           <div className="flex items-center">
             <button
-              onClick={() => setShowAllProducts(!showAllProducts)}
+              onClick={() => {
+                if (!selectedBusinessId) {
+                  alert("Por favor, elija un negocio para ver todos los productos.")
+                } else {
+                  setShowAllProducts(!showAllProducts)
+                }
+              }}
               className="btn btn-outline"
               disabled={searchQuery.trim() !== ""}
             >
@@ -418,8 +499,18 @@ export default function ProductsPage() {
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                   Precio de Venta
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                  Stock Actual
+                <th
+                  onClick={() => {
+                    if (sortField === "stock") {
+                      setSortOrder(sortOrder === "asc" ? "desc" : "asc")
+                    } else {
+                      setSortField("stock")
+                      setSortOrder("asc")
+                    }
+                  }}
+                  className="cursor-pointer px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider"
+                >
+                  Stock Actual {sortField === "stock" ? (sortOrder === "asc" ? "↑" : "↓") : ""}
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                   Stock Mínimo
@@ -438,64 +529,68 @@ export default function ProductsPage() {
                     </div>
                   </td>
                 </tr>
-              ) : filteredProducts.length > 0 ? (
-                filteredProducts.map((product) => {
-                  const business = businesses.find((b) => b.id === product.businessId)
-                  return (
-                    <tr key={product.id} className="hover:bg-gray-50 dark:hover:bg-gray-700">
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm font-medium text-gray-900 dark:text-white">
-                          {product.name}
-                        </div>
-                        <div className="text-xs text-gray-500 dark:text-gray-400">
-                          {product.description}
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
-                        {product.code}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
-                        ${product.purchasePrice.toFixed(2)}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
-                        {calculateProfitMargin(product.purchasePrice, product.sellingPrice)}%
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
-                        ${product.sellingPrice.toFixed(2)}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span
-                          className={`px-2 py-1 text-xs font-medium rounded-full ${
-                            product.stock <= product.minStock
-                              ? "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300"
-                              : "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300"
-                          }`}
-                        >
-                          {product.stock}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
-                        {product.minStock}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-2">
-                        <button
-                          onClick={() => openEditProductModal(product)}
-                          className="text-green-600 hover:text-green-900 dark:text-green-400 dark:hover:text-green-300"
-                          title="Editar Producto"
-                        >
-                          <Edit className="w-5 h-5" />
-                        </button>
-                        <button
-                          onClick={() => openAddStockModal(product)}
-                          className="text-blue-600 hover:text-blue-900 dark:text-blue-400 dark:hover:text-blue-300"
-                          title="Agregar Stock"
-                        >
-                          Agregar Stock
-                        </button>
-                      </td>
-                    </tr>
-                  )
-                })
+              ) : sortedProducts.length > 0 ? (
+                sortedProducts.map((product) => (
+                  <tr key={product.id} className="hover:bg-gray-50 dark:hover:bg-gray-700">
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="text-sm font-medium text-gray-900 dark:text-white">
+                        {product.name}
+                      </div>
+                      <div className="text-xs text-gray-500 dark:text-gray-400">
+                        {product.description}
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
+                      {product.code}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
+                      ${product.purchasePrice.toFixed(2)}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
+                      {calculateProfitMargin(product.purchasePrice, product.sellingPrice)}%
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
+                      ${product.sellingPrice.toFixed(2)}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <span
+                        className={`px-2 py-1 text-xs font-medium rounded-full ${
+                          product.stock <= product.minStock
+                            ? "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300"
+                            : "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300"
+                        }`}
+                      >
+                        {product.stock}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
+                      {product.minStock}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-2">
+                      <button
+                        onClick={() => openEditProductModal(product)}
+                        className="text-green-600 hover:text-green-900 dark:text-green-400 dark:hover:text-green-300"
+                        title="Editar Producto"
+                      >
+                        <Edit className="w-5 h-5" />
+                      </button>
+                      <button
+                        onClick={() => openAddStockModal(product)}
+                        className="text-blue-600 hover:text-blue-900 dark:text-blue-400 dark:hover:text-blue-300"
+                        title="Agregar Stock"
+                      >
+                        Agregar Stock
+                      </button>
+                      <button
+                        onClick={() => openDeleteModal(product)}
+                        className="text-red-600 hover:text-red-900 dark:text-red-400 dark:hover:text-red-300"
+                        title="Eliminar Producto"
+                      >
+                        <Trash2 className="w-5 h-5" />
+                      </button>
+                    </td>
+                  </tr>
+                ))
               ) : (
                 <tr>
                   <td colSpan={8} className="px-6 py-4 text-center text-sm text-gray-500 dark:text-gray-400">
@@ -571,7 +666,6 @@ export default function ProductsPage() {
                     className="input"
                   />
                 </div>
-                {/* Grupo para margen de ganancia y precio de venta */}
                 <div className="flex flex-col gap-2">
                   <label htmlFor="marginPercent" className="label">
                     Margen de Ganancia (%)
@@ -739,6 +833,28 @@ export default function ProductsPage() {
                   className="btn btn-primary"
                 >
                   Confirmar
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal para Eliminar Producto */}
+      {isDeleteModalOpen && currentProductForDelete && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg max-w-md w-full">
+            <div className="p-6">
+              <h2 className="text-xl font-semibold mb-4">Confirmar Eliminación</h2>
+              <p className="mb-6">
+                ¿Estás seguro de que deseas eliminar el producto "{currentProductForDelete.name}"? Esta acción no se puede deshacer.
+              </p>
+              <div className="flex justify-end space-x-3">
+                <button onClick={() => setIsDeleteModalOpen(false)} className="btn btn-secondary">
+                  Cancelar
+                </button>
+                <button onClick={handleDelete} className="btn btn-danger">
+                  Eliminar
                 </button>
               </div>
             </div>
