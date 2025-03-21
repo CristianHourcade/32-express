@@ -11,12 +11,11 @@ import {
   removeProduct,
   type Product,
 } from "@/lib/redux/slices/productSlice"
-import { fetchBusinesses } from "@/lib/redux/slices/businessSlice" // Changed from getBusinesses
+import { fetchBusinesses } from "@/lib/redux/slices/businessSlice"
 import { Plus, Edit, Trash2, X, Search, AlertTriangle } from "lucide-react"
 import Link from "next/link"
 import { supabase } from "@/lib/supabase"
 
-// Función auxiliar para calcular el margen de ganancia (para mostrar en la tabla)
 function calculateProfitMargin(purchasePrice: number, sellingPrice: number) {
   if (purchasePrice === 0) return "0.00"
   return (((sellingPrice - purchasePrice) / purchasePrice) * 100).toFixed(2)
@@ -50,18 +49,18 @@ export default function ProductsPage() {
     name: "",
     code: "",
     purchasePrice: 0,
-    sellingPrice: 0, // Este se calculará automáticamente o se podrá editar manualmente
+    sellingPrice: 0,
     stock: 0,
     minStock: 0,
     description: "",
     businessId: "",
   })
-  // Nuevo estado para el porcentaje de ganancia
   const [marginPercent, setMarginPercent] = useState(0)
-  // Estado para habilitar la edición manual del precio de venta
   const [manualSellingPriceEnabled, setManualSellingPriceEnabled] = useState(false)
 
-  // Tomar el businessId del usuario (si es que lo usas en otros lugares)
+  // Estado para refrescar solo la tabla de productos
+  const [isRefreshing, setIsRefreshing] = useState(false)
+
   const businessId = useSelector((state: RootState) => state.auth.user?.businessId)
 
   useEffect(() => {
@@ -69,14 +68,12 @@ export default function ProductsPage() {
     dispatch(fetchBusinesses())
   }, [dispatch])
 
-  // Al cargar negocios, asignar un negocio por defecto en el formulario
   useEffect(() => {
     if (businesses.length > 0 && productFormData.businessId === "") {
       setProductFormData((prev) => ({ ...prev, businessId: businesses[0].id }))
     }
   }, [businesses, productFormData.businessId])
 
-  // Si se está editando, calcular el margen a partir de los datos existentes
   useEffect(() => {
     if (editingProduct && editingProduct.purchasePrice > 0) {
       const computedMargin =
@@ -85,7 +82,6 @@ export default function ProductsPage() {
     }
   }, [editingProduct])
 
-  // Recalcular precio de venta automáticamente solo si NO está habilitado el modo manual
   useEffect(() => {
     if (!manualSellingPriceEnabled) {
       const newSellingPrice = productFormData.purchasePrice * (1 + marginPercent / 100)
@@ -93,13 +89,11 @@ export default function ProductsPage() {
     }
   }, [productFormData.purchasePrice, marginPercent, manualSellingPriceEnabled])
 
-  // Productos con stock bajo (alerta)
   const lowStockProducts = useMemo(() => {
     if (!products || !businessId) return []
     return products.filter((product) => product.stock <= product.minStock).slice(0, 10)
   }, [products, businessId])
 
-  // Búsqueda remota con Supabase
   const searchProductsInDB = async (query: string) => {
     if (!query.trim()) {
       setSearchResults([])
@@ -139,7 +133,6 @@ export default function ProductsPage() {
     }
   }
 
-  // Manejar cambios en la búsqueda
   const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const query = e.target.value
     setSearchQuery(query)
@@ -150,12 +143,10 @@ export default function ProductsPage() {
     }
   }
 
-  // Handler para filtrar por negocio (en el listado)
   const handleBusinessFilterChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     setSelectedBusinessId(e.target.value)
   }
 
-  // Funciones para el modal de Agregar Stock
   const openAddStockModal = (product: Product) => {
     setCurrentProductForStock(product)
     setStockToAdd(0)
@@ -179,12 +170,15 @@ export default function ProductsPage() {
           ),
         )
       }
+      // Refrescar productos sin bloquear toda la pantalla
+      setIsRefreshing(true)
+      await dispatch(getProducts())
+      setIsRefreshing(false)
     } catch (error) {
       console.error("Error adding stock:", error)
     }
   }
 
-  // Funciones para el modal de Agregar/Editar Producto
   const openAddProductModal = () => {
     setEditingProduct(null)
     setManualSellingPriceEnabled(false)
@@ -219,7 +213,6 @@ export default function ProductsPage() {
       description: product.description,
       businessId: product.businessId,
     })
-    // Por defecto, en edición dejamos en modo automático; el usuario puede activar manual si lo desea
     setManualSellingPriceEnabled(false)
     setIsProductModalOpen(true)
   }
@@ -239,13 +232,11 @@ export default function ProductsPage() {
     }))
   }
 
-  // Manejador para el input de margen (%)
   const handleMarginChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = Number(e.target.value)
     setMarginPercent(value)
   }
 
-  // Manejador para el input de precio de venta manual (si se habilita)
   const handleSellingPriceChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setProductFormData((prev) => ({
       ...prev,
@@ -253,22 +244,36 @@ export default function ProductsPage() {
     }))
   }
 
-  const handleProductFormSubmit = (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault()
-    if (editingProduct) {
-      dispatch(editProduct({ ...editingProduct, ...productFormData }))
-    } else {
-      dispatch(
-        createProduct({
-          ...productFormData,
-          createdAt: new Date().toISOString(),
-          salesCount: 0,
-          totalRevenue: 0,
-        }),
-      )
+  const handleProductFormSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    try {
+      if (editingProduct) {
+        // Espera a que se complete la edición y desenvuelve la promesa
+        await dispatch(editProduct({ ...editingProduct, ...productFormData })).unwrap();
+      } else {
+        // Espera a que se cree el producto y desenvuelve la promesa
+        await dispatch(
+          createProduct({
+            ...productFormData,
+            createdAt: new Date().toISOString(),
+            salesCount: 0,
+            totalRevenue: 0,
+          })
+        ).unwrap();
+      }
+      setTimeout(async () => {
+
+        // Activa el spinner en la tabla y refetch de productos
+        setIsRefreshing(true);
+        await dispatch(getProducts());
+        setIsRefreshing(false);
+        setIsProductModalOpen(false);
+      }, 2000)
+    } catch (error) {
+      console.error("Error updating/creating product:", error);
     }
-    setIsProductModalOpen(false)
-  }
+  };
+  
 
   const isLoading = productsLoading || businessesLoading
   const currentBusiness = businesses.find((business) => business.id === businessId)
@@ -280,7 +285,6 @@ export default function ProductsPage() {
       ? products
       : lowStockProducts
 
-  // Aplicar filtro por negocio (si se selecciona alguno)
   const filteredProducts = useMemo(() => {
     return displayProducts.filter((product) =>
       selectedBusinessId ? product.businessId === selectedBusinessId : true,
@@ -426,7 +430,15 @@ export default function ProductsPage() {
               </tr>
             </thead>
             <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-              {filteredProducts.length > 0 ? (
+              {isRefreshing ? (
+                <tr>
+                  <td colSpan={8} className="px-6 py-4 text-center">
+                    <div className="flex justify-center items-center">
+                      <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-700"></div>
+                    </div>
+                  </td>
+                </tr>
+              ) : filteredProducts.length > 0 ? (
                 filteredProducts.map((product) => {
                   const business = businesses.find((b) => b.id === product.businessId)
                   return (
@@ -486,10 +498,7 @@ export default function ProductsPage() {
                 })
               ) : (
                 <tr>
-                  <td
-                    colSpan={8}
-                    className="px-6 py-4 text-center text-sm text-gray-500 dark:text-gray-400"
-                  >
+                  <td colSpan={8} className="px-6 py-4 text-center text-sm text-gray-500 dark:text-gray-400">
                     {searchQuery
                       ? "No se encontraron productos que coincidan con la búsqueda."
                       : "No hay productos con stock bajo en este momento."}
@@ -562,7 +571,7 @@ export default function ProductsPage() {
                     className="input"
                   />
                 </div>
-                {/* Grupo para margen de ganancia y habilitar precio de venta manual */}
+                {/* Grupo para margen de ganancia y precio de venta */}
                 <div className="flex flex-col gap-2">
                   <label htmlFor="marginPercent" className="label">
                     Margen de Ganancia (%)
@@ -734,6 +743,14 @@ export default function ProductsPage() {
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Spinner en la tabla al refrescar datos */}
+      {isRefreshing && (
+        <div className="text-center py-4">
+          <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-700 inline-block"></div>
+          <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">Actualizando datos...</p>
         </div>
       )}
     </div>

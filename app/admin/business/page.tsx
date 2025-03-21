@@ -32,6 +32,13 @@ export default function BusinessPage() {
     dispatch(getProducts())
   }, [dispatch])
 
+  function formatNumber(num: number) {
+    return new Intl.NumberFormat("en-US", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(num);
+  }
+
   // Filtrar negocios según la búsqueda
   const filteredBusinesses = businesses.filter((business) =>
     business.name.toLowerCase().includes(searchQuery.toLowerCase()),
@@ -42,20 +49,68 @@ export default function BusinessPage() {
   // - Venta Potencial: suma de (sellingPrice * stock)
   // - Ganancia Proyectada: Venta Potencial - Mercadería Invertida
   const businessFinancials = useMemo(() => {
-    const map = new Map<string, { merchandiseInvested: number; potentialSale: number; projectedProfit: number }>()
+    const map = new Map<
+      string,
+      {
+        merchandiseInvested: number
+        potentialSale: number
+        projectedProfit: number
+      }
+    >()
+
     businesses.forEach((business) => {
+      // Filtrar los productos que pertenecen a este negocio
       const businessProducts = products.filter((p) => p.businessId === business.id)
+
+      // LOG: imprimir el nombre del negocio y la cantidad de productos
+      console.log("🔍 [DEBUG] Negocio:", business.name, "| Productos:", businessProducts.length)
+
+      // LOG: imprimir detalles de cada producto
+      businessProducts.forEach((prod) => {
+        console.log(
+          "   → Producto:",
+          prod.name,
+          "| Compra:",
+          prod.purchasePrice,
+          "| Venta:",
+          prod.sellingPrice,
+          "| Stock:",
+          prod.stock
+        )
+      })
+
+      // Calcular Mercadería Invertida
       const merchandiseInvested = businessProducts.reduce(
         (sum, p) => sum + p.purchasePrice * p.stock,
         0,
       )
+      // Calcular Venta Potencial
       const potentialSale = businessProducts.reduce(
         (sum, p) => sum + p.sellingPrice * p.stock,
         0,
       )
+      // Calcular Ganancia Proyectada
       const projectedProfit = potentialSale - merchandiseInvested
-      map.set(business.id, { merchandiseInvested, potentialSale, projectedProfit })
+
+      // LOG: imprimir los totales
+      console.log(
+        "🔍 [DEBUG] Negocio:",
+        business.name,
+        "| Invertida:",
+        merchandiseInvested,
+        "| Potencial:",
+        potentialSale,
+        "| Ganancia Proy:",
+        projectedProfit
+      )
+
+      map.set(business.id, {
+        merchandiseInvested,
+        potentialSale,
+        projectedProfit,
+      })
     })
+
     return map
   }, [businesses, products])
 
@@ -190,13 +245,13 @@ export default function BusinessPage() {
                         </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-right text-sm text-slate-700 dark:text-slate-300">
-                        ${financials.merchandiseInvested.toFixed(2)}
+                        ${formatNumber(financials.merchandiseInvested)}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-right text-sm text-slate-700 dark:text-slate-300">
-                        ${financials.potentialSale.toFixed(2)}
+                        ${formatNumber(financials.potentialSale)}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-bold text-green-600">
-                        ${financials.projectedProfit.toFixed(2)}
+                        ${formatNumber(financials.projectedProfit)}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                         <div className="flex justify-end gap-2">
