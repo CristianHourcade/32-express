@@ -21,3 +21,5 @@ export const supabaseAdmin = createClient<Database>(supabaseUrl, supabaseService
   },
 })
 
+
+export { createClient }
