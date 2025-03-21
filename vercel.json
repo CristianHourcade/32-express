@@ -24,10 +24,6 @@
       ]
     }
   ],
-  "github": {
-    "enabled": true,
-    "silent": false
-  },
   "crons": [
     {
       "path": "/api/cron/cache-cleanup",

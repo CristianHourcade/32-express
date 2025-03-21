@@ -67,5 +67,6 @@ export const deleteEmployee = async (id: string): Promise<void> => {
 }
 
 // Para mantener compatibilidad con el código existente
-export { addEmployee as createEmployee }
+// Para mantener compatibilidad con el código existente
+export { addEmployee as createEmployee, employeeService }
 
