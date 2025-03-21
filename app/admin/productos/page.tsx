@@ -4,18 +4,34 @@ import type React from "react"
 import { useEffect, useState, useMemo } from "react"
 import { useDispatch, useSelector } from "react-redux"
 import type { AppDispatch, RootState } from "@/lib/redux/store"
-import { getProducts, editProduct, type Product } from "@/lib/redux/slices/productSlice"
-import { fetchBusinesses } from "@/lib/redux/slices/businessSlice"
-import { Search, X, AlertTriangle, Plus, Edit } from "lucide-react"
+import {
+  getProducts,
+  createProduct,
+  editProduct,
+  removeProduct,
+  type Product,
+} from "@/lib/redux/slices/productSlice"
+import { fetchBusinesses } from "@/lib/redux/slices/businessSlice" // Changed from getBusinesses
+import { Plus, Edit, Trash2, X, Search, AlertTriangle } from "lucide-react"
 import Link from "next/link"
 import { supabase } from "@/lib/supabase"
 
-export default function EmployeeProductsPage() {
-  const dispatch = useDispatch<AppDispatch>()
-  const { user } = useSelector((state: RootState) => state.auth)
-  const { products, loading: productsLoading } = useSelector((state: RootState) => state.products)
-  const { businesses, loading: businessesLoading } = useSelector((state: RootState) => state.businesses)
+// Función auxiliar para calcular el margen de ganancia (para mostrar en la tabla)
+function calculateProfitMargin(purchasePrice: number, sellingPrice: number) {
+  if (purchasePrice === 0) return "0.00"
+  return (((sellingPrice - purchasePrice) / purchasePrice) * 100).toFixed(2)
+}
 
+export default function ProductsPage() {
+  const dispatch = useDispatch<AppDispatch>()
+  const { products, loading: productsLoading } = useSelector(
+    (state: RootState) => state.products,
+  )
+  const { businesses, loading: businessesLoading } = useSelector(
+    (state: RootState) => state.businesses,
+  )
+
+  // Estados para búsqueda y filtro
   const [searchQuery, setSearchQuery] = useState("")
   const [searchResults, setSearchResults] = useState<Product[]>([])
   const [isSearching, setIsSearching] = useState(false)
@@ -34,19 +50,48 @@ export default function EmployeeProductsPage() {
     name: "",
     code: "",
     purchasePrice: 0,
-    sellingPrice: 0,
+    sellingPrice: 0, // Este se calculará automáticamente o se podrá editar manualmente
     stock: 0,
     minStock: 0,
     description: "",
     businessId: "",
   })
+  // Nuevo estado para el porcentaje de ganancia
+  const [marginPercent, setMarginPercent] = useState(0)
+  // Estado para habilitar la edición manual del precio de venta
+  const [manualSellingPriceEnabled, setManualSellingPriceEnabled] = useState(false)
 
-  const businessId = user?.businessId
+  // Tomar el businessId del usuario (si es que lo usas en otros lugares)
+  const businessId = useSelector((state: RootState) => state.auth.user?.businessId)
 
   useEffect(() => {
     dispatch(getProducts())
     dispatch(fetchBusinesses())
   }, [dispatch])
+
+  // Al cargar negocios, asignar un negocio por defecto en el formulario
+  useEffect(() => {
+    if (businesses.length > 0 && productFormData.businessId === "") {
+      setProductFormData((prev) => ({ ...prev, businessId: businesses[0].id }))
+    }
+  }, [businesses, productFormData.businessId])
+
+  // Si se está editando, calcular el margen a partir de los datos existentes
+  useEffect(() => {
+    if (editingProduct && editingProduct.purchasePrice > 0) {
+      const computedMargin =
+        ((editingProduct.sellingPrice / editingProduct.purchasePrice - 1) * 100)
+      setMarginPercent(Number(computedMargin.toFixed(2)))
+    }
+  }, [editingProduct])
+
+  // Recalcular precio de venta automáticamente solo si NO está habilitado el modo manual
+  useEffect(() => {
+    if (!manualSellingPriceEnabled) {
+      const newSellingPrice = productFormData.purchasePrice * (1 + marginPercent / 100)
+      setProductFormData((prev) => ({ ...prev, sellingPrice: newSellingPrice }))
+    }
+  }, [productFormData.purchasePrice, marginPercent, manualSellingPriceEnabled])
 
   // Productos con stock bajo (alerta)
   const lowStockProducts = useMemo(() => {
@@ -105,7 +150,7 @@ export default function EmployeeProductsPage() {
     }
   }
 
-  // Handler para el filtro por negocio (en el listado)
+  // Handler para filtrar por negocio (en el listado)
   const handleBusinessFilterChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     setSelectedBusinessId(e.target.value)
   }
@@ -127,7 +172,6 @@ export default function EmployeeProductsPage() {
         }),
       )
       setIsAddStockModalOpen(false)
-      // Actualizar búsqueda si es necesario
       if (searchResults.length > 0) {
         setSearchResults((prev) =>
           prev.map((p) =>
@@ -143,6 +187,8 @@ export default function EmployeeProductsPage() {
   // Funciones para el modal de Agregar/Editar Producto
   const openAddProductModal = () => {
     setEditingProduct(null)
+    setManualSellingPriceEnabled(false)
+    setMarginPercent(0)
     setProductFormData({
       name: "",
       code: "",
@@ -158,6 +204,11 @@ export default function EmployeeProductsPage() {
 
   const openEditProductModal = (product: Product) => {
     setEditingProduct(product)
+    const computedMargin =
+      product.purchasePrice > 0
+        ? ((product.sellingPrice / product.purchasePrice - 1) * 100)
+        : 0
+    setMarginPercent(Number(computedMargin.toFixed(2)))
     setProductFormData({
       name: product.name,
       code: product.code,
@@ -168,6 +219,8 @@ export default function EmployeeProductsPage() {
       description: product.description,
       businessId: product.businessId,
     })
+    // Por defecto, en edición dejamos en modo automático; el usuario puede activar manual si lo desea
+    setManualSellingPriceEnabled(false)
     setIsProductModalOpen(true)
   }
 
@@ -175,16 +228,29 @@ export default function EmployeeProductsPage() {
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>,
   ) => {
     const { name, value } = e.target
-    setProductFormData({
-      ...productFormData,
+    setProductFormData((prev) => ({
+      ...prev,
       [name]:
         name === "purchasePrice" ||
-        name === "sellingPrice" ||
         name === "stock" ||
         name === "minStock"
           ? Number(value)
           : value,
-    })
+    }))
+  }
+
+  // Manejador para el input de margen (%)
+  const handleMarginChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = Number(e.target.value)
+    setMarginPercent(value)
+  }
+
+  // Manejador para el input de precio de venta manual (si se habilita)
+  const handleSellingPriceChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setProductFormData((prev) => ({
+      ...prev,
+      sellingPrice: Number(e.target.value),
+    }))
   }
 
   const handleProductFormSubmit = (e: React.FormEvent<HTMLFormElement>) => {
@@ -205,8 +271,6 @@ export default function EmployeeProductsPage() {
   }
 
   const isLoading = productsLoading || businessesLoading
-
-  // Aunque estemos en loading, ya se han ejecutado todos los hooks.
   const currentBusiness = businesses.find((business) => business.id === businessId)
 
   // Seleccionar lista de productos según búsqueda o estado
@@ -342,15 +406,13 @@ export default function EmployeeProductsPage() {
                   Código
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                  Precio de Venta
-                </th>
-                {/* Nueva columna: Precio de Compra */}
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                   Precio de Compra
                 </th>
-                {/* Nueva columna: Margen de Ganancia */}
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                  Margen de Ganancia
+                  Margen (%)
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                  Precio de Venta
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                   Stock Actual
@@ -365,67 +427,69 @@ export default function EmployeeProductsPage() {
             </thead>
             <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
               {filteredProducts.length > 0 ? (
-                filteredProducts.map((product) => (
-                  <tr key={product.id} className="hover:bg-gray-50 dark:hover:bg-gray-700">
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm font-medium text-gray-900 dark:text-white">{product.name}</div>
-                      <div className="text-xs text-gray-500 dark:text-gray-400">{product.description}</div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
-                      {product.code}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
-                      ${product.sellingPrice.toFixed(2)}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
-                      ${product.purchasePrice.toFixed(2)}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span className="font-bold text-green-600">
-                        {product.purchasePrice > 0
-                          ? (
-                              ((product.sellingPrice - product.purchasePrice) / product.purchasePrice) *
-                              100
-                            ).toFixed(2)
-                          : "0.00"}
-                        %
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span
-                        className={`px-2 py-1 text-xs font-medium rounded-full ${
-                          product.stock <= product.minStock
-                            ? "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300"
-                            : "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300"
-                        }`}
-                      >
-                        {product.stock}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
-                      {product.minStock}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-2">
-                      <button
-                        onClick={() => openEditProductModal(product)}
-                        className="text-green-600 hover:text-green-900 dark:text-green-400 dark:hover:text-green-300"
-                        title="Editar Producto"
-                      >
-                        <Edit className="w-5 h-5" />
-                      </button>
-                      <button
-                        onClick={() => openAddStockModal(product)}
-                        className="text-blue-600 hover:text-blue-900 dark:text-blue-400 dark:hover:text-blue-300"
-                        title="Agregar Stock"
-                      >
-                        Agregar Stock
-                      </button>
-                    </td>
-                  </tr>
-                ))
+                filteredProducts.map((product) => {
+                  const business = businesses.find((b) => b.id === product.businessId)
+                  return (
+                    <tr key={product.id} className="hover:bg-gray-50 dark:hover:bg-gray-700">
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="text-sm font-medium text-gray-900 dark:text-white">
+                          {product.name}
+                        </div>
+                        <div className="text-xs text-gray-500 dark:text-gray-400">
+                          {product.description}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
+                        {product.code}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
+                        ${product.purchasePrice.toFixed(2)}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
+                        {calculateProfitMargin(product.purchasePrice, product.sellingPrice)}%
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
+                        ${product.sellingPrice.toFixed(2)}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span
+                          className={`px-2 py-1 text-xs font-medium rounded-full ${
+                            product.stock <= product.minStock
+                              ? "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300"
+                              : "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300"
+                          }`}
+                        >
+                          {product.stock}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
+                        {product.minStock}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-2">
+                        <button
+                          onClick={() => openEditProductModal(product)}
+                          className="text-green-600 hover:text-green-900 dark:text-green-400 dark:hover:text-green-300"
+                          title="Editar Producto"
+                        >
+                          <Edit className="w-5 h-5" />
+                        </button>
+                        <button
+                          onClick={() => openAddStockModal(product)}
+                          className="text-blue-600 hover:text-blue-900 dark:text-blue-400 dark:hover:text-blue-300"
+                          title="Agregar Stock"
+                        >
+                          Agregar Stock
+                        </button>
+                      </td>
+                    </tr>
+                  )
+                })
               ) : (
                 <tr>
-                  <td colSpan={8} className="px-6 py-4 text-center text-sm text-gray-500 dark:text-gray-400">
+                  <td
+                    colSpan={8}
+                    className="px-6 py-4 text-center text-sm text-gray-500 dark:text-gray-400"
+                  >
                     {searchQuery
                       ? "No se encontraron productos que coincidan con la búsqueda."
                       : "No hay productos con stock bajo en este momento."}
@@ -498,6 +562,34 @@ export default function EmployeeProductsPage() {
                     className="input"
                   />
                 </div>
+                {/* Grupo para margen de ganancia y habilitar precio de venta manual */}
+                <div className="flex flex-col gap-2">
+                  <label htmlFor="marginPercent" className="label">
+                    Margen de Ganancia (%)
+                  </label>
+                  <input
+                    type="number"
+                    id="marginPercent"
+                    name="marginPercent"
+                    value={marginPercent}
+                    onChange={handleMarginChange}
+                    min="0"
+                    step="0.01"
+                    className="input"
+                  />
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      id="manualSellingPrice"
+                      checked={manualSellingPriceEnabled}
+                      onChange={(e) => setManualSellingPriceEnabled(e.target.checked)}
+                      className="form-checkbox"
+                    />
+                    <label htmlFor="manualSellingPrice" className="text-sm text-gray-700 dark:text-gray-300">
+                      Precio de venta manual
+                    </label>
+                  </div>
+                </div>
                 <div>
                   <label htmlFor="sellingPrice" className="label">
                     Precio de Venta
@@ -506,12 +598,10 @@ export default function EmployeeProductsPage() {
                     type="number"
                     id="sellingPrice"
                     name="sellingPrice"
-                    value={productFormData.sellingPrice}
-                    onChange={handleProductFormChange}
-                    min="0"
-                    step="0.01"
-                    required
-                    className="input"
+                    value={productFormData.sellingPrice.toFixed(2)}
+                    onChange={handleSellingPriceChange}
+                    disabled={!manualSellingPriceEnabled}
+                    className="input bg-gray-100 dark:bg-gray-700"
                   />
                 </div>
                 <div>
@@ -578,7 +668,11 @@ export default function EmployeeProductsPage() {
                 </div>
               </div>
               <div className="flex justify-end space-x-3 pt-4">
-                <button type="button" onClick={() => setIsProductModalOpen(false)} className="btn btn-secondary">
+                <button
+                  type="button"
+                  onClick={() => setIsProductModalOpen(false)}
+                  className="btn btn-secondary"
+                >
                   Cancelar
                 </button>
                 <button type="submit" className="btn btn-primary">
@@ -629,7 +723,12 @@ export default function EmployeeProductsPage() {
                 <button type="button" onClick={() => setIsAddStockModalOpen(false)} className="btn btn-secondary">
                   Cancelar
                 </button>
-                <button type="button" onClick={handleAddStock} disabled={stockToAdd <= 0} className="btn btn-primary">
+                <button
+                  type="button"
+                  onClick={handleAddStock}
+                  disabled={stockToAdd <= 0}
+                  className="btn btn-primary"
+                >
                   Confirmar
                 </button>
               </div>
