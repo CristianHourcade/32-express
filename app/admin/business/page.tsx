@@ -15,10 +15,20 @@ import { PlusCircle, Search, Edit, Trash2, Building2 } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import BusinessForm from "@/components/admin/BusinessForm"
 import type { Business, CreateBusinessData, UpdateBusinessData } from "@/services/types"
+import { supabase } from "@/lib/supabase"
+
+// Función para formatear números
+function formatNumber(num: number) {
+  return new Intl.NumberFormat("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(num)
+}
 
 export default function BusinessPage() {
   const dispatch = useDispatch<AppDispatch>()
   const { businesses, loading, error } = useSelector((state: RootState) => state.businesses)
+  // Aunque aquí no usamos products del store para los cálculos, aún queremos mostrarlos globalmente (si es necesario)
   const { products, loading: productsLoading } = useSelector((state: RootState) => state.products)
 
   const [searchQuery, setSearchQuery] = useState("")
@@ -27,17 +37,39 @@ export default function BusinessPage() {
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
   const [selectedBusiness, setSelectedBusiness] = useState<Business | null>(null)
 
+  // Este estado almacenará, para cada negocio (key: business.id), la lista completa de productos
+  const [productsByBusiness, setProductsByBusiness] = useState<Map<string, any[]>>(new Map())
+
   useEffect(() => {
     dispatch(fetchBusinesses())
     dispatch(getProducts())
   }, [dispatch])
 
-  function formatNumber(num: number) {
-    return new Intl.NumberFormat("en-US", {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(num);
-  }
+  // Cada vez que cambien los negocios, hacemos una petición por cada negocio para obtener sus productos completos
+  useEffect(() => {
+    async function fetchProductsForEachBusiness() {
+      const newMap = new Map<string, any[]>()
+      await Promise.all(
+        businesses.map(async (business) => {
+          // Ajusta la consulta para no limitar la cantidad (o usa un límite suficientemente alto)
+          const { data, error } = await supabase
+            .from("products")
+            .select("*")
+            .eq("business_id", business.id)
+          if (error) {
+            console.error("Error fetching products for business", business.id, error)
+            newMap.set(business.id, [])
+          } else {
+            newMap.set(business.id, data || [])
+          }
+        }),
+      )
+      setProductsByBusiness(newMap)
+    }
+    if (businesses.length > 0) {
+      fetchProductsForEachBusiness()
+    }
+  }, [businesses])
 
   // Filtrar negocios según la búsqueda
   const filteredBusinesses = businesses.filter((business) =>
@@ -45,63 +77,35 @@ export default function BusinessPage() {
   )
 
   // Calcula para cada negocio:
-  // - Mercadería Invertida: suma de (purchasePrice * stock)
+  // - Mercadería Invertida: suma de (purchasePrice * stock) de los productos obtenidos por negocio
   // - Venta Potencial: suma de (sellingPrice * stock)
   // - Ganancia Proyectada: Venta Potencial - Mercadería Invertida
   const businessFinancials = useMemo(() => {
     const map = new Map<
       string,
-      {
-        merchandiseInvested: number
-        potentialSale: number
-        projectedProfit: number
-      }
+      { merchandiseInvested: number; potentialSale: number; projectedProfit: number }
     >()
 
     businesses.forEach((business) => {
-      // Filtrar los productos que pertenecen a este negocio
-      const businessProducts = products.filter((p) => p.businessId === business.id)
+      // Obtiene la lista completa de productos para este negocio
+      const businessProducts = productsByBusiness.get(business.id) || []
 
-      // LOG: imprimir el nombre del negocio y la cantidad de productos
-      console.log("🔍 [DEBUG] Negocio:", business.name, "| Productos:", businessProducts.length)
-
-      // LOG: imprimir detalles de cada producto
-      businessProducts.forEach((prod) => {
-        console.log(
-          "   → Producto:",
-          prod.name,
-          "| Compra:",
-          prod.purchasePrice,
-          "| Venta:",
-          prod.sellingPrice,
-          "| Stock:",
-          prod.stock
-        )
-      })
-
-      // Calcular Mercadería Invertida
       const merchandiseInvested = businessProducts.reduce(
-        (sum, p) => sum + p.purchasePrice * p.stock,
+        (sum, p) => sum + p.purchase_price * p.stock,
         0,
       )
-      // Calcular Venta Potencial
       const potentialSale = businessProducts.reduce(
-        (sum, p) => sum + p.sellingPrice * p.stock,
+        (sum, p) => sum + p.selling_price * p.stock,
         0,
       )
-      // Calcular Ganancia Proyectada
       const projectedProfit = potentialSale - merchandiseInvested
 
-      // LOG: imprimir los totales
+      // Log resumido para este negocio
+      console.log(`Negocio: ${business.name}`);
       console.log(
-        "🔍 [DEBUG] Negocio:",
-        business.name,
-        "| Invertida:",
-        merchandiseInvested,
-        "| Potencial:",
-        potentialSale,
-        "| Ganancia Proy:",
-        projectedProfit
+        `Total inversión: ${formatNumber(merchandiseInvested)} - Total venta potencial: ${formatNumber(
+          potentialSale,
+        )} - Ganancia proyectada: ${formatNumber(projectedProfit)}`,
       )
 
       map.set(business.id, {
@@ -110,11 +114,10 @@ export default function BusinessPage() {
         projectedProfit,
       })
     })
-
     return map
-  }, [businesses, products])
+  }, [businesses, productsByBusiness])
 
-  // Handlers para creación, edición y eliminación
+  // Handlers para creación, edición y eliminación (sin cambios)
   const handleCreateBusiness = async (data: CreateBusinessData) => {
     try {
       await dispatch(addBusiness(data)).unwrap()
