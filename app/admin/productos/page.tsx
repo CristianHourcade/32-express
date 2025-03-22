@@ -1,130 +1,136 @@
-"use client"
+"use client";
 
-import type React from "react"
-import { useEffect, useState, useMemo } from "react"
-import { useDispatch, useSelector } from "react-redux"
-import type { AppDispatch, RootState } from "@/lib/redux/store"
+import type React from "react";
+import { useEffect, useState, useMemo } from "react";
+import { useDispatch, useSelector } from "react-redux";
+import type { AppDispatch, RootState } from "@/lib/redux/store";
 import {
   getProducts,
   createProduct,
   editProduct,
   removeProduct,
   type Product,
-} from "@/lib/redux/slices/productSlice"
-import { fetchBusinesses } from "@/lib/redux/slices/businessSlice"
-import { Plus, Edit, Trash2, X, Search, AlertTriangle } from "lucide-react"
-import Link from "next/link"
-import { supabase } from "@/lib/supabase"
+} from "@/lib/redux/slices/productSlice";
+import { fetchBusinesses } from "@/lib/redux/slices/businessSlice";
+import { Plus, Edit, Trash2, X, Search, AlertTriangle } from "lucide-react";
+import Link from "next/link";
+import { supabase } from "@/lib/supabase";
 
 function calculateProfitMargin(purchasePrice: number, sellingPrice: number) {
-  if (purchasePrice === 0) return "0.00"
-  return (((sellingPrice - purchasePrice) / purchasePrice) * 100).toFixed(2)
+  if (purchasePrice === 0) return "0.00";
+  return (((sellingPrice - purchasePrice) / purchasePrice) * 100).toFixed(2);
 }
 
 function formatNumber(num: number) {
   return new Intl.NumberFormat("en-US", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
-  }).format(num)
+  }).format(num);
 }
 
 export default function ProductsPage() {
-  const dispatch = useDispatch<AppDispatch>()
+  const dispatch = useDispatch<AppDispatch>();
   const { products, loading: productsLoading } = useSelector(
-    (state: RootState) => state.products,
-  )
+    (state: RootState) => state.products
+  );
   const { businesses, loading: businessesLoading } = useSelector(
-    (state: RootState) => state.businesses,
-  )
-  const businessId = useSelector((state: RootState) => state.auth.user?.businessId)
+    (state: RootState) => state.businesses
+  );
+  const businessId = useSelector((state: RootState) => state.auth.user?.businessId);
 
-  // Eliminamos la definición duplicada; ahora definimos "allProductsByBusiness" UNA SOLA VEZ
-  const [allProductsByBusiness, setAllProductsByBusiness] = useState<Map<string, Product[]>>(new Map())
+  // Para refrescar la lista completa por negocio (si se muestra todos)
+  const [allProductsByBusiness, setAllProductsByBusiness] = useState<Map<string, Product[]>>(new Map());
 
   // Estados para búsqueda y filtro
-  const [searchQuery, setSearchQuery] = useState("")
-  const [searchResults, setSearchResults] = useState<Product[]>([])
-  const [isSearching, setIsSearching] = useState(false)
-  const [showAllProducts, setShowAllProducts] = useState(false)
-  const [selectedBusinessId, setSelectedBusinessId] = useState("")
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<Product[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [showAllProducts, setShowAllProducts] = useState(false);
+  const [selectedBusinessId, setSelectedBusinessId] = useState("");
 
   // Estados para modal de Agregar Stock
-  const [isAddStockModalOpen, setIsAddStockModalOpen] = useState(false)
-  const [currentProductForStock, setCurrentProductForStock] = useState<Product | null>(null)
-  const [stockToAdd, setStockToAdd] = useState(0)
+  const [isAddStockModalOpen, setIsAddStockModalOpen] = useState(false);
+  const [currentProductForStock, setCurrentProductForStock] = useState<Product | null>(null);
+  const [stockToAdd, setStockToAdd] = useState(0);
 
   // Estados para modal de Agregar/Editar Producto
-  const [isProductModalOpen, setIsProductModalOpen] = useState(false)
-  const [editingProduct, setEditingProduct] = useState<Product | null>(null)
+  const [isProductModalOpen, setIsProductModalOpen] = useState(false);
+  const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [productFormData, setProductFormData] = useState({
     name: "",
     code: "",
     purchasePrice: 0,
-    sellingPrice: 0, // Se calculará automáticamente o se podrá editar manualmente
+    sellingPrice: 0, // Se ingresará manualmente
     stock: 0,
     minStock: 0,
     description: "",
     businessId: "",
-  })
-  const [marginPercent, setMarginPercent] = useState(0)
-  const [manualSellingPriceEnabled, setManualSellingPriceEnabled] = useState(false)
+  });
+  // El margen se muestra como read-only y se recalcula cada vez que cambia el precio de venta
+  const [marginPercent, setMarginPercent] = useState(0);
+  // Forzamos que el precio de venta se ingrese manualmente
+  const manualSellingPriceEnabled = true;
 
-  // Estado para refrescar solo la tabla de productos (spinner)
-  const [isRefreshing, setIsRefreshing] = useState(false)
+  // Estado para refrescar solo la tabla (spinner)
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   // Estado para modal de eliminación
-  const [currentProductForDelete, setCurrentProductForDelete] = useState<Product | null>(null)
-  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false)
+  const [currentProductForDelete, setCurrentProductForDelete] = useState<Product | null>(null);
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
 
-  // Estados para ordenamiento (definidos una sola vez)
-  const [sortField, setSortField] = useState<"stock" | null>("stock")
-  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc")
+  // Estados para ordenamiento
+  const [sortField, setSortField] = useState<"stock" | null>("stock");
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
 
   useEffect(() => {
-    dispatch(getProducts())
-    dispatch(fetchBusinesses())
-  }, [dispatch])
+    dispatch(getProducts());
+    dispatch(fetchBusinesses());
+  }, [dispatch]);
 
   useEffect(() => {
     if (businesses.length > 0 && productFormData.businessId === "") {
-      setProductFormData((prev) => ({ ...prev, businessId: businesses[0].id }))
+      setProductFormData((prev) => ({ ...prev, businessId: businesses[0].id }));
     }
-  }, [businesses, productFormData.businessId])
+  }, [businesses, productFormData.businessId]);
 
   useEffect(() => {
     if (editingProduct && editingProduct.purchasePrice > 0) {
       const computedMargin =
-        ((editingProduct.sellingPrice / editingProduct.purchasePrice - 1) * 100)
-      setMarginPercent(Number(computedMargin.toFixed(2)))
+        (editingProduct.sellingPrice / editingProduct.purchasePrice - 1) * 100;
+      setMarginPercent(Number(computedMargin.toFixed(2)));
     }
-  }, [editingProduct])
+  }, [editingProduct]);
 
+  // Nuevo useEffect para actualizar el margen (%) cuando cambia el precio de venta
   useEffect(() => {
-    if (!manualSellingPriceEnabled) {
-      const newSellingPrice = productFormData.purchasePrice * (1 + marginPercent / 100)
-      setProductFormData((prev) => ({ ...prev, sellingPrice: newSellingPrice }))
+    if (productFormData.purchasePrice > 0) {
+      const computedMargin =
+        (productFormData.sellingPrice / productFormData.purchasePrice - 1) * 100;
+      setMarginPercent(Number(computedMargin.toFixed(2)));
+    } else {
+      setMarginPercent(0);
     }
-  }, [productFormData.purchasePrice, marginPercent, manualSellingPriceEnabled])
+  }, [productFormData.sellingPrice, productFormData.purchasePrice]);
 
   const lowStockProducts = useMemo(() => {
-    if (!products || !businessId) return []
-    return products.filter((product) => product.stock <= product.minStock).slice(0, 10)
-  }, [products, businessId])
+    if (!products || !businessId) return [];
+    return products.filter((product) => product.stock <= product.minStock).slice(0, 10);
+  }, [products, businessId]);
 
   const searchProductsInDB = async (query: string) => {
     if (!query.trim()) {
-      setSearchResults([])
-      setIsSearching(false)
-      return
+      setSearchResults([]);
+      setIsSearching(false);
+      return;
     }
-    setIsSearching(true)
+    setIsSearching(true);
     try {
       const { data, error } = await supabase
         .from("products")
         .select("*")
         .or(`name.ilike.%${query}%,code.ilike.%${query}%,description.ilike.%${query}%`)
-        .limit(20)
-      if (error) throw error
+        .limit(20);
+      if (error) throw error;
       const formattedResults: Product[] = data.map((item) => ({
         id: item.id,
         name: item.name,
@@ -137,65 +143,64 @@ export default function ProductsPage() {
         businessId: item.business_id,
         salesCount: item.sales_count || 0,
         totalRevenue: item.total_revenue || 0,
-      }))
-      setSearchResults(formattedResults)
+      }));
+      setSearchResults(formattedResults);
     } catch (error) {
-      console.error("Error searching products:", error)
-      setSearchResults([])
+      console.error("Error searching products:", error);
+      setSearchResults([]);
     } finally {
-      setIsSearching(false)
+      setIsSearching(false);
     }
-  }
+  };
 
   const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const query = e.target.value
-    setSearchQuery(query)
+    const query = e.target.value;
+    setSearchQuery(query);
     if (query.trim()) {
-      searchProductsInDB(query)
+      searchProductsInDB(query);
     } else {
-      setSearchResults([])
+      setSearchResults([]);
     }
-  }
+  };
 
   const handleBusinessFilterChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    setSelectedBusinessId(e.target.value)
-  }
+    setSelectedBusinessId(e.target.value);
+  };
 
   const openAddStockModal = (product: Product) => {
-    setCurrentProductForStock(product)
-    setStockToAdd(0)
-    setIsAddStockModalOpen(true)
-  }
+    setCurrentProductForStock(product);
+    setStockToAdd(0);
+    setIsAddStockModalOpen(true);
+  };
 
   const handleAddStock = async () => {
-    if (!currentProductForStock || stockToAdd <= 0) return
+    if (!currentProductForStock || stockToAdd <= 0) return;
     try {
       await dispatch(
         editProduct({
           ...currentProductForStock,
           stock: currentProductForStock.stock + stockToAdd,
-        }),
-      )
-      setIsAddStockModalOpen(false)
+        })
+      );
+      setIsAddStockModalOpen(false);
       if (searchResults.length > 0) {
         setSearchResults((prev) =>
           prev.map((p) =>
-            p.id === currentProductForStock.id ? { ...p, stock: p.stock + stockToAdd } : p,
-          ),
-        )
+            p.id === currentProductForStock.id ? { ...p, stock: p.stock + stockToAdd } : p
+          )
+        );
       }
-      setIsRefreshing(true)
-      await dispatch(getProducts())
-      setIsRefreshing(false)
+      setIsRefreshing(true);
+      await dispatch(getProducts());
+      setIsRefreshing(false);
     } catch (error) {
-      console.error("Error adding stock:", error)
+      console.error("Error adding stock:", error);
     }
-  }
+  };
 
   const openAddProductModal = () => {
-    setEditingProduct(null)
-    setManualSellingPriceEnabled(false)
-    setMarginPercent(0)
+    setEditingProduct(null);
+    const defaultBusinessId = businesses.length > 0 ? businesses[0].id : "";
     setProductFormData({
       name: "",
       code: "",
@@ -204,18 +209,18 @@ export default function ProductsPage() {
       stock: 0,
       minStock: 0,
       description: "",
-      businessId: businesses.length > 0 ? businesses[0].id : "",
-    })
-    setIsProductModalOpen(true)
-  }
+      businessId: defaultBusinessId,
+    });
+    setIsProductModalOpen(true);
+  };
 
   const openEditProductModal = (product: Product) => {
-    setEditingProduct(product)
+    setEditingProduct(product);
     const computedMargin =
       product.purchasePrice > 0
         ? ((product.sellingPrice / product.purchasePrice - 1) * 100)
-        : 0
-    setMarginPercent(Number(computedMargin.toFixed(2)))
+        : 0;
+    setMarginPercent(Number(computedMargin.toFixed(2)));
     setProductFormData({
       name: product.name,
       code: product.code,
@@ -225,59 +230,58 @@ export default function ProductsPage() {
       minStock: product.minStock,
       description: product.description,
       businessId: product.businessId,
-    })
-    setManualSellingPriceEnabled(false)
-    setIsProductModalOpen(true)
-  }
+    });
+    setIsProductModalOpen(true);
+  };
 
   const openDeleteModal = (product: Product) => {
-    setCurrentProductForDelete(product)
-    setIsDeleteModalOpen(true)
-  }
+    setCurrentProductForDelete(product);
+    setIsDeleteModalOpen(true);
+  };
 
   const handleDelete = async () => {
-    if (!currentProductForDelete) return
+    if (!currentProductForDelete) return;
     try {
-      await dispatch(removeProduct(currentProductForDelete.id)).unwrap()
-      setIsDeleteModalOpen(false)
-      setIsRefreshing(true)
-      await dispatch(getProducts())
-      setIsRefreshing(false)
+      await dispatch(removeProduct(currentProductForDelete.id)).unwrap();
+      setIsDeleteModalOpen(false);
+      setIsRefreshing(true);
+      await dispatch(getProducts());
+      setIsRefreshing(false);
     } catch (error) {
-      console.error("Error deleting product:", error)
+      console.error("Error deleting product:", error);
     }
-  }
+  };
 
   const handleProductFormChange = (
-    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>,
+    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>
   ) => {
-    const { name, value } = e.target
+    const { name, value } = e.target;
     setProductFormData((prev) => ({
       ...prev,
       [name]:
         name === "purchasePrice" || name === "stock" || name === "minStock"
           ? Number(value)
           : value,
-    }))
-  }
+    }));
+  };
 
   const handleMarginChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = Number(e.target.value)
-    setMarginPercent(value)
-  }
+    const value = Number(e.target.value);
+    setMarginPercent(value);
+  };
 
   const handleSellingPriceChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setProductFormData((prev) => ({
       ...prev,
       sellingPrice: Number(e.target.value),
-    }))
-  }
+    }));
+  };
 
   const handleProductFormSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault()
+    e.preventDefault();
     try {
       if (editingProduct) {
-        await dispatch(editProduct({ ...editingProduct, ...productFormData })).unwrap()
+        await dispatch(editProduct({ ...editingProduct, ...productFormData })).unwrap();
       } else {
         await dispatch(
           createProduct({
@@ -285,58 +289,55 @@ export default function ProductsPage() {
             createdAt: new Date().toISOString(),
             salesCount: 0,
             totalRevenue: 0,
-          }),
-        ).unwrap()
+          })
+        ).unwrap();
       }
-      setIsRefreshing(true)
-      await dispatch(getProducts())
-      setIsRefreshing(false)
-      setIsProductModalOpen(false)
+      // Para asegurarnos de que la lista se actualice, aplicamos un breve retardo similar a addStock
+      location.reload()
     } catch (error) {
-      console.error("Error updating/creating product:", error)
+      console.error("Error updating/creating product:", error);
     }
-  }
+  };
 
   // --- Definir "displayProducts" y "filteredProducts" ---
   const displayProducts = searchQuery
     ? searchResults
     : showAllProducts
-    ? // Si se muestran todos los productos, usamos la lista completa del negocio seleccionado
-      selectedBusinessId
+    ? selectedBusinessId
       ? allProductsByBusiness.get(selectedBusinessId) || []
       : []
-    : lowStockProducts
+    : lowStockProducts;
 
   const filteredProducts = useMemo(() => {
     return displayProducts.filter((product) =>
-      selectedBusinessId ? product.businessId === selectedBusinessId : true,
-    )
-  }, [displayProducts, selectedBusinessId])
+      selectedBusinessId ? product.businessId === selectedBusinessId : true
+    );
+  }, [displayProducts, selectedBusinessId]);
 
   // --- Ordenamiento por "stock" ---
   const sortedProducts = useMemo(() => {
-    const productsToSort = [...filteredProducts]
+    const productsToSort = [...filteredProducts];
     if (sortField === "stock") {
       productsToSort.sort((a, b) =>
-        sortOrder === "asc" ? a.stock - b.stock : b.stock - a.stock,
-      )
+        sortOrder === "asc" ? a.stock - b.stock : b.stock - a.stock
+      );
     }
-    return productsToSort
-  }, [filteredProducts, sortField, sortOrder])
+    return productsToSort;
+  }, [filteredProducts, sortField, sortOrder]);
 
   // --- Consulta completa por negocio ---
   useEffect(() => {
     async function fetchProductsForEachBusiness() {
-      const newMap = new Map<string, Product[]>()
+      const newMap = new Map<string, Product[]>();
       await Promise.all(
         businesses.map(async (business) => {
           const { data, error } = await supabase
             .from("products")
             .select("*")
-            .eq("business_id", business.id)
+            .eq("business_id", business.id);
           if (error) {
-            console.error("Error fetching products for business", business.id, error)
-            newMap.set(business.id, [])
+            console.error("Error fetching products for business", business.id, error);
+            newMap.set(business.id, []);
           } else {
             const formattedProducts: Product[] = (data || []).map((item) => ({
               id: item.id,
@@ -350,31 +351,33 @@ export default function ProductsPage() {
               businessId: item.business_id,
               salesCount: item.sales_count || 0,
               totalRevenue: item.total_revenue || 0,
-            }))
-            newMap.set(business.id, formattedProducts)
+            }));
+            newMap.set(business.id, formattedProducts);
           }
-        }),
-      )
-      setAllProductsByBusiness(newMap)
+        })
+      );
+      setAllProductsByBusiness(newMap);
     }
     // Se ejecuta cuando se activa "Mostrar todos los productos" y hay un negocio seleccionado
     if (showAllProducts && selectedBusinessId) {
-      fetchProductsForEachBusiness()
+      fetchProductsForEachBusiness();
     }
-  }, [businesses, showAllProducts, selectedBusinessId])
+  }, [businesses, showAllProducts, selectedBusinessId]);
 
-  const isLoading = productsLoading || businessesLoading
-  const currentBusiness = businesses.find((business) => business.id === businessId)
+  const isLoading = productsLoading || businessesLoading;
+  const currentBusiness = businesses.find((business) => business.id === businessId);
 
   if (isLoading) {
     return (
       <div className="flex justify-center items-center h-64">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-700 mx-auto"></div>
-          <p className="mt-4 text-gray-600 dark:text-gray-400">Cargando productos...</p>
+          <p className="mt-4 text-gray-600 dark:text-gray-400">
+            Cargando productos...
+          </p>
         </div>
       </div>
-    )
+    );
   }
 
   return (
@@ -410,7 +413,9 @@ export default function ProductsPage() {
                 Alerta de Stock Bajo
               </h3>
               <div className="mt-2 text-sm text-amber-700 dark:text-amber-200">
-                <p>Hay {lowStockProducts.length} productos con stock por debajo del mínimo requerido.</p>
+                <p>
+                  Hay {lowStockProducts.length} productos con stock por debajo del mínimo requerido.
+                </p>
               </div>
             </div>
           </div>
@@ -454,9 +459,9 @@ export default function ProductsPage() {
             <button
               onClick={() => {
                 if (!selectedBusinessId) {
-                  alert("Por favor, elija un negocio para ver todos los productos.")
+                  alert("Por favor, elija un negocio para ver todos los productos.");
                 } else {
-                  setShowAllProducts(!showAllProducts)
+                  setShowAllProducts(!showAllProducts);
                 }
               }}
               className="btn btn-outline"
@@ -502,10 +507,10 @@ export default function ProductsPage() {
                 <th
                   onClick={() => {
                     if (sortField === "stock") {
-                      setSortOrder(sortOrder === "asc" ? "desc" : "asc")
+                      setSortOrder(sortOrder === "asc" ? "desc" : "asc");
                     } else {
-                      setSortField("stock")
-                      setSortOrder("asc")
+                      setSortField("stock");
+                      setSortOrder("asc");
                     }
                   }}
                   className="cursor-pointer px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider"
@@ -547,7 +552,13 @@ export default function ProductsPage() {
                       ${product.purchasePrice.toFixed(2)}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
-                      {calculateProfitMargin(product.purchasePrice, product.sellingPrice)}%
+                      <input
+                        type="text"
+                        value={calculateProfitMargin(product.purchasePrice, product.sellingPrice)}
+                        readOnly
+                        className="w-16 bg-transparent text-sm text-gray-500 dark:text-gray-400"
+                      />
+                      %
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
                       ${product.sellingPrice.toFixed(2)}
@@ -593,7 +604,10 @@ export default function ProductsPage() {
                 ))
               ) : (
                 <tr>
-                  <td colSpan={8} className="px-6 py-4 text-center text-sm text-gray-500 dark:text-gray-400">
+                  <td
+                    colSpan={8}
+                    className="px-6 py-4 text-center text-sm text-gray-500 dark:text-gray-400"
+                  >
                     {searchQuery
                       ? "No se encontraron productos que coincidan con la búsqueda."
                       : "No hay productos con stock bajo en este momento."}
@@ -678,20 +692,9 @@ export default function ProductsPage() {
                     onChange={handleMarginChange}
                     min="0"
                     step="0.01"
-                    className="input"
+                    readOnly
+                    className="input bg-gray-100 dark:bg-gray-700"
                   />
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      id="manualSellingPrice"
-                      checked={manualSellingPriceEnabled}
-                      onChange={(e) => setManualSellingPriceEnabled(e.target.checked)}
-                      className="form-checkbox"
-                    />
-                    <label htmlFor="manualSellingPrice" className="text-sm text-gray-700 dark:text-gray-300">
-                      Precio de venta manual
-                    </label>
-                  </div>
                 </div>
                 <div>
                   <label htmlFor="sellingPrice" className="label">
@@ -703,8 +706,7 @@ export default function ProductsPage() {
                     name="sellingPrice"
                     value={productFormData.sellingPrice.toFixed(2)}
                     onChange={handleSellingPriceChange}
-                    disabled={!manualSellingPriceEnabled}
-                    className="input bg-gray-100 dark:bg-gray-700"
+                    className="input"
                   />
                 </div>
                 <div>
@@ -810,7 +812,10 @@ export default function ProductsPage() {
                 <p className="font-medium">{currentProductForStock.stock}</p>
               </div>
               <div>
-                <label htmlFor="stockToAdd" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                <label
+                  htmlFor="stockToAdd"
+                  className="block text-sm font-medium text-gray-700 dark:text-gray-300"
+                >
                   Cantidad a Agregar
                 </label>
                 <input
@@ -818,12 +823,18 @@ export default function ProductsPage() {
                   id="stockToAdd"
                   min="1"
                   value={stockToAdd}
-                  onChange={(e) => setStockToAdd(Number.parseInt(e.target.value) || 0)}
+                  onChange={(e) =>
+                    setStockToAdd(Number.parseInt(e.target.value) || 0)
+                  }
                   className="input mt-1"
                 />
               </div>
               <div className="pt-4 flex justify-end space-x-3">
-                <button type="button" onClick={() => setIsAddStockModalOpen(false)} className="btn btn-secondary">
+                <button
+                  type="button"
+                  onClick={() => setIsAddStockModalOpen(false)}
+                  className="btn btn-secondary"
+                >
                   Cancelar
                 </button>
                 <button
@@ -847,10 +858,14 @@ export default function ProductsPage() {
             <div className="p-6">
               <h2 className="text-xl font-semibold mb-4">Confirmar Eliminación</h2>
               <p className="mb-6">
-                ¿Estás seguro de que deseas eliminar el producto "{currentProductForDelete.name}"? Esta acción no se puede deshacer.
+                ¿Estás seguro de que deseas eliminar el producto "
+                {currentProductForDelete.name}"? Esta acción no se puede deshacer.
               </p>
               <div className="flex justify-end space-x-3">
-                <button onClick={() => setIsDeleteModalOpen(false)} className="btn btn-secondary">
+                <button
+                  onClick={() => setIsDeleteModalOpen(false)}
+                  className="btn btn-secondary"
+                >
                   Cancelar
                 </button>
                 <button onClick={handleDelete} className="btn btn-danger">
@@ -866,9 +881,11 @@ export default function ProductsPage() {
       {isRefreshing && (
         <div className="text-center py-4">
           <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-700 inline-block"></div>
-          <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">Actualizando datos...</p>
+          <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
+            Actualizando datos...
+          </p>
         </div>
       )}
     </div>
-  )
+  );
 }
