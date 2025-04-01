@@ -23,6 +23,20 @@ import {
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, LineElement, PointElement, Title, Tooltip, Legend)
 
+// Helper para obtener la fecha en formato "YYYY-MM-DD" (local)
+function getLocalDateString(date = new Date()) {
+  const year = date.getFullYear()
+  const month = (date.getMonth() + 1).toString().padStart(2, "0")
+  const day = date.getDate().toString().padStart(2, "0")
+  return `${year}-${month}-${day}`
+}
+
+// Helper para extraer la parte de la fecha (YYYY-MM-DD) y forzar una hora intermedia (T12:00:00)
+function parseDateForDisplay(dateStr: string) {
+  const datePart = dateStr.includes("T") ? dateStr.split("T")[0] : dateStr
+  return new Date(datePart + "T12:00:00")
+}
+
 export default function StatisticsPage() {
   const dispatch = useDispatch<AppDispatch>()
   const { businesses, loading: businessesLoading } = useSelector((state: RootState) => state.businesses)
@@ -51,6 +65,7 @@ export default function StatisticsPage() {
     d1.getMonth() === d2.getMonth() &&
     d1.getDate() === d2.getDate()
 
+  // Para ventas y turnos, asumimos que se guardan correctamente y se convierten sin problema.
   const filteredSales = sales.filter((sale) => {
     const saleDate = new Date(sale.timestamp)
     return (
@@ -61,8 +76,9 @@ export default function StatisticsPage() {
     )
   })
 
+  // Para gastos, usamos parseDateForDisplay para forzar la fecha correcta.
   const filteredExpenses = expenses.filter((expense) => {
-    const expenseDate = new Date(expense.date)
+    const expenseDate = parseDateForDisplay(expense.date)
     return (
       selectedBusinessId !== "" &&
       expense.businessId === selectedBusinessId &&
@@ -81,9 +97,12 @@ export default function StatisticsPage() {
     )
   })
 
+  // Calcular estadísticas diarias (para gastos usamos parseDateForDisplay)
   const dailyStats = daysArray.map((day) => {
     const salesForDay = filteredSales.filter((sale) => isSameDate(new Date(sale.timestamp), day))
-    const expensesForDay = filteredExpenses.filter((expense) => isSameDate(new Date(expense.date), day))
+    const expensesForDay = filteredExpenses.filter((expense) =>
+      isSameDate(parseDateForDisplay(expense.date), day)
+    )
     const shiftsForDay = filteredShifts.filter((shift) => isSameDate(new Date(shift.startTime), day))
     const totalSales = salesForDay.reduce((sum, sale) => sum + sale.total, 0)
     const totalExpenses = expensesForDay.reduce((sum, expense) => sum + expense.amount, 0)
@@ -109,14 +128,8 @@ export default function StatisticsPage() {
   const totalNetSum = dailyStats.reduce((sum, stat) => sum + stat.net, 0)
   const totalSalesCount = dailyStats.reduce((sum, stat) => sum + stat.salesCount, 0)
 
-  // *** Ajuste de colores en dark mode *** 
-  // Usaremos "#f9fafb" (slate-50) para un color claro de texto en dark mode
-  const axisTickColor = "#374151" // para light mode
-  const axisTickColorDark = "#f9fafb" // para dark mode, más claro
-
-  // Podemos detectar dark mode con media queries o dejar un color neutral.  
-  // Para un ejemplo simple, definimos un color general. 
-  // O si quieres, puedes leer la preferencia de dark mode con JS y cambiarlo dinámicamente.
+  // Configuración de colores para dark mode (ejemplo)
+  const axisTickColorDark = "#f9fafb"
 
   // Gráfico de "Ventas por Horas"
   const chartData = useMemo(() => {
@@ -134,7 +147,7 @@ export default function StatisticsPage() {
         {
           label: "Ventas por Hora",
           data: hourlySales,
-          backgroundColor: "rgba(16, 185, 129, 0.6)", // green-500
+          backgroundColor: "rgba(16, 185, 129, 0.6)",
           borderColor: "rgba(16, 185, 129, 1)",
           borderWidth: 1,
         },
@@ -148,7 +161,7 @@ export default function StatisticsPage() {
       legend: {
         display: false,
         labels: {
-          color: axisTickColorDark, // color de texto para la leyenda en dark mode
+          color: axisTickColorDark,
         },
       },
       title: {
@@ -157,23 +170,15 @@ export default function StatisticsPage() {
     },
     scales: {
       x: {
-        ticks: { 
-          color: axisTickColorDark, // color para los ticks del eje X
-        },
-        grid: {
-          color: "rgba(156, 163, 175, 0.2)", 
-        },
+        ticks: { color: axisTickColorDark },
+        grid: { color: "rgba(156, 163, 175, 0.2)" },
       },
       y: {
-        ticks: {
-          color: axisTickColorDark, // color para los ticks del eje Y
-        },
-        grid: {
-          color: "rgba(156, 163, 175, 0.2)",
-        },
+        ticks: { color: axisTickColorDark },
+        grid: { color: "rgba(156, 163, 175, 0.2)" },
       },
     },
-  }), [])
+  }), [axisTickColorDark])
 
   // Gráfico de "Ticket Promedio por Día"
   const ticketChartData = useMemo(() => {
@@ -187,7 +192,7 @@ export default function StatisticsPage() {
         {
           label: "Ticket Promedio por Día",
           data: avgTicket,
-          backgroundColor: "rgba(59, 130, 246, 0.5)", // blue-500
+          backgroundColor: "rgba(59, 130, 246, 0.5)",
           borderColor: "rgba(59, 130, 246, 1)",
           borderWidth: 2,
           tension: 0.3,
@@ -211,20 +216,12 @@ export default function StatisticsPage() {
     },
     scales: {
       x: {
-        ticks: {
-          color: axisTickColorDark,
-        },
-        grid: {
-          color: "rgba(156, 163, 175, 0.2)",
-        },
+        ticks: { color: axisTickColorDark },
+        grid: { color: "rgba(156, 163, 175, 0.2)" },
       },
       y: {
-        ticks: {
-          color: axisTickColorDark,
-        },
-        grid: {
-          color: "rgba(156, 163, 175, 0.2)",
-        },
+        ticks: { color: axisTickColorDark },
+        grid: { color: "rgba(156, 163, 175, 0.2)" },
       },
     },
   }), [axisTickColorDark])
@@ -362,11 +359,7 @@ export default function StatisticsPage() {
                     <td className="px-4 py-2 border border-gray-300 dark:border-gray-600">
                       {stat.salesCount}
                     </td>
-                    <td
-                      className={`px-4 py-2 border border-gray-300 dark:border-gray-600 font-semibold ${
-                        stat.net >= 0 ? "text-green-600" : "text-red-600"
-                      }`}
-                    >
+                    <td className={`px-4 py-2 border border-gray-300 dark:border-gray-600 font-semibold ${stat.net >= 0 ? "text-green-600" : "text-red-600"}`}>
                       ${formatPrice(stat.net)}
                     </td>
                     <td className="px-4 py-2 border border-gray-300 dark:border-gray-600">
@@ -434,3 +427,4 @@ export default function StatisticsPage() {
     </div>
   )
 }
+

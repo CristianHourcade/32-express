@@ -240,6 +240,7 @@ export default function ProductsPage() {
       setIsRefreshing(true);
       await dispatch(getProducts());
       setIsRefreshing(false);
+      location.reload();
     } catch (error) {
       console.error("Error deleting product:", error);
     }
