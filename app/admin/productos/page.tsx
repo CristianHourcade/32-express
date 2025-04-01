@@ -38,14 +38,14 @@ export default function ProductsPage() {
   );
   const businessId = useSelector((state: RootState) => state.auth.user?.businessId);
 
-  // Para refrescar la lista completa por negocio (si se muestra todos)
+  // Para refrescar la lista completa por negocio
   const [allProductsByBusiness, setAllProductsByBusiness] = useState<Map<string, Product[]>>(new Map());
 
   // Estados para búsqueda y filtro
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<Product[]>([]);
   const [isSearching, setIsSearching] = useState(false);
-  const [showAllProducts, setShowAllProducts] = useState(false);
+  // Ahora el select de negocio se usa para elegir el negocio a mostrar
   const [selectedBusinessId, setSelectedBusinessId] = useState("");
 
   // Estados para modal de Agregar Stock
@@ -60,15 +60,13 @@ export default function ProductsPage() {
     name: "",
     code: "",
     purchasePrice: 0,
-    sellingPrice: 0, // Se ingresará manualmente
+    sellingPrice: 0,
     stock: 0,
     minStock: 0,
     description: "",
     businessId: "",
   });
-  // El margen se muestra como read-only y se recalcula cada vez que cambia el precio de venta
   const [marginPercent, setMarginPercent] = useState(0);
-  // Forzamos que el precio de venta se ingrese manualmente
   const manualSellingPriceEnabled = true;
 
   // Estado para refrescar solo la tabla (spinner)
@@ -101,7 +99,6 @@ export default function ProductsPage() {
     }
   }, [editingProduct]);
 
-  // Nuevo useEffect para actualizar el margen (%) cuando cambia el precio de venta
   useEffect(() => {
     if (productFormData.purchasePrice > 0) {
       const computedMargin =
@@ -183,13 +180,6 @@ export default function ProductsPage() {
         })
       );
       setIsAddStockModalOpen(false);
-      if (searchResults.length > 0) {
-        setSearchResults((prev) =>
-          prev.map((p) =>
-            p.id === currentProductForStock.id ? { ...p, stock: p.stock + stockToAdd } : p
-          )
-        );
-      }
       setIsRefreshing(true);
       await dispatch(getProducts());
       setIsRefreshing(false);
@@ -200,7 +190,9 @@ export default function ProductsPage() {
 
   const openAddProductModal = () => {
     setEditingProduct(null);
-    const defaultBusinessId = businesses.length > 0 ? businesses[0].id : "";
+    // Si hay un negocio seleccionado, se usa ese, sino se usa el primer negocio de la lista.
+    const defaultBusinessId =
+      selectedBusinessId || (businesses.length > 0 ? businesses[0].id : "");
     setProductFormData({
       name: "",
       code: "",
@@ -213,6 +205,7 @@ export default function ProductsPage() {
     });
     setIsProductModalOpen(true);
   };
+  
 
   const openEditProductModal = (product: Product) => {
     setEditingProduct(product);
@@ -292,29 +285,27 @@ export default function ProductsPage() {
           })
         ).unwrap();
       }
-      // Para asegurarnos de que la lista se actualice, aplicamos un breve retardo similar a addStock
-      location.reload()
+      location.reload();
     } catch (error) {
       console.error("Error updating/creating product:", error);
     }
   };
 
-  // --- Definir "displayProducts" y "filteredProducts" ---
-  const displayProducts = searchQuery
-    ? searchResults
-    : showAllProducts
-    ? selectedBusinessId
-      ? allProductsByBusiness.get(selectedBusinessId) || []
-      : []
-    : lowStockProducts;
+  // --- Solo se muestran productos cuando se selecciona un negocio ---
+  const displayProducts = useMemo(() => {
+    if (!selectedBusinessId) return [];
+    return searchQuery.trim()
+      ? searchResults
+      : allProductsByBusiness.get(selectedBusinessId) || [];
+  }, [selectedBusinessId, searchQuery, searchResults, allProductsByBusiness]);
 
+  // --- Ordenamiento por "stock" ---
   const filteredProducts = useMemo(() => {
     return displayProducts.filter((product) =>
       selectedBusinessId ? product.businessId === selectedBusinessId : true
     );
   }, [displayProducts, selectedBusinessId]);
 
-  // --- Ordenamiento por "stock" ---
   const sortedProducts = useMemo(() => {
     const productsToSort = [...filteredProducts];
     if (sortField === "stock") {
@@ -358,11 +349,10 @@ export default function ProductsPage() {
       );
       setAllProductsByBusiness(newMap);
     }
-    // Se ejecuta cuando se activa "Mostrar todos los productos" y hay un negocio seleccionado
-    if (showAllProducts && selectedBusinessId) {
+    if (selectedBusinessId) {
       fetchProductsForEachBusiness();
     }
-  }, [businesses, showAllProducts, selectedBusinessId]);
+  }, [businesses, selectedBusinessId]);
 
   const isLoading = productsLoading || businessesLoading;
   const currentBusiness = businesses.find((business) => business.id === businessId);
@@ -422,31 +412,16 @@ export default function ProductsPage() {
         </div>
       )}
 
-      {/* Search, Filtro y Botón para cambiar listado */}
+      {/* Filtro de Negocio */}
       <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm p-4">
         <div className="flex flex-col md:flex-row gap-4 items-center justify-between">
-          {/* Input de búsqueda */}
-          <div className="relative w-full md:w-1/2">
-            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-              <Search className="h-5 w-5 text-gray-400" />
-            </div>
-            <input
-              type="text"
-              className="input pl-10 w-full"
-              placeholder="Buscar productos por nombre, código o descripción..."
-              value={searchQuery}
-              onChange={handleSearchChange}
-            />
-          </div>
-
-          {/* Select para filtrar por negocio */}
           <div className="w-full md:w-1/4">
             <select
               className="input w-full"
               value={selectedBusinessId}
               onChange={handleBusinessFilterChange}
             >
-              <option value="">Todos los negocios</option>
+              <option value="">Selecciona un negocio</option>
               {businesses.map((business) => (
                 <option key={business.id} value={business.id}>
                   {business.name}
@@ -454,171 +429,166 @@ export default function ProductsPage() {
               ))}
             </select>
           </div>
-
-          <div className="flex items-center">
-            <button
-              onClick={() => {
-                if (!selectedBusinessId) {
-                  alert("Por favor, elija un negocio para ver todos los productos.");
-                } else {
-                  setShowAllProducts(!showAllProducts);
-                }
-              }}
-              className="btn btn-outline"
-              disabled={searchQuery.trim() !== ""}
-            >
-              {showAllProducts
-                ? "Mostrar solo productos con stock bajo"
-                : "Mostrar todos los productos"}
-            </button>
-          </div>
+          {/* Se muestra el buscador solo si se eligió un negocio */}
+          {selectedBusinessId && (
+            <div className="relative w-full md:w-1/2">
+              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                <Search className="h-5 w-5 text-gray-400" />
+              </div>
+              <input
+                type="text"
+                className="input pl-10 w-full"
+                placeholder="Buscar productos..."
+                value={searchQuery}
+                onChange={handleSearchChange}
+              />
+            </div>
+          )}
         </div>
       </div>
-
-      {/* Search Status */}
-      {isSearching && (
-        <div className="text-center py-2">
-          <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-700 mx-auto"></div>
-          <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">Buscando productos...</p>
-        </div>
-      )}
 
       {/* Products Table */}
-      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-            <thead className="bg-gray-50 dark:bg-gray-700">
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                  Producto
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                  Código
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                  Precio de Compra
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                  Margen (%)
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                  Precio de Venta
-                </th>
-                <th
-                  onClick={() => {
-                    if (sortField === "stock") {
-                      setSortOrder(sortOrder === "asc" ? "desc" : "asc");
-                    } else {
-                      setSortField("stock");
-                      setSortOrder("asc");
-                    }
-                  }}
-                  className="cursor-pointer px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider"
-                >
-                  Stock Actual {sortField === "stock" ? (sortOrder === "asc" ? "↑" : "↓") : ""}
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                  Stock Mínimo
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                  Acciones
-                </th>
-              </tr>
-            </thead>
-            <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-              {isRefreshing ? (
+      {selectedBusinessId ? (
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+              <thead className="bg-gray-50 dark:bg-gray-700">
                 <tr>
-                  <td colSpan={8} className="px-6 py-4 text-center">
-                    <div className="flex justify-center items-center">
-                      <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-700"></div>
-                    </div>
-                  </td>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                    Producto
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                    Código
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                    Precio de Compra
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                    Margen (%)
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                    Precio de Venta
+                  </th>
+                  <th
+                    onClick={() => {
+                      if (sortField === "stock") {
+                        setSortOrder(sortOrder === "asc" ? "desc" : "asc");
+                      } else {
+                        setSortField("stock");
+                        setSortOrder("asc");
+                      }
+                    }}
+                    className="cursor-pointer px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider"
+                  >
+                    Stock Actual {sortField === "stock" ? (sortOrder === "asc" ? "↑" : "↓") : ""}
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                    Stock Mínimo
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                    Acciones
+                  </th>
                 </tr>
-              ) : sortedProducts.length > 0 ? (
-                sortedProducts.map((product) => (
-                  <tr key={product.id} className="hover:bg-gray-50 dark:hover:bg-gray-700">
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm font-medium text-gray-900 dark:text-white">
-                        {product.name}
+              </thead>
+              <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                {isRefreshing ? (
+                  <tr>
+                    <td colSpan={8} className="px-6 py-4 text-center">
+                      <div className="flex justify-center items-center">
+                        <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-700"></div>
                       </div>
-                      <div className="text-xs text-gray-500 dark:text-gray-400">
-                        {product.description}
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
-                      {product.code}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
-                      ${product.purchasePrice.toFixed(2)}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
-                      <input
-                        type="text"
-                        value={calculateProfitMargin(product.purchasePrice, product.sellingPrice)}
-                        readOnly
-                        className="w-16 bg-transparent text-sm text-gray-500 dark:text-gray-400"
-                      />
-                      %
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
-                      ${product.sellingPrice.toFixed(2)}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span
-                        className={`px-2 py-1 text-xs font-medium rounded-full ${
-                          product.stock <= product.minStock
-                            ? "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300"
-                            : "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300"
-                        }`}
-                      >
-                        {product.stock}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
-                      {product.minStock}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-2">
-                      <button
-                        onClick={() => openEditProductModal(product)}
-                        className="text-green-600 hover:text-green-900 dark:text-green-400 dark:hover:text-green-300"
-                        title="Editar Producto"
-                      >
-                        <Edit className="w-5 h-5" />
-                      </button>
-                      <button
-                        onClick={() => openAddStockModal(product)}
-                        className="text-blue-600 hover:text-blue-900 dark:text-blue-400 dark:hover:text-blue-300"
-                        title="Agregar Stock"
-                      >
-                        Agregar Stock
-                      </button>
-                      <button
-                        onClick={() => openDeleteModal(product)}
-                        className="text-red-600 hover:text-red-900 dark:text-red-400 dark:hover:text-red-300"
-                        title="Eliminar Producto"
-                      >
-                        <Trash2 className="w-5 h-5" />
-                      </button>
                     </td>
                   </tr>
-                ))
-              ) : (
-                <tr>
-                  <td
-                    colSpan={8}
-                    className="px-6 py-4 text-center text-sm text-gray-500 dark:text-gray-400"
-                  >
-                    {searchQuery
-                      ? "No se encontraron productos que coincidan con la búsqueda."
-                      : "No hay productos con stock bajo en este momento."}
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+                ) : sortedProducts.length > 0 ? (
+                  sortedProducts.map((product) => (
+                    <tr key={product.id} className="hover:bg-gray-50 dark:hover:bg-gray-700">
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="text-sm font-medium text-gray-900 dark:text-white">
+                          {product.name}
+                        </div>
+                        <div className="text-xs text-gray-500 dark:text-gray-400">
+                          {product.description}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
+                        {product.code}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
+                        ${product.purchasePrice.toFixed(2)}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
+                        <input
+                          type="text"
+                          value={calculateProfitMargin(product.purchasePrice, product.sellingPrice)}
+                          readOnly
+                          className="w-16 bg-transparent text-sm text-gray-500 dark:text-gray-400"
+                        />
+                        %
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
+                        ${product.sellingPrice.toFixed(2)}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span
+                          className={`px-2 py-1 text-xs font-medium rounded-full ${
+                            product.stock <= product.minStock
+                              ? "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300"
+                              : "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300"
+                          }`}
+                        >
+                          {product.stock}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
+                        {product.minStock}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-2">
+                        <button
+                          onClick={() => openEditProductModal(product)}
+                          className="text-green-600 hover:text-green-900 dark:text-green-400 dark:hover:text-green-300"
+                          title="Editar Producto"
+                        >
+                          <Edit className="w-5 h-5" />
+                        </button>
+                        <button
+                          onClick={() => openAddStockModal(product)}
+                          className="text-blue-600 hover:text-blue-900 dark:text-blue-400 dark:hover:text-blue-300"
+                          title="Agregar Stock"
+                        >
+                          Agregar Stock
+                        </button>
+                        <button
+                          onClick={() => openDeleteModal(product)}
+                          className="text-red-600 hover:text-red-900 dark:text-red-400 dark:hover:text-red-300"
+                          title="Eliminar Producto"
+                        >
+                          <Trash2 className="w-5 h-5" />
+                        </button>
+                      </td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td
+                      colSpan={8}
+                      className="px-6 py-4 text-center text-sm text-gray-500 dark:text-gray-400"
+                    >
+                      {searchQuery
+                        ? "No se encontraron productos que coincidan con la búsqueda."
+                        : "No hay productos para este negocio."}
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
-      </div>
-
+      ) : (
+        <div className="text-center py-4 text-gray-600 dark:text-gray-400">
+          Selecciona un negocio para ver los productos.
+        </div>
+      )}
+      
       {/* Modal para Agregar/Editar Producto */}
       {isProductModalOpen && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
@@ -877,7 +847,7 @@ export default function ProductsPage() {
         </div>
       )}
 
-      {/* Spinner en la tabla al refrescar datos */}
+      {/* Spinner al refrescar datos */}
       {isRefreshing && (
         <div className="text-center py-4">
           <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-700 inline-block"></div>

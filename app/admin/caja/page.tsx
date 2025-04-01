@@ -1,8 +1,6 @@
 "use client"
 
-import React from "react"
-
-import { useEffect, useState } from "react"
+import React, { useEffect, useState } from "react"
 import { useDispatch, useSelector } from "react-redux"
 import type { AppDispatch, RootState } from "@/lib/redux/store"
 import { fetchBusinesses } from "@/lib/redux/slices/businessSlice" // Changed from getBusinesses
@@ -45,17 +43,14 @@ export default function CashFlowPage() {
     end: new Date(),
     label: "Mes Actual",
   })
-  const [customDateRange, setCustomDateRange] = useState<{
-    start: string
-    end: string
-  }>({
+  const [customDateRange, setCustomDateRange] = useState<{ start: string; end: string }>({
     start: new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split("T")[0],
     end: new Date().toISOString().split("T")[0],
   })
   const [expandedBusinessId, setExpandedBusinessId] = useState<string | null>(null)
 
   useEffect(() => {
-    dispatch(fetchBusinesses()) // Changed from getBusinesses
+    dispatch(fetchBusinesses())
     dispatch(getSales())
     dispatch(getExpenses())
   }, [dispatch])
@@ -96,10 +91,7 @@ export default function CashFlowPage() {
 
   // Manejar cambios en el rango de fechas personalizado
   const handleCustomDateChange = (e: React.ChangeEvent<HTMLInputElement>, type: "start" | "end") => {
-    const newRange = {
-      ...customDateRange,
-      [type]: e.target.value,
-    }
+    const newRange = { ...customDateRange, [type]: e.target.value }
     setCustomDateRange(newRange)
 
     if (selectedDateRange.label === "Rango Personalizado") {
@@ -112,29 +104,12 @@ export default function CashFlowPage() {
   }
 
   // Filtrar ventas y gastos según el rango de fechas y negocio seleccionados
-  const filteredSales = sales
-    .map((sale) => {
-      // Modificar los métodos de pago para incluir Mercadopago y Rappi
-      // Esto es solo para demostración, en una aplicación real estos datos vendrían de la base de datos
-      const paymentMethod = (() => {
-        // Asignar aleatoriamente algunos pagos a Mercadopago y Rappi para demostración
-        const random = Math.random()
-        if (random < 0.2) return "mercadopago"
-        if (random < 0.3) return "rappi"
-        return sale.paymentMethod
-      })()
-
-      return {
-        ...sale,
-        paymentMethod,
-      }
-    })
-    .filter((sale) => {
-      const saleDate = new Date(sale.timestamp)
-      const matchesDate = saleDate >= selectedDateRange.start && saleDate <= selectedDateRange.end
-      const matchesBusiness = selectedBusinessId === "all" || sale.businessId === selectedBusinessId
-      return matchesDate && matchesBusiness
-    })
+  const filteredSales = sales.filter((sale) => {
+    const saleDate = new Date(sale.timestamp)
+    const matchesDate = saleDate >= selectedDateRange.start && saleDate <= selectedDateRange.end
+    const matchesBusiness = selectedBusinessId === "all" || sale.businessId === selectedBusinessId
+    return matchesDate && matchesBusiness
+  })
 
   const filteredExpenses = expenses.filter((expense) => {
     const expenseDate = new Date(expense.date)
@@ -143,13 +118,20 @@ export default function CashFlowPage() {
     return matchesDate && matchesBusiness
   })
 
+  // Función para formatear precios (ej.: 10,000.00)
+  const formatPrice = (num: number): string => {
+    return num.toLocaleString("en-US", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })
+  }
+
   // Calcular flujo de caja para cada negocio
   const calculateBusinessCashFlow = (): BusinessCashFlow[] => {
-    const businessCashFlows: { [key: string]: BusinessCashFlow } = {}
-
-    // Inicializar flujo de caja para cada negocio
+    const flows: { [key: string]: BusinessCashFlow } = {}
+    // Inicializar para cada negocio de la lista
     businesses.forEach((business) => {
-      businessCashFlows[business.id] = {
+      flows[business.id] = {
         businessId: business.id,
         businessName: business.name,
         sales: 0,
@@ -169,49 +151,40 @@ export default function CashFlowPage() {
 
     // Agregar datos de ventas
     filteredSales.forEach((sale) => {
-      if (businessCashFlows[sale.businessId]) {
-        businessCashFlows[sale.businessId].sales += sale.total
-        businessCashFlows[sale.businessId].salesCount += 1
+      if (flows[sale.businessId]) {
+        flows[sale.businessId].sales += sale.total
+        flows[sale.businessId].salesCount += 1
 
-        // Incrementar el método de pago correspondiente
-        if (sale.paymentMethod === "cash") {
-          businessCashFlows[sale.businessId].paymentMethods.cash += sale.total
-        } else if (sale.paymentMethod === "card") {
-          businessCashFlows[sale.businessId].paymentMethods.card += sale.total
-        } else if (sale.paymentMethod === "transfer") {
-          businessCashFlows[sale.businessId].paymentMethods.transfer += sale.total
-        } else if (sale.paymentMethod === "mercadopago") {
-          businessCashFlows[sale.businessId].paymentMethods.mercadopago += sale.total
-        } else if (sale.paymentMethod === "rappi") {
-          businessCashFlows[sale.businessId].paymentMethods.rappi += sale.total
+        // Sumar según el método de pago
+        if (sale.paymentMethod in flows[sale.businessId].paymentMethods) {
+          flows[sale.businessId].paymentMethods[sale.paymentMethod] += sale.total
         }
       }
     })
 
     // Agregar datos de gastos
     filteredExpenses.forEach((expense) => {
-      if (businessCashFlows[expense.businessId]) {
-        businessCashFlows[expense.businessId].expenses += expense.amount
-        businessCashFlows[businessCashFlows[expense.businessId].businessId].expensesCount += 1
+      if (flows[expense.businessId]) {
+        flows[expense.businessId].expenses += expense.amount
+        flows[expense.businessId].expensesCount += 1
       }
     })
 
-    // Calcular total neto
-    Object.values(businessCashFlows).forEach((flow) => {
+    // Calcular total neto para cada negocio
+    Object.values(flows).forEach((flow) => {
       flow.netTotal = flow.sales - flow.expenses
     })
 
-    // Filtrar por negocio seleccionado si es necesario
+    // Si se ha filtrado por negocio, devolver solo ese flujo
     if (selectedBusinessId !== "all") {
-      return Object.values(businessCashFlows).filter((flow) => flow.businessId === selectedBusinessId)
+      return Object.values(flows).filter((flow) => flow.businessId === selectedBusinessId)
     }
-
-    return Object.values(businessCashFlows)
+    return Object.values(flows)
   }
 
   const businessCashFlows = calculateBusinessCashFlow()
 
-  // Calcular totales
+  // Calcular totales globales
   const totalSales = businessCashFlows.reduce((sum, flow) => sum + flow.sales, 0)
   const totalExpenses = businessCashFlows.reduce((sum, flow) => sum + flow.expenses, 0)
   const totalNet = totalSales - totalExpenses
@@ -238,7 +211,9 @@ export default function CashFlowPage() {
       <div className="flex justify-center items-center h-64">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-sky-600 mx-auto"></div>
-          <p className="mt-4 text-slate-600 dark:text-slate-400">Cargando datos de flujo de caja...</p>
+          <p className="mt-4 text-slate-600 dark:text-slate-400">
+            Cargando datos de flujo de caja...
+          </p>
         </div>
       </div>
     )
@@ -248,7 +223,9 @@ export default function CashFlowPage() {
     <div className="space-y-6">
       <div>
         <h1 className="app-title">Flujo de Caja</h1>
-        <p className="text-slate-600 dark:text-slate-400">Monitorea el flujo de caja de todos los negocios</p>
+        <p className="text-slate-600 dark:text-slate-400">
+          Monitorea el flujo de caja de todos los negocios
+        </p>
       </div>
 
       {/* Filtros */}
@@ -318,8 +295,14 @@ export default function CashFlowPage() {
         </div>
         <div className="mt-4 pt-4 border-t border-slate-200 dark:border-slate-700">
           <div className="text-sm text-slate-600 dark:text-slate-400">
-            Mostrando datos desde <span className="font-medium">{selectedDateRange.start.toLocaleDateString()}</span>{" "}
-            hasta <span className="font-medium">{selectedDateRange.end.toLocaleDateString()}</span>
+            Mostrando datos desde{" "}
+            <span className="font-medium">
+              {selectedDateRange.start.toLocaleDateString()}
+            </span>{" "}
+            hasta{" "}
+            <span className="font-medium">
+              {selectedDateRange.end.toLocaleDateString()}
+            </span>
           </div>
         </div>
       </div>
@@ -330,7 +313,9 @@ export default function CashFlowPage() {
           <div className="flex justify-between items-start">
             <div>
               <p className="app-stat-title">Ventas Totales</p>
-              <p className="app-stat-value text-green-600 dark:text-green-400">${totalSales.toFixed(2)}</p>
+              <p className="app-stat-value text-green-600 dark:text-green-400">
+                ${formatPrice(totalSales)}
+              </p>
             </div>
             <div className="bg-green-100 dark:bg-green-900/30 p-3 rounded-full">
               <TrendingUp className="h-6 w-6 text-green-600 dark:text-green-400" />
@@ -343,7 +328,9 @@ export default function CashFlowPage() {
           <div className="flex justify-between items-start">
             <div>
               <p className="app-stat-title">Gastos Totales</p>
-              <p className="app-stat-value text-red-600 dark:text-red-400">${totalExpenses.toFixed(2)}</p>
+              <p className="app-stat-value text-red-600 dark:text-red-400">
+                ${formatPrice(totalExpenses)}
+              </p>
             </div>
             <div className="bg-red-100 dark:bg-red-900/30 p-3 rounded-full">
               <TrendingDown className="h-6 w-6 text-red-600 dark:text-red-400" />
@@ -361,7 +348,7 @@ export default function CashFlowPage() {
                   totalNet >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"
                 }`}
               >
-                ${totalNet.toFixed(2)}
+                ${formatPrice(totalNet)}
               </p>
             </div>
             <div
@@ -376,7 +363,9 @@ export default function CashFlowPage() {
               />
             </div>
           </div>
-          <p className="app-stat-description">{totalNet >= 0 ? "Ganancia" : "Pérdida"} para el período seleccionado</p>
+          <p className="app-stat-description">
+            {totalNet >= 0 ? "Ganancia" : "Pérdida"} para el período seleccionado
+          </p>
         </div>
       </div>
 
@@ -384,46 +373,46 @@ export default function CashFlowPage() {
       <div className="app-card">
         <h2 className="app-subtitle mb-4">Desglose por Métodos de Pago</h2>
         <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-          <div className="payment-method-card payment-method-cash">
+          <div className="payment-method-card">
             <p className="text-sm text-slate-600 dark:text-slate-400">Efectivo</p>
             <p className="text-2xl font-bold text-green-600 dark:text-green-400">
-              ${totalPaymentMethods.cash.toFixed(2)}
+              ${formatPrice(totalPaymentMethods.cash)}
             </p>
             <p className="text-sm text-slate-500 dark:text-slate-500">
               {((totalPaymentMethods.cash / totalSales) * 100 || 0).toFixed(1)}% del total
             </p>
           </div>
-          <div className="payment-method-card payment-method-card">
+          <div className="payment-method-card">
             <p className="text-sm text-slate-600 dark:text-slate-400">Tarjetas</p>
             <p className="text-2xl font-bold text-blue-600 dark:text-blue-400">
-              ${totalPaymentMethods.card.toFixed(2)}
+              ${formatPrice(totalPaymentMethods.card)}
             </p>
             <p className="text-sm text-slate-500 dark:text-slate-500">
               {((totalPaymentMethods.card / totalSales) * 100 || 0).toFixed(1)}% del total
             </p>
           </div>
-          <div className="payment-method-card payment-method-transfer">
+          <div className="payment-method-card">
             <p className="text-sm text-slate-600 dark:text-slate-400">Transferencia</p>
             <p className="text-2xl font-bold text-purple-600 dark:text-purple-400">
-              ${totalPaymentMethods.transfer.toFixed(2)}
+              ${formatPrice(totalPaymentMethods.transfer)}
             </p>
             <p className="text-sm text-slate-500 dark:text-slate-500">
               {((totalPaymentMethods.transfer / totalSales) * 100 || 0).toFixed(1)}% del total
             </p>
           </div>
-          <div className="payment-method-card payment-method-mercadopago">
+          <div className="payment-method-card">
             <p className="text-sm text-slate-600 dark:text-slate-400">Mercadopago</p>
             <p className="text-2xl font-bold text-sky-600 dark:text-sky-400">
-              ${totalPaymentMethods.mercadopago.toFixed(2)}
+              ${formatPrice(totalPaymentMethods.mercadopago)}
             </p>
             <p className="text-sm text-slate-500 dark:text-slate-500">
               {((totalPaymentMethods.mercadopago / totalSales) * 100 || 0).toFixed(1)}% del total
             </p>
           </div>
-          <div className="payment-method-card payment-method-rappi">
+          <div className="payment-method-card">
             <p className="text-sm text-slate-600 dark:text-slate-400">Rappi</p>
             <p className="text-2xl font-bold text-orange-600 dark:text-orange-400">
-              ${totalPaymentMethods.rappi.toFixed(2)}
+              ${formatPrice(totalPaymentMethods.rappi)}
             </p>
             <p className="text-sm text-slate-500 dark:text-slate-500">
               {((totalPaymentMethods.rappi / totalSales) * 100 || 0).toFixed(1)}% del total
@@ -451,21 +440,25 @@ export default function CashFlowPage() {
                   <tr className="table-row">
                     <td className="table-cell font-medium">{flow.businessName}</td>
                     <td className="table-cell text-green-600 dark:text-green-400">
-                      ${flow.sales.toFixed(2)}
-                      <div className="text-xs text-slate-500 dark:text-slate-400">{flow.salesCount} transacciones</div>
+                      ${formatPrice(flow.sales)}
+                      <div className="text-xs text-slate-500 dark:text-slate-400">
+                        {flow.salesCount} transacciones
+                      </div>
                     </td>
                     <td className="table-cell text-red-600 dark:text-red-400">
-                      ${flow.expenses.toFixed(2)}
+                      ${formatPrice(flow.expenses)}
                       <div className="text-xs text-slate-500 dark:text-slate-400">
                         {flow.expensesCount} transacciones
                       </div>
                     </td>
                     <td
                       className={`table-cell font-medium ${
-                        flow.netTotal >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"
+                        flow.netTotal >= 0
+                          ? "text-green-600 dark:text-green-400"
+                          : "text-red-600 dark:text-red-400"
                       }`}
                     >
-                      ${flow.netTotal.toFixed(2)}
+                      ${formatPrice(flow.netTotal)}
                     </td>
                     <td className="table-cell">
                       <button
@@ -488,12 +481,14 @@ export default function CashFlowPage() {
                     <tr>
                       <td colSpan={5} className="p-0 border-b border-slate-200 dark:border-slate-700">
                         <div className="bg-slate-50 dark:bg-slate-800/50 p-4">
-                          <h3 className="text-sm font-semibold mb-2">Desglose por Métodos de Pago</h3>
+                          <h3 className="text-sm font-semibold mb-2">
+                            Desglose por Métodos de Pago
+                          </h3>
                           <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-4">
                             <div className="bg-white dark:bg-slate-800 p-3 rounded-md shadow-sm">
                               <p className="text-xs text-slate-500 dark:text-slate-400">Efectivo</p>
                               <p className="text-lg font-semibold text-green-600 dark:text-green-400">
-                                ${flow.paymentMethods.cash.toFixed(2)}
+                                ${formatPrice(flow.paymentMethods.cash)}
                               </p>
                               <p className="text-xs text-slate-500 dark:text-slate-500">
                                 {((flow.paymentMethods.cash / flow.sales) * 100 || 0).toFixed(1)}% de ventas
@@ -502,7 +497,7 @@ export default function CashFlowPage() {
                             <div className="bg-white dark:bg-slate-800 p-3 rounded-md shadow-sm">
                               <p className="text-xs text-slate-500 dark:text-slate-400">Tarjetas</p>
                               <p className="text-lg font-semibold text-blue-600 dark:text-blue-400">
-                                ${flow.paymentMethods.card.toFixed(2)}
+                                ${formatPrice(flow.paymentMethods.card)}
                               </p>
                               <p className="text-xs text-slate-500 dark:text-slate-500">
                                 {((flow.paymentMethods.card / flow.sales) * 100 || 0).toFixed(1)}% de ventas
@@ -511,7 +506,7 @@ export default function CashFlowPage() {
                             <div className="bg-white dark:bg-slate-800 p-3 rounded-md shadow-sm">
                               <p className="text-xs text-slate-500 dark:text-slate-400">Transferencia</p>
                               <p className="text-lg font-semibold text-purple-600 dark:text-purple-400">
-                                ${flow.paymentMethods.transfer.toFixed(2)}
+                                ${formatPrice(flow.paymentMethods.transfer)}
                               </p>
                               <p className="text-xs text-slate-500 dark:text-slate-500">
                                 {((flow.paymentMethods.transfer / flow.sales) * 100 || 0).toFixed(1)}% de ventas
@@ -520,7 +515,7 @@ export default function CashFlowPage() {
                             <div className="bg-white dark:bg-slate-800 p-3 rounded-md shadow-sm">
                               <p className="text-xs text-slate-500 dark:text-slate-400">Mercadopago</p>
                               <p className="text-lg font-semibold text-sky-600 dark:text-sky-400">
-                                ${flow.paymentMethods.mercadopago.toFixed(2)}
+                                ${formatPrice(flow.paymentMethods.mercadopago)}
                               </p>
                               <p className="text-xs text-slate-500 dark:text-slate-500">
                                 {((flow.paymentMethods.mercadopago / flow.sales) * 100 || 0).toFixed(1)}% de ventas
@@ -529,7 +524,7 @@ export default function CashFlowPage() {
                             <div className="bg-white dark:bg-slate-800 p-3 rounded-md shadow-sm">
                               <p className="text-xs text-slate-500 dark:text-slate-400">Rappi</p>
                               <p className="text-lg font-semibold text-orange-600 dark:text-orange-400">
-                                ${flow.paymentMethods.rappi.toFixed(2)}
+                                ${formatPrice(flow.paymentMethods.rappi)}
                               </p>
                               <p className="text-xs text-slate-500 dark:text-slate-500">
                                 {((flow.paymentMethods.rappi / flow.sales) * 100 || 0).toFixed(1)}% de ventas
@@ -553,7 +548,7 @@ export default function CashFlowPage() {
                                         {new Date(sale.timestamp).toLocaleDateString()}
                                       </p>
                                       <p className="text-sm font-medium text-green-600 dark:text-green-400">
-                                        ${sale.total.toFixed(2)}
+                                        ${formatPrice(sale.total)}
                                       </p>
                                     </div>
                                     <p className="text-xs text-slate-500 dark:text-slate-400">
@@ -582,7 +577,7 @@ export default function CashFlowPage() {
                                         {new Date(expense.date).toLocaleDateString()}
                                       </p>
                                       <p className="text-sm font-medium text-red-600 dark:text-red-400">
-                                        ${expense.amount.toFixed(2)}
+                                        ${formatPrice(expense.amount)}
                                       </p>
                                     </div>
                                     <p className="text-xs text-slate-500 dark:text-slate-400">
@@ -591,8 +586,7 @@ export default function CashFlowPage() {
                                     </p>
                                   </div>
                                 ))}
-                              {filteredExpenses.filter((expense) => expense.businessId === flow.businessId).length ===
-                                0 && (
+                              {filteredExpenses.filter((expense) => expense.businessId === flow.businessId).length === 0 && (
                                 <p className="text-sm text-slate-500 dark:text-slate-400">
                                   No hay gastos en este período
                                 </p>
@@ -619,4 +613,3 @@ export default function CashFlowPage() {
     </div>
   )
 }
-

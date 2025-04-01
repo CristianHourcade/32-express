@@ -24,24 +24,24 @@ export class ProductService extends SupabaseService<Product> {
     const productsWithStats = await Promise.all(
       products.map(async (product) => {
         // Obtener items de ventas para este producto
-        const { data: saleItems, error: saleItemsError } = await supabase
-          .from("sale_items")
-          .select("quantity, price")
-          .eq("product_id", product.id)
-          .limit(1000) // Aseguramos que también se obtengan hasta 1000 items de venta
+        // const { data: saleItems, error: saleItemsError } = await supabase
+        //   .from("sale_items")
+        //   .select("quantity, price")
+        //   .eq("product_id", product.id)
+        //   .limit(1000) // Aseguramos que también se obtengan hasta 1000 items de venta
 
-        if (saleItemsError) {
-          console.error("Error fetching sale items:", saleItemsError)
-        }
+        // if (saleItemsError) {
+        //   console.error("Error fetching sale items:", saleItemsError)
+        // }
 
         // Calcular estadísticas
         let salesCount = 0
         let totalRevenue = 0
 
-        saleItems?.forEach((item) => {
-          salesCount += item.quantity
-          totalRevenue += item.quantity * item.price
-        })
+        // saleItems?.forEach((item) => {
+        //   salesCount += item.quantity
+        //   totalRevenue += item.quantity * item.price
+        // })
 
         // Construir objeto de producto con estadísticas
         return {

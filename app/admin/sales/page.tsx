@@ -1,7 +1,6 @@
 "use client"
 
 import type React from "react"
-
 import { useEffect, useState } from "react"
 import { useDispatch, useSelector } from "react-redux"
 import type { AppDispatch, RootState } from "@/lib/redux/store"
@@ -21,12 +20,19 @@ export default function SalesPage() {
   const [selectedBusinessId, setSelectedBusinessId] = useState<string>("all")
   const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false)
   const [selectedSale, setSelectedSale] = useState<Sale | null>(null)
-  const [searchTerm, setSearchTerm] = useState<string>("")
 
-  const [dateRange, setDateRange] = useState<{ start: string; end: string }>({
-    start: new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split("T")[0],
-    end: new Date().toISOString().split("T")[0],
+  // Estado para el rango de fechas
+  const [dateRange, setDateRange] = useState<{ start: string; end: string }>(() => {
+    const today = new Date()
+    return {
+      start: new Date(today.getFullYear(), today.getMonth(), 1)
+        .toISOString()
+        .split("T")[0],
+      end: today.toISOString().split("T")[0],
+    }
   })
+  // Estado aplicado cuando se pulsa el botón "Buscar"
+  const [appliedDateRange, setAppliedDateRange] = useState(dateRange)
 
   // Cargar datos al montar el componente
   useEffect(() => {
@@ -68,28 +74,23 @@ export default function SalesPage() {
     setIsDetailsModalOpen(true)
   }
 
+  // Filtrar las ventas usando el rango de fechas aplicado
   const filteredSales = sales.filter((sale) => {
-    const matchesBusiness = selectedBusinessId === "all" || sale.businessId === selectedBusinessId
+    const matchesBusiness =
+      selectedBusinessId === "all" || sale.businessId === selectedBusinessId
     const saleDate = new Date(sale.timestamp)
-    const startDate = new Date(dateRange.start)
-    const endDate = new Date(dateRange.end)
-    endDate.setHours(23, 59, 59, 999) // Establecer al final del día
+    // Convertir start y end agregando hora explícita para incluir todo el día
+    const startDate = new Date(appliedDateRange.start + "T00:00:00")
+    const endDate = new Date(appliedDateRange.end + "T23:59:59.999")
     const matchesDate = saleDate >= startDate && saleDate <= endDate
-
-    // Búsqueda por texto
-    const matchesSearch =
-      searchTerm === "" ||
-      sale.businessName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      sale.employeeName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      sale.items.some((item) => item.productName.toLowerCase().includes(searchTerm.toLowerCase()))
-
-    return matchesBusiness && matchesDate && matchesSearch
+    return matchesBusiness && matchesDate
   })
 
   // Calcular el total de ventas filtradas
   const totalSalesAmount = filteredSales.reduce((sum, sale) => sum + sale.total, 0)
 
-  const isLoading = salesLoading || businessesLoading || productsLoading || employeesLoading
+  const isLoading =
+    salesLoading || businessesLoading || productsLoading || employeesLoading
 
   // Función para traducir el método de pago
   const translatePaymentMethod = (method: string) => {
@@ -100,7 +101,6 @@ export default function SalesPage() {
       mercadopago: "Mercadopago",
       rappi: "Rappi",
     }
-
     return translations[method] || method
   }
 
@@ -113,8 +113,15 @@ export default function SalesPage() {
       mercadopago: "bg-sky-100 text-sky-800 dark:bg-sky-900 dark:text-sky-300",
       rappi: "bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-300",
     }
-
     return classes[method] || "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300"
+  }
+
+  // Función para formatear precios (ej.: 10,000.00)
+  const formatPrice = (num: number): string => {
+    return num.toLocaleString("en-US", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })
   }
 
   if (isLoading) {
@@ -122,7 +129,9 @@ export default function SalesPage() {
       <div className="flex justify-center items-center h-64">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-sky-600 mx-auto"></div>
-          <p className="mt-4 text-slate-600 dark:text-slate-400">Cargando datos de ventas...</p>
+          <p className="mt-4 text-slate-600 dark:text-slate-400">
+            Cargando datos de ventas...
+          </p>
         </div>
       </div>
     )
@@ -132,7 +141,11 @@ export default function SalesPage() {
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <h1 className="app-title">Ventas</h1>
-        <button onClick={refreshSales} className="btn btn-primary flex items-center gap-2" disabled={salesLoading}>
+        <button
+          onClick={refreshSales}
+          className="btn btn-primary flex items-center gap-2"
+          disabled={salesLoading}
+        >
           <RefreshCw className={`w-4 h-4 ${salesLoading ? "animate-spin" : ""}`} />
           Actualizar
         </button>
@@ -147,7 +160,10 @@ export default function SalesPage() {
       <div className="app-card">
         <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-6 gap-4">
           <div className="flex items-center">
-            <label htmlFor="businessFilter" className="mr-2 text-sm font-medium">
+            <label
+              htmlFor="businessFilter"
+              className="mr-2 text-sm font-medium"
+            >
               Filtrar por Negocio:
             </label>
             <select
@@ -171,57 +187,51 @@ export default function SalesPage() {
               <input
                 type="date"
                 value={dateRange.start}
-                onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })}
+                onChange={(e) =>
+                  setDateRange({ ...dateRange, start: e.target.value })
+                }
                 className="input py-1 px-2 text-sm"
               />
               <span className="self-center">a</span>
               <input
                 type="date"
                 value={dateRange.end}
-                onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })}
+                onChange={(e) =>
+                  setDateRange({ ...dateRange, end: e.target.value })
+                }
                 className="input py-1 px-2 text-sm"
               />
               <button
-                onClick={() =>
-                  setDateRange({
-                    start: "2000-01-01",
-                    end: new Date().toISOString().split("T")[0],
-                  })
-                }
+                onClick={() => setAppliedDateRange(dateRange)}
                 className="btn btn-secondary py-1 px-3 text-sm"
-                title="Mostrar todas las ventas históricas"
+                title="Buscar ventas por fecha"
               >
-                Ver historial completo
+                Buscar
               </button>
             </div>
-          </div>
-
-          <div className="relative max-w-xs">
-            <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
-              <Search className="w-4 h-4 text-slate-500 dark:text-slate-400" />
-            </div>
-            <input
-              type="text"
-              className="input pl-10"
-              placeholder="Buscar ventas..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-            />
           </div>
         </div>
 
         <div className="flex justify-between items-center mb-4 bg-slate-50 dark:bg-slate-800 p-4 rounded-lg border border-slate-200 dark:border-slate-700">
           <div className="text-slate-600 dark:text-slate-400">
-            <span className="font-medium">Total de ventas mostradas:</span> {filteredSales.length}{" "}
+            <span className="font-medium">Total de ventas mostradas:</span>{" "}
+            {filteredSales.length}{" "}
             {filteredSales.length === 1 ? "venta" : "ventas"}
           </div>
-          <div className="text-lg font-bold text-green-600 dark:text-green-400">${totalSalesAmount.toFixed(2)}</div>
+          <div className="text-lg font-bold text-green-600 dark:text-green-400">
+            ${formatPrice(totalSalesAmount)}
+          </div>
         </div>
 
         {sales.length === 0 ? (
           <div className="text-center py-12">
-            <p className="text-slate-600 dark:text-slate-400 mb-4">No se encontraron ventas en la base de datos.</p>
-            <button onClick={refreshSales} className="btn btn-primary flex items-center gap-2 mx-auto">
+            <p className="text-slate-600 dark:text-slate-400 mb-4">
+              No se encontraron ventas en la base de datos.
+            </p>
+            <button
+              onClick={refreshSales}
+              className="btn btn-primary flex items-center gap-2 mx-auto"
+            >
               <RefreshCw className="w-4 h-4" />
               Intentar cargar nuevamente
             </button>
@@ -251,12 +261,20 @@ export default function SalesPage() {
                   <tr key={sale.id} className="table-row">
                     <td className="table-cell">{sale.businessName}</td>
                     <td className="table-cell">{sale.employeeName}</td>
-                    <td className="table-cell">{new Date(sale.timestamp).toLocaleString()}</td>
-                    <td className="table-cell">{sale.items.length} artículos</td>
-                    <td className="table-cell font-medium">${sale.total.toFixed(2)}</td>
+                    <td className="table-cell">
+                      {new Date(sale.timestamp).toLocaleString()}
+                    </td>
+                    <td className="table-cell">
+                      {sale.items.length} artículos
+                    </td>
+                    <td className="table-cell font-medium">
+                      ${formatPrice(sale.total)}
+                    </td>
                     <td className="table-cell">
                       <span
-                        className={`px-2 py-1 rounded text-xs font-medium ${getPaymentMethodClass(sale.paymentMethod)}`}
+                        className={`px-2 py-1 rounded text-xs font-medium ${getPaymentMethodClass(
+                          sale.paymentMethod
+                        )}`}
                       >
                         {translatePaymentMethod(sale.paymentMethod)}
                       </span>
@@ -310,11 +328,13 @@ export default function SalesPage() {
                 </div>
                 <div>
                   <p className="text-sm text-slate-500 dark:text-slate-400">Método de Pago</p>
-                  <p className="font-medium">{translatePaymentMethod(selectedSale.paymentMethod)}</p>
+                  <p className="font-medium">
+                    {translatePaymentMethod(selectedSale.paymentMethod)}
+                  </p>
                 </div>
                 <div>
                   <p className="text-sm text-slate-500 dark:text-slate-400">Total</p>
-                  <p className="font-medium">${selectedSale.total.toFixed(2)}</p>
+                  <p className="font-medium">${formatPrice(selectedSale.total)}</p>
                 </div>
               </div>
 
@@ -334,20 +354,72 @@ export default function SalesPage() {
                       <tr key={index} className="table-row">
                         <td className="table-cell font-medium">{item.productName}</td>
                         <td className="table-cell">{item.quantity}</td>
-                        <td className="table-cell">${item.price.toFixed(2)}</td>
-                        <td className="table-cell">${item.total.toFixed(2)}</td>
+                        <td className="table-cell">${formatPrice(item.price)}</td>
+                        <td className="table-cell">${formatPrice(item.total)}</td>
                       </tr>
                     ))}
                   </tbody>
                   <tfoot>
                     <tr className="bg-slate-50 dark:bg-slate-700">
-                      <td colSpan={3} className="px-6 py-3 text-right font-medium">
+                      <td
+                        colSpan={3}
+                        className="px-6 py-3 text-right font-medium"
+                      >
                         Total:
                       </td>
-                      <td className="px-6 py-3 font-medium">${selectedSale.total.toFixed(2)}</td>
+                      <td className="px-6 py-3 font-medium">
+                        ${formatPrice(selectedSale.total)}
+                      </td>
                     </tr>
                   </tfoot>
                 </table>
+              </div>
+
+              {/* Sección de Métodos de Pago */}
+              <div className="mb-6">
+                <h3 className="text-lg font-semibold mb-2">Métodos de Pago</h3>
+                <div className="grid grid-cols-5 gap-4">
+                  <div className="bg-green-100 dark:bg-green-900 p-3 rounded">
+                    <p className="text-sm text-slate-500 dark:text-slate-400">
+                      Efectivo
+                    </p>
+                    <p className="font-medium">
+                      ${formatPrice((selectedSale && paymentTotals["cash"]) || 0)}
+                    </p>
+                  </div>
+                  <div className="bg-blue-100 dark:bg-blue-900 p-3 rounded">
+                    <p className="text-sm text-slate-500 dark:text-slate-400">
+                      Tarjeta
+                    </p>
+                    <p className="font-medium">
+                      ${formatPrice((selectedSale && paymentTotals["card"]) || 0)}
+                    </p>
+                  </div>
+                  <div className="bg-purple-100 dark:bg-purple-900 p-3 rounded">
+                    <p className="text-sm text-slate-500 dark:text-slate-400">
+                      Transferencia
+                    </p>
+                    <p className="font-medium">
+                      ${formatPrice((selectedSale && paymentTotals["transfer"]) || 0)}
+                    </p>
+                  </div>
+                  <div className="bg-sky-100 dark:bg-sky-900 p-3 rounded">
+                    <p className="text-sm text-slate-500 dark:text-slate-400">
+                      Mercadopago
+                    </p>
+                    <p className="font-medium">
+                      ${formatPrice((selectedSale && paymentTotals["mercadopago"]) || 0)}
+                    </p>
+                  </div>
+                  <div className="bg-orange-100 dark:bg-orange-900 p-3 rounded">
+                    <p className="text-sm text-slate-500 dark:text-slate-400">
+                      Rappi
+                    </p>
+                    <p className="font-medium">
+                      ${formatPrice((selectedSale && paymentTotals["rappi"]) || 0)}
+                    </p>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -356,4 +428,3 @@ export default function SalesPage() {
     </div>
   )
 }
-

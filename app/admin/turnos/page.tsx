@@ -1,13 +1,12 @@
 "use client"
 
 import type React from "react"
-
 import { useEffect, useState } from "react"
 import { useDispatch, useSelector } from "react-redux"
 import type { AppDispatch, RootState } from "@/lib/redux/store"
 import { getShifts, type Shift } from "@/lib/redux/slices/shiftSlice"
 import { getEmployees } from "@/lib/redux/slices/employeeSlice"
-import { fetchBusinesses } from "@/lib/redux/slices/businessSlice" // Changed from getBusinesses
+import { fetchBusinesses } from "@/lib/redux/slices/businessSlice"
 import { getSales } from "@/lib/redux/slices/salesSlice"
 import { FileText, Search } from "lucide-react"
 
@@ -25,7 +24,7 @@ export default function ShiftsPage() {
   useEffect(() => {
     dispatch(getShifts())
     dispatch(getEmployees())
-    dispatch(fetchBusinesses()) // Changed from getBusinesses
+    dispatch(fetchBusinesses())
     dispatch(getSales())
   }, [dispatch])
 
@@ -39,14 +38,16 @@ export default function ShiftsPage() {
   }
 
   const filteredShifts =
-    selectedBusinessId === "all" ? shifts : shifts.filter((shift) => shift.businessId === selectedBusinessId)
+    selectedBusinessId === "all"
+      ? shifts
+      : shifts.filter((shift) => shift.businessId === selectedBusinessId)
 
   // Ordenar turnos por hora de inicio (más recientes primero)
   const sortedShifts = [...filteredShifts].sort(
-    (a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime(),
+    (a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime()
   )
 
-  // Obtener ventas para un turno específico
+  // Función para obtener las ventas de un turno específico
   const getShiftSales = (shiftId: string) => {
     return sales.filter((sale) => sale.shiftId === shiftId)
   }
@@ -75,6 +76,14 @@ export default function ShiftsPage() {
     return classes[method] || "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300"
   }
 
+  // Función para formatear precios
+  const formatPrice = (num: number): string => {
+    return num.toLocaleString("en-US", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })
+  }
+
   const isLoading = shiftsLoading || employeesLoading || businessesLoading || salesLoading
 
   if (isLoading) {
@@ -82,10 +91,23 @@ export default function ShiftsPage() {
       <div className="flex justify-center items-center h-64">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-700 mx-auto"></div>
-          <p className="mt-4 text-gray-600 dark:text-gray-400">Cargando datos de turnos...</p>
+          <p className="mt-4 text-gray-600 dark:text-gray-400">
+            Cargando datos de turnos...
+          </p>
         </div>
       </div>
     )
+  }
+
+  // Dentro del modal, recalculamos los totales por método de pago para el turno seleccionado
+  let paymentTotals: Record<string, number> = {}
+  if (selectedShift) {
+    const shiftSales = getShiftSales(selectedShift.id)
+    paymentTotals = shiftSales.reduce((acc, sale) => {
+      const method = sale.paymentMethod
+      acc[method] = (acc[method] || 0) + sale.total
+      return acc
+    }, {} as Record<string, number>)
   }
 
   return (
@@ -117,7 +139,11 @@ export default function ShiftsPage() {
             <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
               <Search className="w-4 h-4 text-gray-500 dark:text-gray-400" />
             </div>
-            <input type="text" className="input pl-10" placeholder="Buscar turnos..." />
+            <input
+              type="text"
+              className="input pl-10"
+              placeholder="Buscar turnos..."
+            />
           </div>
         </div>
 
@@ -139,13 +165,14 @@ export default function ShiftsPage() {
               {sortedShifts.map((shift) => {
                 const shiftSales = getShiftSales(shift.id)
                 const totalAmount = shiftSales.reduce((sum, sale) => sum + sale.total, 0)
-
                 return (
                   <tr key={shift.id} className="table-row">
                     <td className="table-cell font-medium">{shift.employeeName}</td>
                     <td className="table-cell">{shift.businessName}</td>
                     <td className="table-cell">{new Date(shift.startTime).toLocaleString()}</td>
-                    <td className="table-cell">{shift.endTime ? new Date(shift.endTime).toLocaleString() : "-"}</td>
+                    <td className="table-cell">
+                      {shift.endTime ? new Date(shift.endTime).toLocaleString() : "-"}
+                    </td>
                     <td className="table-cell">
                       <span
                         className={`px-2 py-1 rounded text-xs font-medium ${
@@ -158,7 +185,9 @@ export default function ShiftsPage() {
                       </span>
                     </td>
                     <td className="table-cell">{shift.sales}</td>
-                    <td className="table-cell font-medium">${(totalAmount || 0).toFixed(2)}</td>
+                    <td className="table-cell font-medium">
+                      ${formatPrice(totalAmount || 0)}
+                    </td>
                     <td className="table-cell">
                       <button
                         onClick={() => openDetailsModal(shift)}
@@ -205,13 +234,21 @@ export default function ShiftsPage() {
             <div className="p-6">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
                 <div>
-                  <p className="text-sm text-gray-500 dark:text-gray-400">Hora de Inicio</p>
-                  <p className="font-medium">{new Date(selectedShift.startTime).toLocaleString()}</p>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">
+                    Hora de Inicio
+                  </p>
+                  <p className="font-medium">
+                    {new Date(selectedShift.startTime).toLocaleString()}
+                  </p>
                 </div>
                 <div>
-                  <p className="text-sm text-gray-500 dark:text-gray-400">Hora de Fin</p>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">
+                    Hora de Fin
+                  </p>
                   <p className="font-medium">
-                    {selectedShift.endTime ? new Date(selectedShift.endTime).toLocaleString() : "Aún activo"}
+                    {selectedShift.endTime
+                      ? new Date(selectedShift.endTime).toLocaleString()
+                      : "Aún activo"}
                   </p>
                 </div>
                 <div>
@@ -229,7 +266,9 @@ export default function ShiftsPage() {
                   </p>
                 </div>
                 <div>
-                  <p className="text-sm text-gray-500 dark:text-gray-400">Total de Ventas</p>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">
+                    Total de Ventas
+                  </p>
                   <p className="font-medium">{selectedShift.sales}</p>
                 </div>
               </div>
@@ -238,29 +277,51 @@ export default function ShiftsPage() {
                 <h3 className="text-lg font-semibold mb-2">Métodos de Pago</h3>
                 <div className="grid grid-cols-5 gap-4">
                   <div className="bg-green-100 dark:bg-green-900 p-3 rounded">
-                    <p className="text-sm text-gray-500 dark:text-gray-400">Efectivo</p>
-                    <p className="font-medium">${selectedShift.paymentMethods.cash.toFixed(2)}</p>
+                    <p className="text-sm text-gray-500 dark:text-gray-400">
+                      Efectivo
+                    </p>
+                    <p className="font-medium">
+                      ${formatPrice(paymentTotals["cash"] || 0)}
+                    </p>
                   </div>
                   <div className="bg-blue-100 dark:bg-blue-900 p-3 rounded">
-                    <p className="text-sm text-gray-500 dark:text-gray-400">Tarjeta</p>
-                    <p className="font-medium">${selectedShift.paymentMethods.card.toFixed(2)}</p>
+                    <p className="text-sm text-gray-500 dark:text-gray-400">
+                      Tarjeta
+                    </p>
+                    <p className="font-medium">
+                      ${formatPrice(paymentTotals["card"] || 0)}
+                    </p>
                   </div>
                   <div className="bg-purple-100 dark:bg-purple-900 p-3 rounded">
-                    <p className="text-sm text-gray-500 dark:text-gray-400">Transferencia</p>
-                    <p className="font-medium">${selectedShift.paymentMethods.transfer.toFixed(2)}</p>
+                    <p className="text-sm text-gray-500 dark:text-gray-400">
+                      Transferencia
+                    </p>
+                    <p className="font-medium">
+                      ${formatPrice(paymentTotals["transfer"] || 0)}
+                    </p>
                   </div>
                   <div className="bg-sky-100 dark:bg-sky-900 p-3 rounded">
-                    <p className="text-sm text-gray-500 dark:text-gray-400">Mercadopago</p>
-                    <p className="font-medium">$0.00</p>
+                    <p className="text-sm text-gray-500 dark:text-gray-400">
+                      Mercadopago
+                    </p>
+                    <p className="font-medium">
+                      ${formatPrice(paymentTotals["mercadopago"] || 0)}
+                    </p>
                   </div>
                   <div className="bg-orange-100 dark:bg-orange-900 p-3 rounded">
-                    <p className="text-sm text-gray-500 dark:text-gray-400">Rappi</p>
-                    <p className="font-medium">$0.00</p>
+                    <p className="text-sm text-gray-500 dark:text-gray-400">
+                      Rappi
+                    </p>
+                    <p className="font-medium">
+                      ${formatPrice(paymentTotals["rappi"] || 0)}
+                    </p>
                   </div>
                 </div>
               </div>
 
-              <h3 className="text-lg font-semibold mb-3">Ventas Durante Este Turno</h3>
+              <h3 className="text-lg font-semibold mb-3">
+                Ventas Durante Este Turno
+              </h3>
               {getShiftSales(selectedShift.id).length > 0 ? (
                 <div className="table-container">
                   <table className="table">
@@ -275,12 +336,15 @@ export default function ShiftsPage() {
                     <tbody className="table-body">
                       {getShiftSales(selectedShift.id).map((sale) => (
                         <tr key={sale.id} className="table-row">
-                          <td className="table-cell">{new Date(sale.timestamp).toLocaleTimeString()}</td>
+                          <td className="table-cell">
+                            {new Date(sale.timestamp).toLocaleTimeString()}
+                          </td>
                           <td className="table-cell">
                             <div className="space-y-1">
                               {sale.items.map((item, index) => (
                                 <div key={index} className="text-xs">
-                                  {item.quantity}x {item.productName} - ${item.total.toFixed(2)}
+                                  {item.quantity}x {item.productName} - $
+                                  {formatPrice(item.total)}
                                 </div>
                               ))}
                             </div>
@@ -288,20 +352,24 @@ export default function ShiftsPage() {
                           <td className="table-cell">
                             <span
                               className={`px-2 py-1 rounded text-xs font-medium ${getPaymentMethodClass(
-                                sale.paymentMethod,
+                                sale.paymentMethod
                               )}`}
                             >
                               {translatePaymentMethod(sale.paymentMethod)}
                             </span>
                           </td>
-                          <td className="table-cell font-medium">${sale.total.toFixed(2)}</td>
+                          <td className="table-cell font-medium">
+                            ${formatPrice(sale.total)}
+                          </td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
               ) : (
-                <p className="text-gray-500 dark:text-gray-400">No hay ventas registradas durante este turno.</p>
+                <p className="text-gray-500 dark:text-gray-400">
+                  No hay ventas registradas durante este turno.
+                </p>
               )}
             </div>
           </div>
@@ -310,4 +378,3 @@ export default function ShiftsPage() {
     </div>
   )
 }
-

@@ -22,6 +22,7 @@ import {
   UserIcon,
   Building2,
   ClipboardList,
+  BarChart2,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
@@ -35,6 +36,7 @@ const navItems = [
   { name: "Gastos", href: "/admin/gastos", icon: DollarSign },
   { name: "Flujo de Caja", href: "/admin/caja", icon: CreditCard },
   { name: "Actividad", href: "/admin/activity", icon: Activity },
+  { name: "Estadistica", href: "/admin/estadistica", icon: BarChart2 },
 ]
 
 export default function AdminNavbar() {
