@@ -15,18 +15,27 @@ export default function AdminDashboard() {
   const dispatch = useDispatch<AppDispatch>()
   const { businesses, loading: businessesLoading } = useSelector((state: RootState) => state.businesses)
   const { employees, loading: employeesLoading } = useSelector((state: RootState) => state.employees)
+  // Se sigue usando el state global para otros propósitos (productos generales, etc.)
   const { products, loading: productsLoading } = useSelector((state: RootState) => state.products)
   const { shifts, loading: shiftsLoading } = useSelector((state: RootState) => state.shifts)
   const { sales, loading: salesLoading } = useSelector((state: RootState) => state.sales)
   const { expenses, loading: expensesLoading } = useSelector((state: RootState) => state.expenses)
 
-  // Estado para la petición directa a la DB (para usar en Top Productos)
+  // Estado para la petición directa a la DB (Top Productos)
   const [directSales, setDirectSales] = useState<any[]>([])
-  const [directSalesLoading, setDirectSalesLoading] = useState<boolean>(true)
+  const [directSalesLoading, setDirectSalesLoading] = useState<boolean>(false)
+  // Estado para filtrar productos principales por negocio
+  const [selectedBusinessForTopProducts, setSelectedBusinessForTopProducts] = useState<string>("")
+  // Estado para los productos traídos directamente desde la BD según el negocio seleccionado
+  const [dbProducts, setDbProducts] = useState<any[]>([])
+  const [dbProductsLoading, setDbProductsLoading] = useState<boolean>(false)
 
-  // Petición directa a la DB para obtener ventas con sus items
+  // Petición para obtener directSales para el negocio seleccionado
   useEffect(() => {
     const fetchDirectSales = async () => {
+      console.log(selectedBusinessForTopProducts);
+      if (!selectedBusinessForTopProducts) return
+
       setDirectSalesLoading(true)
       const { data, error } = await supabase
         .from("sales")
@@ -37,7 +46,9 @@ export default function AdminDashboard() {
             products(name)
           )
         `)
+        .eq("business_id", selectedBusinessForTopProducts)
         .order("timestamp", { ascending: false })
+        console.log(data);
 
       if (error) {
         console.error("Error fetching direct sales:", error)
@@ -48,16 +59,40 @@ export default function AdminDashboard() {
       setDirectSalesLoading(false)
     }
     fetchDirectSales()
-  }, [])
+  }, [selectedBusinessForTopProducts])
+
+  // Petición para obtener los productos de la BD filtrados por el negocio seleccionado
+  useEffect(() => {
+    const fetchProductsForBusiness = async () => {
+      if (!selectedBusinessForTopProducts) {
+        setDbProducts([])
+        return
+      }
+      setDbProductsLoading(true)
+      const { data, error } = await supabase
+        .from("products")
+        .select("*")
+        .eq("business_id", selectedBusinessForTopProducts)
+
+      if (error) {
+        console.error("Error fetching products:", error)
+        setDbProducts([])
+      } else {
+        setDbProducts(data || [])
+      }
+      setDbProductsLoading(false)
+    }
+    fetchProductsForBusiness()
+  }, [selectedBusinessForTopProducts])
 
   useEffect(() => {
     dispatch(fetchBusinesses())
     dispatch(getEmployees())
     dispatch(getProducts())
     dispatch(getShifts())
-    dispatch(getActiveShifts()) // Obtener turnos activos
-    dispatch(getSales())        // Cargar ventas
-    dispatch(getExpenses())     // Cargar gastos
+    dispatch(getActiveShifts())
+    dispatch(getSales())
+    dispatch(getExpenses())
   }, [dispatch])
 
   // Función para formatear números de precio (ej.: 100,000.00)
@@ -75,8 +110,6 @@ export default function AdminDashboard() {
   // Estados para ordenación en la tabla de Top Productos
   const [sortColumn, setSortColumn] = useState<"salesCount" | "totalRevenue">("salesCount")
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc")
-  // Estado para filtrar productos principales por negocio
-  const [selectedBusinessForTopProducts, setSelectedBusinessForTopProducts] = useState<string>("")
 
   // Arreglo de turnos activos, asegurando que shifts sea un array
   const activeShifts = Array.isArray(shifts)
@@ -84,15 +117,8 @@ export default function AdminDashboard() {
     : []
 
   // ---------------------------------------------------
-  // TOP PRODUCTOS: Usando directSales para agrupar los items
+  // TOP PRODUCTOS: Se agrupan los items usando directSales y dbProducts
   // ---------------------------------------------------
-  // Filtramos las ventas directas por negocio (si se selecciona)
-  const filteredSalesForTopProducts = useMemo(() => {
-    return directSales.filter((sale) => {
-      return selectedBusinessForTopProducts === "" || sale.business_id === selectedBusinessForTopProducts
-    })
-  }, [directSales, selectedBusinessForTopProducts])
-  
   const topProducts = useMemo(() => {
     const productMap = new Map<
       string,
@@ -105,17 +131,17 @@ export default function AdminDashboard() {
         totalRevenue: number
       }
     >()
-  
+    console.log(dbProducts);
+
     // Agrupamos los items de las ventas filtradas
-    for (const sale of filteredSalesForTopProducts) {
-      // Asegurarse de que la venta tenga items en "sale_items"
+    for (const sale of directSales) {
       if (!sale.sale_items) continue
       for (const item of sale.sale_items) {
-        // Buscar el producto para obtener datos adicionales
-        const prod = products.find((p) => p.id === item.product_id)
+        // Buscamos el producto en los productos traídos desde la BD para el negocio seleccionado
+        const prod = dbProducts.find((p) => p.id === item.product_id)
+        console.log("producto", prod, item)
         if (!prod) continue
-  
-        // Clave compuesta "productId-businessId" para agrupar
+
         const key = `${item.product_id}-${prod.businessId}`
         if (!productMap.has(key)) {
           productMap.set(key, {
@@ -128,15 +154,12 @@ export default function AdminDashboard() {
           })
         }
         const data = productMap.get(key)!
-        console.log(`Agrupando item para clave ${key}:`, item)
         data.totalQuantity += item.quantity
         data.totalRevenue += item.total
       }
     }
-  
+
     let arr = Array.from(productMap.values())
-  
-    // Ordenamos según el criterio seleccionado
     arr.sort((a, b) => {
       if (sortColumn === "salesCount") {
         return sortDirection === "asc"
@@ -149,11 +172,9 @@ export default function AdminDashboard() {
       }
       return 0
     })
-  
-    // Limitar el listado a solo 15 items
+
     return arr.slice(0, 15)
-  }, [filteredSalesForTopProducts, products, sortColumn, sortDirection])
-  
+  }, [directSales, dbProducts, sortColumn, sortDirection])
 
   // ---------------------------------------------------
   // NEGOCIOS CON DATOS DEL MES (Ventas, Gastos, Profit, etc.)
@@ -176,7 +197,7 @@ export default function AdminDashboard() {
       }
     >()
 
-    // Inicializar para cada negocio
+    // Inicializamos para cada negocio
     businesses.forEach((business) => {
       businessDataMap.set(business.id, {
         transactions: 0,
@@ -223,7 +244,7 @@ export default function AdminDashboard() {
       }
     })
 
-    // Calcular profit y retornar datos
+    // Calcular profit y retornar datos para cada negocio
     return businesses.map((business) => {
       const data = businessDataMap.get(business.id) || {
         transactions: 0,
@@ -254,7 +275,7 @@ export default function AdminDashboard() {
   const businessesWithMonthlyData = calculateBusinessMonthlyData()
 
   // ---------------------------------------------------
-  // TURNOS ACTIVOS (ejemplo)
+  // TURNOS ACTIVOS
   // ---------------------------------------------------
   const calculateShiftTotals = (shift: any) => {
     const shiftSales = sales.filter((sale) => sale.shiftId === shift.id)
@@ -348,7 +369,7 @@ export default function AdminDashboard() {
     <div className="space-y-6">
       <h1 className="text-2xl font-bold">Dashboard</h1>
 
-      {/* Negocios */}
+      {/* Sección de Negocios */}
       <div>
         <h2 className="text-xl font-semibold mb-4">{monthHeader}</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -415,16 +436,20 @@ export default function AdminDashboard() {
         </div>
       </div>
 
-      {/* Top Productos (Historial de Ventas) */}
+      {/* Sección Top Productos */}
       <div>
         <div className="flex justify-between items-center mb-4">
           <h2 className="text-xl font-semibold">Productos Principales</h2>
           <select
             className="input max-w-xs"
             value={selectedBusinessForTopProducts}
-            onChange={(e) => setSelectedBusinessForTopProducts(e.target.value)}
+            onChange={(e) => {
+              setSelectedBusinessForTopProducts(e.target.value)
+              // Reiniciamos directSales al cambiar la selección si es necesario
+              setDirectSales([])
+            }}
           >
-            <option value="">Todos los negocios</option>
+            <option value="">Selecciona un negocio</option>
             {businesses.map((business) => (
               <option key={business.id} value={business.id}>
                 {business.name}
@@ -432,36 +457,44 @@ export default function AdminDashboard() {
             ))}
           </select>
         </div>
-        <div className="card">
-          <div className="table-container">
-            <table className="table">
-              <thead className="table-header">
-                <tr>
-                  <th className="table-header-cell">Producto</th>
-                  <th className="table-header-cell">Negocio</th>
-                  <SortableHeader column="salesCount" label="Unidades Vendidas" />
-                  <SortableHeader column="totalRevenue" label="Monto Facturado" />
-                </tr>
-              </thead>
-              <tbody className="table-body">
-                {topProducts.map((item, idx) => {
-                  const business = businesses.find((b) => b.id === item.businessId)
-                  return (
-                    <tr key={idx} className="table-row">
-                      <td className="table-cell font-medium">{item.productName}</td>
-                      <td className="table-cell">{business?.name || "Desconocido"}</td>
-                      <td className="table-cell">{item.totalQuantity}</td>
-                      <td className="table-cell">${formatPrice(item.totalRevenue)}</td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
+        {selectedBusinessForTopProducts === "" ? (
+          <p className="text-gray-500 dark:text-gray-400">Por favor, selecciona un negocio para ver los productos principales.</p>
+        ) : directSalesLoading || dbProductsLoading ? (
+          <div className="flex justify-center items-center h-32">
+            <p>Cargando productos...</p>
           </div>
-        </div>
+        ) : (
+          <div className="card">
+            <div className="table-container">
+              <table className="table">
+                <thead className="table-header">
+                  <tr>
+                    <th className="table-header-cell">Producto</th>
+                    <th className="table-header-cell">Negocio</th>
+                    <SortableHeader column="salesCount" label="Unidades Vendidas" />
+                    <SortableHeader column="totalRevenue" label="Monto Facturado" />
+                  </tr>
+                </thead>
+                <tbody className="table-body">
+                  {topProducts.map((item, idx) => {
+                    const business = businesses.find((b) => b.id === item.businessId)
+                    return (
+                      <tr key={idx} className="table-row">
+                        <td className="table-cell font-medium">{item.productName}</td>
+                        <td className="table-cell">{business?.name || "Desconocido"}</td>
+                        <td className="table-cell">{item.totalQuantity}</td>
+                        <td className="table-cell">${formatPrice(item.totalRevenue)}</td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* Turnos Activos */}
+      {/* Sección Turnos Activos */}
       <div>
         <h2 className="text-xl font-semibold mb-4">Turnos Activos</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
