@@ -8,6 +8,8 @@ import { getEmployees } from "@/lib/redux/slices/employeeSlice"
 import { getProducts } from "@/lib/redux/slices/productSlice"
 import { getShifts, getActiveShifts } from "@/lib/redux/slices/shiftSlice"
 import { getSales } from "@/lib/redux/slices/salesSlice"
+import { getExpenses } from "@/lib/redux/slices/expensesSlice"
+import { supabase } from "@/lib/supabase"
 
 export default function AdminDashboard() {
   const dispatch = useDispatch<AppDispatch>()
@@ -16,12 +18,37 @@ export default function AdminDashboard() {
   const { products, loading: productsLoading } = useSelector((state: RootState) => state.products)
   const { shifts, loading: shiftsLoading } = useSelector((state: RootState) => state.shifts)
   const { sales, loading: salesLoading } = useSelector((state: RootState) => state.sales)
+  const { expenses, loading: expensesLoading } = useSelector((state: RootState) => state.expenses)
 
-  // Estados para ordenación en la tabla de Productos Principales
-  const [sortColumn, setSortColumn] = useState<"salesCount" | "totalRevenue">("salesCount")
-  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc")
-  // Estado para filtrar productos principales por negocio
-  const [selectedBusinessForTopProducts, setSelectedBusinessForTopProducts] = useState<string>("")
+  // Estado para la petición directa a la DB (para usar en Top Productos)
+  const [directSales, setDirectSales] = useState<any[]>([])
+  const [directSalesLoading, setDirectSalesLoading] = useState<boolean>(true)
+
+  // Petición directa a la DB para obtener ventas con sus items
+  useEffect(() => {
+    const fetchDirectSales = async () => {
+      setDirectSalesLoading(true)
+      const { data, error } = await supabase
+        .from("sales")
+        .select(`
+          *,
+          sale_items (
+            *,
+            products(name)
+          )
+        `)
+        .order("timestamp", { ascending: false })
+
+      if (error) {
+        console.error("Error fetching direct sales:", error)
+      } else {
+        console.log("Direct sales data:", data)
+        setDirectSales(data || [])
+      }
+      setDirectSalesLoading(false)
+    }
+    fetchDirectSales()
+  }, [])
 
   useEffect(() => {
     dispatch(fetchBusinesses())
@@ -29,20 +56,44 @@ export default function AdminDashboard() {
     dispatch(getProducts())
     dispatch(getShifts())
     dispatch(getActiveShifts()) // Obtener turnos activos
-    dispatch(getSales())       // Cargar ventas
+    dispatch(getSales())        // Cargar ventas
+    dispatch(getExpenses())     // Cargar gastos
   }, [dispatch])
 
-  // Calcular productos con stock bajo (solo para la alerta)
-  const lowStockProducts = products.filter((product) => product.stock <= product.minStock).slice(0, 20)
+  // Función para formatear números de precio (ej.: 100,000.00)
+  const formatPrice = (num: number): string => {
+    return num.toLocaleString("en-US", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })
+  }
 
-  // Ordenar turnos activos por cantidad de ventas (campo shift.sales, si lo manejas)
-  const activeShifts = shifts.filter((shift) => shift.active).sort((a, b) => b.sales - a.sales)
+  // Obtener el nombre del mes actual en español (ej.: "Abril")
+  const currentMonthName = new Date().toLocaleString("es-ES", { month: "long" })
+  const monthHeader = `Negocios – Mes ${currentMonthName.charAt(0).toUpperCase() + currentMonthName.slice(1)}`
 
-  // --------------------------------------------
-  // LÓGICA PARA ACUMULAR PRODUCTOS MÁS VENDIDOS
-  // --------------------------------------------
+  // Estados para ordenación en la tabla de Top Productos
+  const [sortColumn, setSortColumn] = useState<"salesCount" | "totalRevenue">("salesCount")
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc")
+  // Estado para filtrar productos principales por negocio
+  const [selectedBusinessForTopProducts, setSelectedBusinessForTopProducts] = useState<string>("")
+
+  // Arreglo de turnos activos, asegurando que shifts sea un array
+  const activeShifts = Array.isArray(shifts)
+    ? shifts.filter((shift) => shift.active).sort((a, b) => b.sales - a.sales)
+    : []
+
+  // ---------------------------------------------------
+  // TOP PRODUCTOS: Usando directSales para agrupar los items
+  // ---------------------------------------------------
+  // Filtramos las ventas directas por negocio (si se selecciona)
+  const filteredSalesForTopProducts = useMemo(() => {
+    return directSales.filter((sale) => {
+      return selectedBusinessForTopProducts === "" || sale.business_id === selectedBusinessForTopProducts
+    })
+  }, [directSales, selectedBusinessForTopProducts])
+  
   const topProducts = useMemo(() => {
-    // Mapa para acumular info: productId => { ...datos acumulados... }
     const productMap = new Map<
       string,
       {
@@ -54,23 +105,21 @@ export default function AdminDashboard() {
         totalRevenue: number
       }
     >()
-
-    // Filtrar ventas si se selecciona un negocio
-    const relevantSales = selectedBusinessForTopProducts
-      ? sales.filter((sale) => sale.businessId === selectedBusinessForTopProducts)
-      : sales
-
-    // Recorrer las ventas y sus items para acumular
-    for (const sale of relevantSales) {
-      for (const item of sale.items) {
-        // Buscar el producto en el store de products
-        const prod = products.find((p) => p.id === item.productId)
+  
+    // Agrupamos los items de las ventas filtradas
+    for (const sale of filteredSalesForTopProducts) {
+      // Asegurarse de que la venta tenga items en "sale_items"
+      if (!sale.sale_items) continue
+      for (const item of sale.sale_items) {
+        // Buscar el producto para obtener datos adicionales
+        const prod = products.find((p) => p.id === item.product_id)
         if (!prod) continue
-
-        // Si no existe en el mapa, lo inicializamos
-        if (!productMap.has(item.productId)) {
-          productMap.set(item.productId, {
-            productName: item.productName,
+  
+        // Clave compuesta "productId-businessId" para agrupar
+        const key = `${item.product_id}-${prod.businessId}`
+        if (!productMap.has(key)) {
+          productMap.set(key, {
+            productName: item.products?.name || "Producto desconocido",
             businessId: prod.businessId,
             purchasePrice: prod.purchasePrice,
             sellingPrice: prod.sellingPrice,
@@ -78,54 +127,62 @@ export default function AdminDashboard() {
             totalRevenue: 0,
           })
         }
-        const data = productMap.get(item.productId)!
+        const data = productMap.get(key)!
+        console.log(`Agrupando item para clave ${key}:`, item)
         data.totalQuantity += item.quantity
         data.totalRevenue += item.total
       }
     }
-
-    // Convertir el mapa a array para poder ordenarlo
+  
     let arr = Array.from(productMap.values())
-
-    // Ordenar según la columna y dirección seleccionadas
+  
+    // Ordenamos según el criterio seleccionado
     arr.sort((a, b) => {
       if (sortColumn === "salesCount") {
-        return sortDirection === "asc" ? a.totalQuantity - b.totalQuantity : b.totalQuantity - a.totalQuantity
+        return sortDirection === "asc"
+          ? a.totalQuantity - b.totalQuantity
+          : b.totalQuantity - a.totalQuantity
       } else if (sortColumn === "totalRevenue") {
-        return sortDirection === "asc" ? a.totalRevenue - b.totalRevenue : b.totalRevenue - a.totalRevenue
+        return sortDirection === "asc"
+          ? a.totalRevenue - b.totalRevenue
+          : b.totalRevenue - a.totalRevenue
       }
       return 0
     })
+  
+    // Limitar el listado a solo 15 items
+    return arr.slice(0, 15)
+  }, [filteredSalesForTopProducts, products, sortColumn, sortDirection])
+  
 
-    // Tomar solo los 10 primeros
-    const top10 = arr.slice(0, 10)
-
-    // Debug en consola
-    console.log("🔍 [AdminDashboard] topProducts calculados a partir de sales:", top10)
-    return top10
-  }, [sales, products, selectedBusinessForTopProducts, sortColumn, sortDirection])
-
-  // --------------------------------------------
-  // LÓGICA PARA NEGOCIOS CON SUS VENTAS
-  // --------------------------------------------
-  const calculateBusinessSales = () => {
-    // Mapa para almacenar las ventas por negocio
-    const businessSalesMap = new Map<
+  // ---------------------------------------------------
+  // NEGOCIOS CON DATOS DEL MES (Ventas, Gastos, Profit, etc.)
+  // ---------------------------------------------------
+  const calculateBusinessMonthlyData = () => {
+    const businessDataMap = new Map<
       string,
       {
-        todaySales: number
+        transactions: number
         totalAmount: number
+        totalExpense: number
+        profit: number
         paymentMethods: {
-          [key: string]: number
+          cash: number
+          card: number
+          transfer: number
+          mercadopago: number
+          rappi: number
         }
       }
     >()
 
-    // Inicializar con los negocios existentes
+    // Inicializar para cada negocio
     businesses.forEach((business) => {
-      businessSalesMap.set(business.id, {
-        todaySales: 0,
+      businessDataMap.set(business.id, {
+        transactions: 0,
         totalAmount: 0,
+        totalExpense: 0,
+        profit: 0,
         paymentMethods: {
           cash: 0,
           card: 0,
@@ -136,36 +193,43 @@ export default function AdminDashboard() {
       })
     })
 
-    // Procesar las ventas
+    const today = new Date()
+    const currentMonth = today.getMonth()
+    const currentYear = today.getFullYear()
+
+    // Procesar ventas del mes actual
     sales.forEach((sale) => {
-      const businessData = businessSalesMap.get(sale.businessId)
-      if (businessData) {
-        // Verificar si la venta es de hoy
-        const saleDate = new Date(sale.timestamp)
-        const today = new Date()
-        const isToday =
-          saleDate.getDate() === today.getDate() &&
-          saleDate.getMonth() === today.getMonth() &&
-          saleDate.getFullYear() === today.getFullYear()
-
-        if (isToday) {
-          businessData.todaySales++
-        }
-
-        businessData.totalAmount += sale.total
-
-        // Actualizar método de pago
-        if (sale.paymentMethod in businessData.paymentMethods) {
-          businessData.paymentMethods[sale.paymentMethod] += sale.total
+      const saleDate = new Date(sale.timestamp)
+      if (saleDate.getMonth() === currentMonth && saleDate.getFullYear() === currentYear) {
+        const businessData = businessDataMap.get(sale.businessId)
+        if (businessData) {
+          businessData.transactions += 1
+          businessData.totalAmount += sale.total
+          if (sale.paymentMethod in businessData.paymentMethods) {
+            businessData.paymentMethods[sale.paymentMethod] += sale.total
+          }
         }
       }
     })
 
-    // Retornar un array de negocios con sus stats
+    // Procesar gastos del mes actual
+    expenses.forEach((expense) => {
+      const expenseDate = new Date(expense.date)
+      if (expenseDate.getMonth() === currentMonth && expenseDate.getFullYear() === currentYear) {
+        const businessData = businessDataMap.get(expense.businessId)
+        if (businessData) {
+          businessData.totalExpense += expense.amount
+        }
+      }
+    })
+
+    // Calcular profit y retornar datos
     return businesses.map((business) => {
-      const data = businessSalesMap.get(business.id) || {
-        todaySales: 0,
+      const data = businessDataMap.get(business.id) || {
+        transactions: 0,
         totalAmount: 0,
+        totalExpense: 0,
+        profit: 0,
         paymentMethods: {
           cash: 0,
           card: 0,
@@ -174,25 +238,26 @@ export default function AdminDashboard() {
           rappi: 0,
         },
       }
+      data.profit = data.totalAmount - data.totalExpense
       return {
         ...business,
-        todaySales: data.todaySales,
+        transactions: data.transactions,
         totalAmount: data.totalAmount,
+        totalExpense: data.totalExpense,
+        profit: data.profit,
+        avgTicket: data.transactions > 0 ? data.totalAmount / data.transactions : 0,
         paymentMethods: data.paymentMethods,
       }
     })
   }
 
-  const businessesWithSales = calculateBusinessSales()
+  const businessesWithMonthlyData = calculateBusinessMonthlyData()
 
-  // --------------------------------------------
-  // LÓGICA PARA TURNOS ACTIVOS (ejemplo)
-  // --------------------------------------------
+  // ---------------------------------------------------
+  // TURNOS ACTIVOS (ejemplo)
+  // ---------------------------------------------------
   const calculateShiftTotals = (shift: any) => {
-    // Filtrar las ventas de este turno
     const shiftSales = sales.filter((sale) => sale.shiftId === shift.id)
-
-    // Inicializar los métodos de pago
     const paymentMethods = {
       cash: 0,
       card: 0,
@@ -200,27 +265,31 @@ export default function AdminDashboard() {
       mercadopago: 0,
       rappi: 0,
     }
-
     shiftSales.forEach((sale) => {
       if (sale.paymentMethod in paymentMethods) {
         paymentMethods[sale.paymentMethod] += sale.total
       }
     })
-
     const totalSales = Object.values(paymentMethods).reduce((sum, val) => sum + val, 0)
     return { paymentMethods, totalSales }
   }
 
-  // Verificar si está cargando
   const isLoading =
-    businessesLoading || employeesLoading || productsLoading || shiftsLoading || salesLoading
+    businessesLoading ||
+    employeesLoading ||
+    productsLoading ||
+    shiftsLoading ||
+    salesLoading ||
+    expensesLoading
 
   if (isLoading) {
     return (
       <div className="flex justify-center items-center h-64">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-700 mx-auto"></div>
-          <p className="mt-4 text-slate-600 dark:text-slate-400">Cargando datos del dashboard...</p>
+          <p className="mt-4 text-slate-600 dark:text-slate-400">
+            Cargando datos del dashboard...
+          </p>
         </div>
       </div>
     )
@@ -249,7 +318,7 @@ export default function AdminDashboard() {
     return classes[method] || "bg-gray-100 dark:bg-gray-700 p-2 rounded"
   }
 
-  // Encabezado ordenable
+  // Encabezado ordenable para la tabla de Top Productos
   const SortableHeader = ({
     column,
     label,
@@ -275,35 +344,42 @@ export default function AdminDashboard() {
     </th>
   )
 
-  // --------------------------------------------
-  // RENDER
-  // --------------------------------------------
   return (
     <div className="space-y-6">
       <h1 className="text-2xl font-bold">Dashboard</h1>
 
       {/* Negocios */}
       <div>
-        <h2 className="text-xl font-semibold mb-4">Negocios</h2>
+        <h2 className="text-xl font-semibold mb-4">{monthHeader}</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {businessesWithSales.map((business) => (
+          {businessesWithMonthlyData.map((business) => (
             <div key={business.id} className="card">
               <h3 className="text-lg font-semibold mb-2">{business.name}</h3>
               <div className="grid grid-cols-2 gap-2 mb-2">
                 <div>
-                  <p className="text-sm text-gray-500 dark:text-gray-400">Ventas de Hoy</p>
-                  <p className="font-medium">{business.todaySales}</p>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">Ventas del Mes</p>
+                  <p className="font-medium">{business.transactions}</p>
                 </div>
                 <div>
-                  <p className="text-sm text-gray-500 dark:text-gray-400">Monto Total</p>
-                  <p className="font-medium">${business.totalAmount.toFixed(2)}</p>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">Monto del Mes</p>
+                  <p className="font-medium">${formatPrice(business.totalAmount)}</p>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-2 mb-2">
+                <div>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">Gasto del Mes</p>
+                  <p className="font-medium">${formatPrice(business.totalExpense)}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">Profit del Mes</p>
+                  <p className="font-medium">${formatPrice(business.profit)}</p>
                 </div>
               </div>
               <div className="mb-2">
-                <p className="text-sm text-gray-500 dark:text-gray-400">Ticket Promedio</p>
+                <p className="text-sm text-gray-500 dark:text-gray-400">Ticket Promedio del Mes</p>
                 <p className="font-medium">
-                  {business.todaySales > 0
-                    ? `$${(business.totalAmount / business.todaySales).toFixed(2)}`
+                  {business.transactions > 0
+                    ? `$${formatPrice(business.avgTicket)}`
                     : "0.00"}
                 </p>
               </div>
@@ -312,25 +388,25 @@ export default function AdminDashboard() {
                 <div className="grid grid-cols-2 gap-2 mb-2">
                   <div className={getPaymentMethodClass("cash")}>
                     <p className="text-xs text-gray-500 dark:text-gray-400">Efectivo</p>
-                    <p className="font-medium">${business.paymentMethods.cash.toFixed(2)}</p>
+                    <p className="font-medium">${formatPrice(business.paymentMethods.cash)}</p>
                   </div>
                   <div className={getPaymentMethodClass("card")}>
                     <p className="text-xs text-gray-500 dark:text-gray-400">Tarjetas</p>
-                    <p className="font-medium">${business.paymentMethods.card.toFixed(2)}</p>
+                    <p className="font-medium">${formatPrice(business.paymentMethods.card)}</p>
                   </div>
                 </div>
                 <div className="grid grid-cols-3 gap-2">
                   <div className={getPaymentMethodClass("mercadopago")}>
                     <p className="text-xs text-gray-500 dark:text-gray-400">Mercadopago</p>
-                    <p className="font-medium">${business.paymentMethods.mercadopago.toFixed(2)}</p>
+                    <p className="font-medium">${formatPrice(business.paymentMethods.mercadopago)}</p>
                   </div>
                   <div className={getPaymentMethodClass("rappi")}>
                     <p className="text-xs text-gray-500 dark:text-gray-400">Rappi</p>
-                    <p className="font-medium">${business.paymentMethods.rappi.toFixed(2)}</p>
+                    <p className="font-medium">${formatPrice(business.paymentMethods.rappi)}</p>
                   </div>
                   <div className={getPaymentMethodClass("transfer")}>
                     <p className="text-xs text-gray-500 dark:text-gray-400">Transferencia</p>
-                    <p className="font-medium">${business.paymentMethods.transfer.toFixed(2)}</p>
+                    <p className="font-medium">${formatPrice(business.paymentMethods.transfer)}</p>
                   </div>
                 </div>
               </div>
@@ -339,87 +415,10 @@ export default function AdminDashboard() {
         </div>
       </div>
 
-      {/* Alertas de Stock */}
-      <div>
-        <h2 className="text-xl font-semibold mb-4 flex items-center">
-          {lowStockProducts.length > 0 && (
-            <span className="bg-red-100 text-red-800 text-xs font-medium mr-2 px-2.5 py-0.5 rounded dark:bg-red-900 dark:text-red-300">
-              ¡Atención!
-            </span>
-          )}
-          Alertas de Stock
-        </h2>
-        <div className={`card ${lowStockProducts.length > 0 ? "border-l-4 border-l-red-500" : ""}`}>
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-semibold">Productos con Stock Bajo</h3>
-            <span className="bg-red-100 text-red-800 text-xs font-medium px-2.5 py-0.5 rounded dark:bg-red-900 dark:text-red-300">
-              {lowStockProducts.length} productos
-            </span>
-          </div>
-          {lowStockProducts.length > 0 ? (
-            <>
-              <div className="table-container">
-                <table className="table">
-                  <thead className="table-header">
-                    <tr>
-                      <th className="table-header-cell">Producto</th>
-                      <th className="table-header-cell">Negocio</th>
-                      <th className="table-header-cell">Stock Actual</th>
-                      <th className="table-header-cell">Stock Mínimo</th>
-                      <th className="table-header-cell">Estado</th>
-                    </tr>
-                  </thead>
-                  <tbody className="table-body">
-                    {lowStockProducts.map((product) => {
-                      const business = businesses.find((b) => b.id === product.businessId)
-                      const stockDifference = product.minStock - product.stock
-                      const stockPercentage = (product.stock / product.minStock) * 100
-
-                      return (
-                        <tr key={product.id} className="table-row">
-                          <td className="table-cell font-medium">{product.name}</td>
-                          <td className="table-cell">{business?.name || "Desconocido"}</td>
-                          <td className="table-cell text-red-600 dark:text-red-400 font-medium">
-                            {product.stock}
-                          </td>
-                          <td className="table-cell">{product.minStock}</td>
-                          <td className="table-cell">
-                            <div className="flex items-center">
-                              <div className="w-full bg-gray-200 rounded-full h-2.5 mr-2 dark:bg-gray-700">
-                                <div
-                                  className="bg-red-600 h-2.5 rounded-full dark:bg-red-500"
-                                  style={{ width: `${stockPercentage}%` }}
-                                ></div>
-                              </div>
-                              <span className="text-xs font-medium text-red-600 dark:text-red-400">
-                                Faltan {stockDifference}
-                              </span>
-                            </div>
-                          </td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              </div>
-              <div className="mt-4 p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-900 rounded-md">
-                <p className="text-sm text-yellow-800 dark:text-yellow-300">
-                  <strong>Acción requerida:</strong> Estos productos necesitan reabastecimiento inmediato para mantener
-                  el inventario en niveles óptimos.
-                </p>
-              </div>
-            </>
-          ) : (
-            <p className="text-gray-500 dark:text-gray-400">No hay productos con stock bajo en este momento.</p>
-          )}
-        </div>
-      </div>
-
-      {/* Productos Principales (ahora basados en la data de las ventas) */}
+      {/* Top Productos (Historial de Ventas) */}
       <div>
         <div className="flex justify-between items-center mb-4">
           <h2 className="text-xl font-semibold">Productos Principales</h2>
-          {/* Select para filtrar por negocio */}
           <select
             className="input max-w-xs"
             value={selectedBusinessForTopProducts}
@@ -440,27 +439,19 @@ export default function AdminDashboard() {
                 <tr>
                   <th className="table-header-cell">Producto</th>
                   <th className="table-header-cell">Negocio</th>
-                  <SortableHeader column="salesCount" label="Cantidad Vendida" />
-                  <SortableHeader column="totalRevenue" label="Ventas Recaudadas" />
-                  <th className="table-header-cell">Margen de Ganancia</th>
+                  <SortableHeader column="salesCount" label="Unidades Vendidas" />
+                  <SortableHeader column="totalRevenue" label="Monto Facturado" />
                 </tr>
               </thead>
               <tbody className="table-body">
                 {topProducts.map((item, idx) => {
                   const business = businesses.find((b) => b.id === item.businessId)
-                  // Calcular margen de ganancia
-                  let marginPercentage = 0
-                  if (item.purchasePrice > 0) {
-                    marginPercentage =
-                      ((item.sellingPrice - item.purchasePrice) / item.purchasePrice) * 100
-                  }
                   return (
                     <tr key={idx} className="table-row">
                       <td className="table-cell font-medium">{item.productName}</td>
                       <td className="table-cell">{business?.name || "Desconocido"}</td>
                       <td className="table-cell">{item.totalQuantity}</td>
-                      <td className="table-cell">${item.totalRevenue.toFixed(2)}</td>
-                      <td className="table-cell">{marginPercentage.toFixed(2)}%</td>
+                      <td className="table-cell">${formatPrice(item.totalRevenue)}</td>
                     </tr>
                   )
                 })}
@@ -499,7 +490,7 @@ export default function AdminDashboard() {
                   <div className="flex justify-between bg-gray-100 dark:bg-gray-800 p-2 rounded-md">
                     <p className="text-sm font-semibold">Venta Total</p>
                     <p className="font-bold text-green-600 dark:text-green-400">
-                      ${shiftTotals.totalSales.toFixed(2)}
+                      ${formatPrice(shiftTotals.totalSales)}
                     </p>
                   </div>
                   <div className="mt-3">
@@ -507,29 +498,25 @@ export default function AdminDashboard() {
                     <div className="grid grid-cols-2 gap-2 mb-2">
                       <div className={getPaymentMethodClass("cash")}>
                         <p className="text-xs text-gray-500 dark:text-gray-400">Efectivo</p>
-                        <p className="font-medium">${shiftTotals.paymentMethods.cash.toFixed(2)}</p>
+                        <p className="font-medium">${formatPrice(shiftTotals.paymentMethods.cash)}</p>
                       </div>
                       <div className={getPaymentMethodClass("card")}>
                         <p className="text-xs text-gray-500 dark:text-gray-400">Tarjetas</p>
-                        <p className="font-medium">${shiftTotals.paymentMethods.card.toFixed(2)}</p>
+                        <p className="font-medium">${formatPrice(shiftTotals.paymentMethods.card)}</p>
                       </div>
                     </div>
                     <div className="grid grid-cols-3 gap-2">
                       <div className={getPaymentMethodClass("mercadopago")}>
                         <p className="text-xs text-gray-500 dark:text-gray-400">Mercadopago</p>
-                        <p className="font-medium">
-                          ${shiftTotals.paymentMethods.mercadopago.toFixed(2)}
-                        </p>
+                        <p className="font-medium">${formatPrice(shiftTotals.paymentMethods.mercadopago)}</p>
                       </div>
                       <div className={getPaymentMethodClass("rappi")}>
                         <p className="text-xs text-gray-500 dark:text-gray-400">Rappi</p>
-                        <p className="font-medium">${shiftTotals.paymentMethods.rappi.toFixed(2)}</p>
+                        <p className="font-medium">${formatPrice(shiftTotals.paymentMethods.rappi)}</p>
                       </div>
                       <div className={getPaymentMethodClass("transfer")}>
                         <p className="text-xs text-gray-500 dark:text-gray-400">Transferencia</p>
-                        <p className="font-medium">
-                          ${shiftTotals.paymentMethods.transfer.toFixed(2)}
-                        </p>
+                        <p className="font-medium">${formatPrice(shiftTotals.paymentMethods.transfer)}</p>
                       </div>
                     </div>
                   </div>
