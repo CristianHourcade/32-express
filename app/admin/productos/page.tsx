@@ -78,7 +78,7 @@ export default function ProductsPage() {
 
   // Estados para ordenamiento
   const [sortField, setSortField] = useState<"stock" | null>("stock");
-  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
 
   useEffect(() => {
     dispatch(getProducts());
@@ -122,9 +122,12 @@ export default function ProductsPage() {
     }
     setIsSearching(true);
     try {
-      const { data, error } = await supabase
-        .from("products")
-        .select("*")
+      // Se agrega el filtro por el negocio seleccionado
+      const queryBuilder = supabase.from("products").select("*");
+      if (selectedBusinessId) {
+        queryBuilder.eq("business_id", selectedBusinessId);
+      }
+      const { data, error } = await queryBuilder
         .or(`name.ilike.%${query}%,code.ilike.%${query}%,description.ilike.%${query}%`)
         .limit(20);
       if (error) throw error;
@@ -205,7 +208,6 @@ export default function ProductsPage() {
     });
     setIsProductModalOpen(true);
   };
-  
 
   const openEditProductModal = (product: Product) => {
     setEditingProduct(product);
