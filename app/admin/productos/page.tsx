@@ -117,6 +117,7 @@ export default function ProductsPage() {
   const searchProductsInDB = async (query: string) => {
     if (!query.trim()) {
       setSearchResults([]);
+      if(isProductModalOpen) setIsProductModalOpen(false)
       setIsSearching(false);
       return;
     }
@@ -149,6 +150,7 @@ export default function ProductsPage() {
       console.error("Error searching products:", error);
       setSearchResults([]);
     } finally {
+      if(isProductModalOpen) setIsProductModalOpen(false)
       setIsSearching(false);
     }
   };
@@ -242,7 +244,11 @@ export default function ProductsPage() {
       setIsRefreshing(true);
       await dispatch(getProducts());
       setIsRefreshing(false);
-      location.reload();
+      if(searchQuery) {
+        searchProductsInDB(searchQuery);
+      } else {
+        location.reload();
+      }
     } catch (error) {
       console.error("Error deleting product:", error);
     }
@@ -288,7 +294,11 @@ export default function ProductsPage() {
           })
         ).unwrap();
       }
-      location.reload();
+      if(searchQuery) {
+        searchProductsInDB(searchQuery);
+      } else {
+        location.reload();
+      }
     } catch (error) {
       console.error("Error updating/creating product:", error);
     }
