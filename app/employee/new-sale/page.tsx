@@ -4,12 +4,12 @@ import { useEffect, useState, useMemo } from "react"
 import { useRouter } from "next/navigation"
 import { useDispatch, useSelector } from "react-redux"
 import type { AppDispatch, RootState } from "@/lib/redux/store"
-import { getProducts, editProduct } from "@/lib/redux/slices/productSlice"
+import { editProduct } from "@/lib/redux/slices/productSlice"
 import { createSale } from "@/lib/redux/slices/salesSlice"
 import { getShifts } from "@/lib/redux/slices/shiftSlice"
 import { Search, ShoppingCart, Plus, Minus, Trash2, X, Check, AlertTriangle } from "lucide-react"
 import Link from "next/link"
-import { supabase } from "@/lib/supabase" // Importar Supabase para la búsqueda remota
+import { supabase } from "@/lib/supabase"
 
 type CartItem = {
   productId: string
@@ -23,12 +23,15 @@ export default function NewSalePage() {
   const router = useRouter()
   const dispatch = useDispatch<AppDispatch>()
   const { user } = useSelector((state: RootState) => state.auth)
-  const { products, loading: productsLoading } = useSelector((state: RootState) => state.products)
   const { shifts, loading: shiftsLoading } = useSelector((state: RootState) => state.shifts)
   const { employees } = useSelector((state: RootState) => state.employees)
 
-  const [searchQuery, setSearchQuery] = useState("")
+  // Estado local para los productos
+  const [products, setProducts] = useState<any[]>([])
+  const [productsLoading, setProductsLoading] = useState(true)
+
   // Estados para búsqueda remota
+  const [searchQuery, setSearchQuery] = useState("")
   const [searchResults, setSearchResults] = useState<any[]>([])
   const [isSearching, setIsSearching] = useState(false)
 
@@ -38,43 +41,62 @@ export default function NewSalePage() {
   const [isProcessing, setIsProcessing] = useState(false)
   const [successMessage, setSuccessMessage] = useState("")
 
+  // Obtenemos el businessId del usuario
+  const businessId = user?.businessId
+
+  // Cargar productos desde la base de datos filtrando por businessId
+  useEffect(() => {
+    if (!businessId) return
+    const fetchProducts = async () => {
+      setProductsLoading(true)
+      try {
+        const { data, error } = await supabase
+          .from("products")
+          .select("*")
+          .eq("business_id", businessId) // Filtrar por businessId
+        if (error) throw error
+        setProducts(data)
+        console.log("Productos cargados:", data)
+      } catch (error) {
+        console.error("Error al cargar productos:", error)
+        setProducts([])
+      } finally {
+        setProductsLoading(false)
+      }
+    }
+    fetchProducts()
+  }, [businessId])
+
+  // Cargar turnos
   useEffect(() => {
     console.log("🔍 NewSale: Component mounted")
     console.log("🔍 NewSale: Current user:", user)
-    dispatch(getProducts())
     dispatch(getShifts())
-  }, [dispatch])
+  }, [dispatch, user])
 
-  // Filtrar productos del negocio del empleado (búsqueda local para otras partes si se requiere)
-  const businessId = user?.businessId
+  // Filtrar productos del negocio (si se requiere en alguna parte)
   const businessProducts = useMemo(
-    () => products.filter((product) => product.businessId === businessId),
+    () => products.filter((product) => product.business_id === businessId),
     [products, businessId],
   )
 
   // --- Búsqueda remota usando Supabase ---
   useEffect(() => {
     const fetchSearchResults = async () => {
-      // Si el query está vacío, limpiar resultados
       if (!searchQuery.trim()) {
         setSearchResults([])
         return
       }
-
       setIsSearching(true)
       try {
         const { data, error } = await supabase
           .from("products")
           .select("*")
-          // Se filtra también por business_id para obtener solo los productos de este negocio
           .eq("business_id", businessId)
-          // Se usa OR para buscar en name, code y description
           .or(`name.ilike.%${searchQuery}%,code.ilike.%${searchQuery}%,description.ilike.%${searchQuery}%`)
           .limit(20)
-
         if (error) throw error
 
-        // Mapear los resultados al formato esperado (ajusta según tu modelo)
         const formattedResults = data.map((item) => ({
           id: item.id,
           name: item.name,
@@ -84,7 +106,6 @@ export default function NewSalePage() {
           stock: item.stock,
           minStock: item.min_stock,
           businessId: item.business_id,
-          // Puedes agregar otros campos si es necesario
         }))
 
         setSearchResults(formattedResults)
@@ -99,10 +120,6 @@ export default function NewSalePage() {
   }, [searchQuery, businessId])
   // --- Fin búsqueda remota ---
 
-  // Mantener la lógica para buscar productos (se activa al escribir en el input)
-  // Ahora searchQuery activa la búsqueda remota en lugar de filtrar localmente
-
-  // ... (Resto de la lógica del componente, como currentEmployee, activeShift, etc.)
   const currentEmployee = useMemo(() => {
     if (!user) return null
     const empById = employees.find((emp) => emp.userId === user.id)
@@ -154,6 +171,10 @@ export default function NewSalePage() {
   const handleCompleteSale = async () => {
     if (!activeShift || !user || cart.length === 0) return
 
+    // Agregamos un log para ver el valor actual de products
+    console.log("Valores de products al confirmar la venta:", products)
+
+    console.log("Carrito",cart);
     setIsProcessing(true)
     try {
       const saleData = {
