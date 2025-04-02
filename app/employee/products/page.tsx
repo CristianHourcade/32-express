@@ -173,6 +173,7 @@ export default function EmployeeProductsPage() {
       if (error) throw error;
       setIsAddStockModalOpen(false);
       fetchProducts();
+      if(searchQuery) searchProductsInDB(searchQuery);
     } catch (error) {
       console.error("Error adding stock:", error);
     }
