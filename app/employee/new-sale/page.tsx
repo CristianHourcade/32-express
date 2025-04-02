@@ -1,101 +1,116 @@
-"use client"
+"use client";
 
-import { useEffect, useState, useMemo } from "react"
-import { useRouter } from "next/navigation"
-import { useDispatch, useSelector } from "react-redux"
-import type { AppDispatch, RootState } from "@/lib/redux/store"
-import { editProduct } from "@/lib/redux/slices/productSlice"
-import { createSale } from "@/lib/redux/slices/salesSlice"
-import { getShifts } from "@/lib/redux/slices/shiftSlice"
-import { Search, ShoppingCart, Plus, Minus, Trash2, X, Check, AlertTriangle } from "lucide-react"
-import Link from "next/link"
-import { supabase } from "@/lib/supabase"
+import { useEffect, useState, useMemo } from "react";
+import { useRouter } from "next/navigation";
+import { useDispatch, useSelector } from "react-redux";
+import type { AppDispatch, RootState } from "@/lib/redux/store";
+import { editProduct } from "@/lib/redux/slices/productSlice";
+import { createSale } from "@/lib/redux/slices/salesSlice";
+import { getShifts } from "@/lib/redux/slices/shiftSlice";
+import {
+  Search,
+  ShoppingCart,
+  Plus,
+  Minus,
+  Trash2,
+  X,
+  Check,
+  AlertTriangle,
+} from "lucide-react";
+import Link from "next/link";
+import { supabase } from "@/lib/supabase";
 
 type CartItem = {
-  productId: string
-  productName: string
-  price: number
-  quantity: number
-  total: number
-}
+  productId: string;
+  productName: string;
+  price: number;
+  quantity: number;
+  total: number;
+};
 
 export default function NewSalePage() {
-  const router = useRouter()
-  const dispatch = useDispatch<AppDispatch>()
-  const { user } = useSelector((state: RootState) => state.auth)
-  const { shifts, loading: shiftsLoading } = useSelector((state: RootState) => state.shifts)
-  const { employees } = useSelector((state: RootState) => state.employees)
+  const router = useRouter();
+  const dispatch = useDispatch<AppDispatch>();
+  const { user } = useSelector((state: RootState) => state.auth);
+  const { shifts, loading: shiftsLoading } = useSelector(
+    (state: RootState) => state.shifts
+  );
+  const { employees } = useSelector((state: RootState) => state.employees);
 
   // Estado local para los productos
-  const [products, setProducts] = useState<any[]>([])
-  const [productsLoading, setProductsLoading] = useState(true)
+  const [products, setProducts] = useState<any[]>([]);
+  const [productsLoading, setProductsLoading] = useState(true);
 
   // Estados para búsqueda remota
-  const [searchQuery, setSearchQuery] = useState("")
-  const [searchResults, setSearchResults] = useState<any[]>([])
-  const [isSearching, setIsSearching] = useState(false)
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
 
-  const [cart, setCart] = useState<CartItem[]>([])
-  const [paymentMethod, setPaymentMethod] = useState<"cash" | "card" | "transfer" | "mercadopago" | "rappi">("cash")
-  const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false)
-  const [isProcessing, setIsProcessing] = useState(false)
-  const [successMessage, setSuccessMessage] = useState("")
+  const [cart, setCart] = useState<CartItem[]>([]);
+  const [paymentMethod, setPaymentMethod] = useState<
+    "cash" | "card" | "transfer" | "mercadopago" | "rappi"
+  >("cash");
+  const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [successMessage, setSuccessMessage] = useState("");
 
   // Obtenemos el businessId del usuario
-  const businessId = user?.businessId
+  const businessId = user?.businessId;
 
   // Cargar productos desde la base de datos filtrando por businessId
   useEffect(() => {
-    if (!businessId) return
+    if (!businessId) return;
     const fetchProducts = async () => {
-      setProductsLoading(true)
+      setProductsLoading(true);
       try {
         const { data, error } = await supabase
           .from("products")
           .select("*")
-          .eq("business_id", businessId) // Filtrar por businessId
-        if (error) throw error
-        setProducts(data)
-        console.log("Productos cargados:", data)
+          .eq("business_id", businessId); // Filtrar por businessId
+        if (error) throw error;
+        setProducts(data);
+        console.log("Productos cargados:", data);
       } catch (error) {
-        console.error("Error al cargar productos:", error)
-        setProducts([])
+        console.error("Error al cargar productos:", error);
+        setProducts([]);
       } finally {
-        setProductsLoading(false)
+        setProductsLoading(false);
       }
-    }
-    fetchProducts()
-  }, [businessId])
+    };
+    fetchProducts();
+  }, [businessId]);
 
   // Cargar turnos
   useEffect(() => {
-    console.log("🔍 NewSale: Component mounted")
-    console.log("🔍 NewSale: Current user:", user)
-    dispatch(getShifts())
-  }, [dispatch, user])
+    console.log("🔍 NewSale: Component mounted");
+    console.log("🔍 NewSale: Current user:", user);
+    dispatch(getShifts());
+  }, [dispatch, user]);
 
   // Filtrar productos del negocio (si se requiere en alguna parte)
   const businessProducts = useMemo(
     () => products.filter((product) => product.business_id === businessId),
-    [products, businessId],
-  )
+    [products, businessId]
+  );
 
   // --- Búsqueda remota usando Supabase ---
   useEffect(() => {
     const fetchSearchResults = async () => {
       if (!searchQuery.trim()) {
-        setSearchResults([])
-        return
+        setSearchResults([]);
+        return;
       }
-      setIsSearching(true)
+      setIsSearching(true);
       try {
         const { data, error } = await supabase
           .from("products")
           .select("*")
           .eq("business_id", businessId)
-          .or(`name.ilike.%${searchQuery}%,code.ilike.%${searchQuery}%,description.ilike.%${searchQuery}%`)
-          .limit(20)
-        if (error) throw error
+          .or(
+            `name.ilike.%${searchQuery}%,code.ilike.%${searchQuery}%,description.ilike.%${searchQuery}%`
+          )
+          .limit(20);
+        if (error) throw error;
 
         const formattedResults = data.map((item) => ({
           id: item.id,
@@ -106,40 +121,50 @@ export default function NewSalePage() {
           stock: item.stock,
           minStock: item.min_stock,
           businessId: item.business_id,
-        }))
+        }));
 
-        setSearchResults(formattedResults)
+        setSearchResults(formattedResults);
       } catch (error) {
-        console.error("Error searching products:", error)
-        setSearchResults([])
+        console.error("Error searching products:", error);
+        setSearchResults([]);
       } finally {
-        setIsSearching(false)
+        setIsSearching(false);
       }
-    }
-    fetchSearchResults()
-  }, [searchQuery, businessId])
+    };
+    fetchSearchResults();
+  }, [searchQuery, businessId]);
   // --- Fin búsqueda remota ---
 
   const currentEmployee = useMemo(() => {
-    if (!user) return null
-    const empById = employees.find((emp) => emp.userId === user.id)
-    const empByEmail = !empById ? employees.find((emp) => emp.email.toLowerCase() === user.email.toLowerCase()) : null
-    return empById || empByEmail
-  }, [employees, user])
+    if (!user) return null;
+    const empById = employees.find((emp) => emp.userId === user.id);
+    const empByEmail = !empById
+      ? employees.find(
+          (emp) => emp.email.toLowerCase() === user.email.toLowerCase()
+        )
+      : null;
+    return empById || empByEmail;
+  }, [employees, user]);
 
   const activeShift = useMemo(() => {
-    if (!currentEmployee) return null
-    return shifts.find((shift) => shift.employeeId === currentEmployee.id && shift.active)
-  }, [shifts, currentEmployee])
+    if (!currentEmployee) return null;
+    return shifts.find(
+      (shift) => shift.employeeId === currentEmployee.id && shift.active
+    );
+  }, [shifts, currentEmployee]);
 
   // Funciones para el carrito
   const addToCart = (product) => {
-    const existingItemIndex = cart.findIndex((item) => item.productId === product.id)
+    const existingItemIndex = cart.findIndex(
+      (item) => item.productId === product.id
+    );
     if (existingItemIndex >= 0) {
-      const updatedCart = [...cart]
-      updatedCart[existingItemIndex].quantity += 1
-      updatedCart[existingItemIndex].total = updatedCart[existingItemIndex].quantity * updatedCart[existingItemIndex].price
-      setCart(updatedCart)
+      const updatedCart = [...cart];
+      updatedCart[existingItemIndex].quantity += 1;
+      updatedCart[existingItemIndex].total =
+        updatedCart[existingItemIndex].quantity *
+        updatedCart[existingItemIndex].price;
+      setCart(updatedCart);
     } else {
       setCart([
         ...cart,
@@ -150,32 +175,35 @@ export default function NewSalePage() {
           quantity: 1,
           total: product.sellingPrice,
         },
-      ])
+      ]);
     }
-  }
+  };
 
   const updateCartItemQuantity = (index: number, newQuantity: number) => {
-    if (newQuantity < 1) return
-    const updatedCart = [...cart]
-    updatedCart[index].quantity = newQuantity
-    updatedCart[index].total = newQuantity * updatedCart[index].price
-    setCart(updatedCart)
-  }
+    if (newQuantity < 1) return;
+    const updatedCart = [...cart];
+    updatedCart[index].quantity = newQuantity;
+    updatedCart[index].total = newQuantity * updatedCart[index].price;
+    setCart(updatedCart);
+  };
 
   const removeFromCart = (index: number) => {
-    setCart(cart.filter((_, i) => i !== index))
-  }
+    setCart(cart.filter((_, i) => i !== index));
+  };
 
-  const cartTotal = useMemo(() => cart.reduce((sum, item) => sum + item.total, 0), [cart])
+  const cartTotal = useMemo(
+    () => cart.reduce((sum, item) => sum + item.total, 0),
+    [cart]
+  );
 
   const handleCompleteSale = async () => {
-    if (!activeShift || !user || cart.length === 0) return
+    if (!activeShift || !user || cart.length === 0) return;
 
     // Agregamos un log para ver el valor actual de products
-    console.log("Valores de products al confirmar la venta:", products)
+    console.log("Valores de products al confirmar la venta:", products);
 
-    console.log("Carrito",cart);
-    setIsProcessing(true)
+    console.log("Carrito", cart);
+    setIsProcessing(true);
     try {
       const saleData = {
         businessId: businessId!,
@@ -187,12 +215,12 @@ export default function NewSalePage() {
         paymentMethod,
         timestamp: new Date().toISOString(),
         shiftId: activeShift.id,
-      }
-      const result = await dispatch(createSale(saleData))
+      };
+      const result = await dispatch(createSale(saleData));
 
       // Actualizar stock de cada producto
       for (const item of cart) {
-        const product = products.find((p) => p.id === item.productId)
+        const product = products.find((p) => p.id === item.productId);
         if (product) {
           await dispatch(
             editProduct({
@@ -200,41 +228,71 @@ export default function NewSalePage() {
               stock: product.stock - item.quantity,
               salesCount: product.salesCount + item.quantity,
               totalRevenue: product.totalRevenue + item.total,
-            }),
-          )
+            })
+          );
         }
       }
 
-      setSuccessMessage("Venta registrada correctamente")
-      setCart([])
-      setPaymentMethod("cash")
-      setIsConfirmModalOpen(false)
-      setTimeout(() => {
-        setSuccessMessage("")
-      }, 3000)
-    } catch (error) {
-      console.error("Error completing sale:", error)
-    } finally {
-      setIsProcessing(false)
-    }
-  }
+      setSuccessMessage("Venta registrada correctamente");
+      setCart([]);
+      setPaymentMethod("cash");
+      setIsConfirmModalOpen(false);
+      setIsSearching(true);
+      const { data, error } = await supabase
+      .from("products")
+      .select("*")
+      .eq("business_id", businessId)
+      .or(
+        `name.ilike.%${searchQuery}%,code.ilike.%${searchQuery}%,description.ilike.%${searchQuery}%`
+      )
+      .limit(20);
+    if (error) throw error;
+    setIsSearching(false);
 
-  const isLoading = productsLoading || shiftsLoading
+    const formattedResults = data.map((item) => ({
+      id: item.id,
+      name: item.name,
+      code: item.code,
+      description: item.description,
+      sellingPrice: item.selling_price,
+      stock: item.stock,
+      minStock: item.min_stock,
+      businessId: item.business_id,
+    }));
+
+    setSearchResults(formattedResults);
+      setTimeout(async () => {
+
+        setSuccessMessage("");
+      }, 3000);
+    } catch (error) {
+      console.error("Error completing sale:", error);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const isLoading = productsLoading || shiftsLoading;
 
   if (isLoading) {
     return (
       <div className="flex justify-center items-center h-64">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-700 mx-auto"></div>
-          <p className="mt-4 text-gray-600 dark:text-gray-400">Cargando datos...</p>
+          <p className="mt-4 text-gray-600 dark:text-gray-400">
+            Cargando datos...
+          </p>
         </div>
       </div>
-    )
+    );
   }
 
   const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS" }).format(amount)
-  }
+    return new Intl.NumberFormat("es-AR", {
+      style: "currency",
+      currency: "ARS",
+    }).format(amount);
+  };
 
   return (
     <div className="space-y-6">
@@ -243,7 +301,8 @@ export default function NewSalePage() {
         <div>
           <h1 className="text-2xl font-bold">Nueva Venta</h1>
           <p className="text-gray-600 dark:text-gray-400">
-            Registra una nueva venta para {activeShift?.businessName || "tu negocio"}
+            Registra una nueva venta para{" "}
+            {activeShift?.businessName || "tu negocio"}
           </p>
         </div>
         <Link href="/employee/dashboard" className="btn btn-secondary">
@@ -256,14 +315,22 @@ export default function NewSalePage() {
         <div className="bg-red-50 dark:bg-red-900/20 border-l-4 border-red-500 p-4 rounded-md">
           <div className="flex">
             <div className="flex-shrink-0">
-              <AlertTriangle className="h-5 w-5 text-red-500" aria-hidden="true" />
+              <AlertTriangle
+                className="h-5 w-5 text-red-500"
+                aria-hidden="true"
+              />
             </div>
             <div className="ml-3">
-              <h3 className="text-sm font-medium text-red-800 dark:text-red-300">No hay un turno activo</h3>
+              <h3 className="text-sm font-medium text-red-800 dark:text-red-300">
+                No hay un turno activo
+              </h3>
               <div className="mt-2 text-sm text-red-700 dark:text-red-200">
                 <p>
                   Debes iniciar un turno antes de poder registrar ventas.
-                  <Link href="/employee/dashboard" className="ml-2 font-medium underline">
+                  <Link
+                    href="/employee/dashboard"
+                    className="ml-2 font-medium underline"
+                  >
                     Ir al Dashboard
                   </Link>
                 </p>
@@ -281,7 +348,9 @@ export default function NewSalePage() {
               <Check className="h-5 w-5 text-green-500" aria-hidden="true" />
             </div>
             <div className="ml-3">
-              <p className="text-sm font-medium text-green-800 dark:text-green-300">{successMessage}</p>
+              <p className="text-sm font-medium text-green-800 dark:text-green-300">
+                {successMessage}
+              </p>
             </div>
           </div>
         </div>
@@ -336,17 +405,27 @@ export default function NewSalePage() {
                   <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
                     {isSearching ? (
                       <tr>
-                        <td colSpan={5} className="px-6 py-4 text-center text-sm text-gray-500 dark:text-gray-400">
+                        <td
+                          colSpan={5}
+                          className="px-6 py-4 text-center text-sm text-gray-500 dark:text-gray-400"
+                        >
                           <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-700 mx-auto"></div>
                           <p className="mt-2">Buscando productos...</p>
                         </td>
                       </tr>
                     ) : searchResults.length > 0 ? (
                       searchResults.map((product) => (
-                        <tr key={product.id} className="hover:bg-gray-50 dark:hover:bg-gray-700">
+                        <tr
+                          key={product.id}
+                          className="hover:bg-gray-50 dark:hover:bg-gray-700"
+                        >
                           <td className="px-6 py-4 whitespace-nowrap">
-                            <div className="text-sm font-medium text-gray-900 dark:text-white">{product.name}</div>
-                            <div className="text-xs text-gray-500 dark:text-gray-400">{product.description}</div>
+                            <div className="text-sm font-medium text-gray-900 dark:text-white">
+                              {product.name}
+                            </div>
+                            <div className="text-xs text-gray-500 dark:text-gray-400">
+                              {product.description}
+                            </div>
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
                             {product.code}
@@ -380,8 +459,12 @@ export default function NewSalePage() {
                       ))
                     ) : (
                       <tr>
-                        <td colSpan={5} className="px-6 py-4 text-center text-sm text-gray-500 dark:text-gray-400">
-                          No se encontraron productos. Intenta con otra búsqueda.
+                        <td
+                          colSpan={5}
+                          className="px-6 py-4 text-center text-sm text-gray-500 dark:text-gray-400"
+                        >
+                          No se encontraron productos. Intenta con otra
+                          búsqueda.
                         </td>
                       </tr>
                     )}
@@ -414,18 +497,24 @@ export default function NewSalePage() {
                   >
                     <div className="flex-1">
                       <p className="font-medium text-sm">{item.productName}</p>
-                      <p className="text-xs text-gray-500 dark:text-gray-400">{formatCurrency(item.price)} c/u</p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                        {formatCurrency(item.price)} c/u
+                      </p>
                     </div>
                     <div className="flex items-center space-x-2">
                       <button
-                        onClick={() => updateCartItemQuantity(index, item.quantity - 1)}
+                        onClick={() =>
+                          updateCartItemQuantity(index, item.quantity - 1)
+                        }
                         className="p-1 rounded-full bg-gray-200 dark:bg-gray-600 hover:bg-gray-300 dark:hover:bg-gray-500"
                       >
                         <Minus className="h-4 w-4" />
                       </button>
                       <span className="w-8 text-center">{item.quantity}</span>
                       <button
-                        onClick={() => updateCartItemQuantity(index, item.quantity + 1)}
+                        onClick={() =>
+                          updateCartItemQuantity(index, item.quantity + 1)
+                        }
                         className="p-1 rounded-full bg-gray-200 dark:bg-gray-600 hover:bg-gray-300 dark:hover:bg-gray-500"
                       >
                         <Plus className="h-4 w-4" />
@@ -438,7 +527,9 @@ export default function NewSalePage() {
                       </button>
                     </div>
                     <div className="ml-4 text-right">
-                      <p className="font-medium">{formatCurrency(item.total)}</p>
+                      <p className="font-medium">
+                        {formatCurrency(item.total)}
+                      </p>
                     </div>
                   </div>
                 ))}
@@ -524,8 +615,12 @@ export default function NewSalePage() {
             ) : (
               <div className="text-center py-8">
                 <ShoppingCart className="h-12 w-12 mx-auto text-gray-400" />
-                <p className="mt-2 text-gray-500 dark:text-gray-400">El carrito está vacío</p>
-                <p className="text-sm text-gray-500 dark:text-gray-400">Busca productos y agrégalos al carrito</p>
+                <p className="mt-2 text-gray-500 dark:text-gray-400">
+                  El carrito está vacío
+                </p>
+                <p className="text-sm text-gray-500 dark:text-gray-400">
+                  Busca productos y agrégalos al carrito
+                </p>
               </div>
             )}
           </div>
@@ -546,11 +641,15 @@ export default function NewSalePage() {
               </button>
             </div>
             <div className="p-6 space-y-4">
-              <p className="text-gray-700 dark:text-gray-300">¿Estás seguro de que deseas completar esta venta?</p>
+              <p className="text-gray-700 dark:text-gray-300">
+                ¿Estás seguro de que deseas completar esta venta?
+              </p>
               <div className="bg-gray-50 dark:bg-gray-700 p-4 rounded-md">
                 <div className="flex justify-between mb-2">
                   <span className="font-medium">Total:</span>
-                  <span className="font-medium">{formatCurrency(cartTotal)}</span>
+                  <span className="font-medium">
+                    {formatCurrency(cartTotal)}
+                  </span>
                 </div>
                 <div className="flex justify-between text-sm">
                   <span>Método de Pago:</span>
@@ -580,10 +679,19 @@ export default function NewSalePage() {
                 </div>
               </div>
               <div className="pt-4 flex justify-end space-x-3">
-                <button type="button" onClick={() => setIsConfirmModalOpen(false)} className="btn btn-secondary">
+                <button
+                  type="button"
+                  onClick={() => setIsConfirmModalOpen(false)}
+                  className="btn btn-secondary"
+                >
                   Cancelar
                 </button>
-                <button type="button" onClick={handleCompleteSale} disabled={isProcessing} className="btn btn-primary">
+                <button
+                  type="button"
+                  onClick={handleCompleteSale}
+                  disabled={isProcessing}
+                  className="btn btn-primary"
+                >
                   {isProcessing ? "Procesando..." : "Confirmar"}
                 </button>
               </div>
@@ -592,5 +700,5 @@ export default function NewSalePage() {
         </div>
       )}
     </div>
-  )
+  );
 }
