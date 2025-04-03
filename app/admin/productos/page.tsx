@@ -1,7 +1,6 @@
 "use client";
 
-import type React from "react";
-import { useEffect, useState, useMemo } from "react";
+import React, { useEffect, useState, useMemo } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import type { AppDispatch, RootState } from "@/lib/redux/store";
 import {
@@ -12,48 +11,39 @@ import {
   type Product,
 } from "@/lib/redux/slices/productSlice";
 import { fetchBusinesses } from "@/lib/redux/slices/businessSlice";
-import { Plus, Edit, Trash2, X, Search, AlertTriangle } from "lucide-react";
+import { Plus, Edit, Trash2, X, Search } from "lucide-react";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 
-function calculateProfitMargin(purchasePrice: number, sellingPrice: number) {
-  if (purchasePrice === 0) return "0.00";
-  return (((sellingPrice - purchasePrice) / purchasePrice) * 100).toFixed(2);
+// Función para calcular el margen
+function calculateMargin(purchasePrice: number, sellingPrice: number): number {
+  if (purchasePrice === 0) return 0;
+  return ((sellingPrice - purchasePrice) / purchasePrice) * 100;
 }
 
-function formatNumber(num: number) {
-  return new Intl.NumberFormat("en-US", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(num);
-}
-
-export default function ProductsPage() {
+export default function ProductsAdminPage() {
   const dispatch = useDispatch<AppDispatch>();
-  const { products, loading: productsLoading } = useSelector(
-    (state: RootState) => state.products
-  );
   const { businesses, loading: businessesLoading } = useSelector(
     (state: RootState) => state.businesses
   );
-  const businessId = useSelector((state: RootState) => state.auth.user?.businessId);
+  // Si tu auth trae un businessId por defecto, úsalo. Si no, lo puedes omitir.
+  const businessIdFromAuth = useSelector(
+    (state: RootState) => state.auth.user?.businessId
+  );
 
-  // Para refrescar la lista completa por negocio
-  const [allProductsByBusiness, setAllProductsByBusiness] = useState<Map<string, Product[]>>(new Map());
+  // ---------------------------
+  // STATES LOCALES
+  // ---------------------------
+  const [products, setProducts] = useState<Product[]>([]);
+  const [productsLoading, setProductsLoading] = useState(false);
 
-  // Estados para búsqueda y filtro
+  // Negocio seleccionado
+  const [selectedBusinessId, setSelectedBusinessId] = useState<string>("");
+
+  // Búsqueda local
   const [searchQuery, setSearchQuery] = useState("");
-  const [searchResults, setSearchResults] = useState<Product[]>([]);
-  const [isSearching, setIsSearching] = useState(false);
-  // Ahora el select de negocio se usa para elegir el negocio a mostrar
-  const [selectedBusinessId, setSelectedBusinessId] = useState("");
 
-  // Estados para modal de Agregar Stock
-  const [isAddStockModalOpen, setIsAddStockModalOpen] = useState(false);
-  const [currentProductForStock, setCurrentProductForStock] = useState<Product | null>(null);
-  const [stockToAdd, setStockToAdd] = useState(0);
-
-  // Estados para modal de Agregar/Editar Producto
+  // Modales y formularios
   const [isProductModalOpen, setIsProductModalOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [productFormData, setProductFormData] = useState({
@@ -67,72 +57,47 @@ export default function ProductsPage() {
     businessId: "",
   });
   const [marginPercent, setMarginPercent] = useState(0);
-  const manualSellingPriceEnabled = true;
 
-  // Estado para refrescar solo la tabla (spinner)
+  const [isAddStockModalOpen, setIsAddStockModalOpen] = useState(false);
+  const [currentProductForStock, setCurrentProductForStock] = useState<Product | null>(null);
+  const [stockToAdd, setStockToAdd] = useState(0);
+
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [currentProductForDelete, setCurrentProductForDelete] = useState<Product | null>(null);
+
+  // Para mostrar spinner al refrescar
   const [isRefreshing, setIsRefreshing] = useState(false);
 
-  // Estado para modal de eliminación
-  const [currentProductForDelete, setCurrentProductForDelete] = useState<Product | null>(null);
-  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
-
-  // Estados para ordenamiento
+  // Ordenamiento
   const [sortField, setSortField] = useState<"stock" | null>("stock");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
 
+  // ---------------------------
+  // EFECTOS INICIALES
+  // ---------------------------
   useEffect(() => {
-    dispatch(getProducts());
     dispatch(fetchBusinesses());
   }, [dispatch]);
 
+  // Si no hay negocio seleccionado, se usa el del auth o el primero
   useEffect(() => {
-    if (businesses.length > 0 && productFormData.businessId === "") {
-      setProductFormData((prev) => ({ ...prev, businessId: businesses[0].id }));
+    if (businesses.length > 0 && !selectedBusinessId) {
+      setSelectedBusinessId(businessIdFromAuth || businesses[0].id);
     }
-  }, [businesses, productFormData.businessId]);
+  }, [businesses, businessIdFromAuth, selectedBusinessId]);
 
-  useEffect(() => {
-    if (editingProduct && editingProduct.purchasePrice > 0) {
-      const computedMargin =
-        (editingProduct.sellingPrice / editingProduct.purchasePrice - 1) * 100;
-      setMarginPercent(Number(computedMargin.toFixed(2)));
-    }
-  }, [editingProduct]);
-
-  useEffect(() => {
-    if (productFormData.purchasePrice > 0) {
-      const computedMargin =
-        (productFormData.sellingPrice / productFormData.purchasePrice - 1) * 100;
-      setMarginPercent(Number(computedMargin.toFixed(2)));
-    } else {
-      setMarginPercent(0);
-    }
-  }, [productFormData.sellingPrice, productFormData.purchasePrice]);
-
-  const lowStockProducts = useMemo(() => {
-    if (!products || !businessId) return [];
-    return products.filter((product) => product.stock <= product.minStock).slice(0, 10);
-  }, [products, businessId]);
-
-  const searchProductsInDB = async (query: string) => {
-    if (!query.trim()) {
-      setSearchResults([]);
-      if(isProductModalOpen) setIsProductModalOpen(false)
-      setIsSearching(false);
-      return;
-    }
-    setIsSearching(true);
+  // ---------------------------
+  // FETCH DE PRODUCTOS POR NEGOCIO
+  // ---------------------------
+  const fetchProductsForBusiness = async (businessId: string) => {
+    setProductsLoading(true);
     try {
-      // Se agrega el filtro por el negocio seleccionado
-      const queryBuilder = supabase.from("products").select("*");
-      if (selectedBusinessId) {
-        queryBuilder.eq("business_id", selectedBusinessId);
-      }
-      const { data, error } = await queryBuilder
-        .or(`name.ilike.%${query}%,code.ilike.%${query}%,description.ilike.%${query}%`)
-        .limit(20);
+      const { data, error } = await supabase
+        .from("products")
+        .select("*")
+        .eq("business_id", businessId);
       if (error) throw error;
-      const formattedResults: Product[] = data.map((item) => ({
+      const formattedProducts: Product[] = (data || []).map((item: any) => ({
         id: item.id,
         name: item.name,
         code: item.code,
@@ -145,59 +110,52 @@ export default function ProductsPage() {
         salesCount: item.sales_count || 0,
         totalRevenue: item.total_revenue || 0,
       }));
-      setSearchResults(formattedResults);
+      setProducts(formattedProducts);
     } catch (error) {
-      console.error("Error searching products:", error);
-      setSearchResults([]);
+      console.error("Error fetching products:", error);
+      setProducts([]);
     } finally {
-      if(isProductModalOpen) setIsProductModalOpen(false)
-      setIsSearching(false);
+      setProductsLoading(false);
     }
   };
 
-  const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const query = e.target.value;
-    setSearchQuery(query);
-    if (query.trim()) {
-      searchProductsInDB(query);
-    } else {
-      setSearchResults([]);
+  // Al cambiar de negocio, se cargan los productos
+  useEffect(() => {
+    if (selectedBusinessId) {
+      fetchProductsForBusiness(selectedBusinessId);
     }
-  };
+  }, [selectedBusinessId]);
 
-  const handleBusinessFilterChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    setSelectedBusinessId(e.target.value);
-  };
+  // ---------------------------
+  // BÚSQUEDA LOCAL
+  // ---------------------------
+  const filteredProducts = useMemo(() => {
+    if (!searchQuery.trim()) return products;
+    const lowerQuery = searchQuery.toLowerCase();
+    return products.filter(
+      (p) =>
+        (p.name ?? "").toLowerCase().includes(lowerQuery) ||
+        (p.code ?? "").toLowerCase().includes(lowerQuery) ||
+        (p.description ?? "").toLowerCase().includes(lowerQuery)
+    );
+  }, [searchQuery, products]);
 
-  const openAddStockModal = (product: Product) => {
-    setCurrentProductForStock(product);
-    setStockToAdd(0);
-    setIsAddStockModalOpen(true);
-  };
-
-  const handleAddStock = async () => {
-    if (!currentProductForStock || stockToAdd <= 0) return;
-    try {
-      await dispatch(
-        editProduct({
-          ...currentProductForStock,
-          stock: currentProductForStock.stock + stockToAdd,
-        })
-      );
-      setIsAddStockModalOpen(false);
-      setIsRefreshing(true);
-      await dispatch(getProducts());
-      setIsRefreshing(false);
-    } catch (error) {
-      console.error("Error adding stock:", error);
+  // ---------------------------
+  // ORDENAMIENTO
+  // ---------------------------
+  const sortedProducts = useMemo(() => {
+    const arr = [...filteredProducts];
+    if (sortField === "stock") {
+      arr.sort((a, b) => (sortOrder === "asc" ? a.stock - b.stock : b.stock - a.stock));
     }
-  };
+    return arr;
+  }, [filteredProducts, sortField, sortOrder]);
 
+  // ---------------------------
+  // FUNCIONES DE MODALES / ACCIONES
+  // ---------------------------
   const openAddProductModal = () => {
     setEditingProduct(null);
-    // Si hay un negocio seleccionado, se usa ese, sino se usa el primer negocio de la lista.
-    const defaultBusinessId =
-      selectedBusinessId || (businesses.length > 0 ? businesses[0].id : "");
     setProductFormData({
       name: "",
       code: "",
@@ -206,18 +164,13 @@ export default function ProductsPage() {
       stock: 0,
       minStock: 0,
       description: "",
-      businessId: defaultBusinessId,
+      businessId: selectedBusinessId,
     });
     setIsProductModalOpen(true);
   };
 
   const openEditProductModal = (product: Product) => {
     setEditingProduct(product);
-    const computedMargin =
-      product.purchasePrice > 0
-        ? ((product.sellingPrice / product.purchasePrice - 1) * 100)
-        : 0;
-    setMarginPercent(Number(computedMargin.toFixed(2)));
     setProductFormData({
       name: product.name,
       code: product.code,
@@ -228,6 +181,11 @@ export default function ProductsPage() {
       description: product.description,
       businessId: product.businessId,
     });
+    setMarginPercent(
+      product.purchasePrice > 0
+        ? Number(((product.sellingPrice / product.purchasePrice - 1) * 100).toFixed(2))
+        : 0
+    );
     setIsProductModalOpen(true);
   };
 
@@ -242,41 +200,11 @@ export default function ProductsPage() {
       await dispatch(removeProduct(currentProductForDelete.id)).unwrap();
       setIsDeleteModalOpen(false);
       setIsRefreshing(true);
-      await dispatch(getProducts());
+      await fetchProductsForBusiness(selectedBusinessId);
       setIsRefreshing(false);
-      if(searchQuery) {
-        searchProductsInDB(searchQuery);
-      } else {
-        location.reload();
-      }
     } catch (error) {
       console.error("Error deleting product:", error);
     }
-  };
-
-  const handleProductFormChange = (
-    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>
-  ) => {
-    const { name, value } = e.target;
-    setProductFormData((prev) => ({
-      ...prev,
-      [name]:
-        name === "purchasePrice" || name === "stock" || name === "minStock"
-          ? Number(value)
-          : value,
-    }));
-  };
-
-  const handleMarginChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = Number(e.target.value);
-    setMarginPercent(value);
-  };
-
-  const handleSellingPriceChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setProductFormData((prev) => ({
-      ...prev,
-      sellingPrice: Number(e.target.value),
-    }));
   };
 
   const handleProductFormSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -294,94 +222,57 @@ export default function ProductsPage() {
           })
         ).unwrap();
       }
-      if(searchQuery) {
-        searchProductsInDB(searchQuery);
-      } else {
-        location.reload();
-      }
+      setIsProductModalOpen(false);
+      setIsRefreshing(true);
+      await fetchProductsForBusiness(selectedBusinessId);
+      setIsRefreshing(false);
     } catch (error) {
       console.error("Error updating/creating product:", error);
     }
   };
 
-  // --- Solo se muestran productos cuando se selecciona un negocio ---
-  const displayProducts = useMemo(() => {
-    if (!selectedBusinessId) return [];
-    return searchQuery.trim()
-      ? searchResults
-      : allProductsByBusiness.get(selectedBusinessId) || [];
-  }, [selectedBusinessId, searchQuery, searchResults, allProductsByBusiness]);
+  const openAddStockModal = (product: Product) => {
+    setCurrentProductForStock(product);
+    setStockToAdd(0);
+    setIsAddStockModalOpen(true);
+  };
 
-  // --- Ordenamiento por "stock" ---
-  const filteredProducts = useMemo(() => {
-    return displayProducts.filter((product) =>
-      selectedBusinessId ? product.businessId === selectedBusinessId : true
-    );
-  }, [displayProducts, selectedBusinessId]);
-
-  const sortedProducts = useMemo(() => {
-    const productsToSort = [...filteredProducts];
-    if (sortField === "stock") {
-      productsToSort.sort((a, b) =>
-        sortOrder === "asc" ? a.stock - b.stock : b.stock - a.stock
-      );
-    }
-    return productsToSort;
-  }, [filteredProducts, sortField, sortOrder]);
-
-  // --- Consulta completa por negocio ---
-  useEffect(() => {
-    async function fetchProductsForEachBusiness() {
-      const newMap = new Map<string, Product[]>();
-      await Promise.all(
-        businesses.map(async (business) => {
-          const { data, error } = await supabase
-            .from("products")
-            .select("*")
-            .eq("business_id", business.id);
-          if (error) {
-            console.error("Error fetching products for business", business.id, error);
-            newMap.set(business.id, []);
-          } else {
-            const formattedProducts: Product[] = (data || []).map((item) => ({
-              id: item.id,
-              name: item.name,
-              code: item.code,
-              description: item.description,
-              purchasePrice: item.purchase_price,
-              sellingPrice: item.selling_price,
-              stock: item.stock,
-              minStock: item.min_stock,
-              businessId: item.business_id,
-              salesCount: item.sales_count || 0,
-              totalRevenue: item.total_revenue || 0,
-            }));
-            newMap.set(business.id, formattedProducts);
-          }
+  const handleAddStock = async () => {
+    if (!currentProductForStock || stockToAdd <= 0) return;
+    try {
+      await dispatch(
+        editProduct({
+          ...currentProductForStock,
+          stock: currentProductForStock.stock + stockToAdd,
         })
-      );
-      setAllProductsByBusiness(newMap);
+      ).unwrap();
+      setIsAddStockModalOpen(false);
+      setIsRefreshing(true);
+      await fetchProductsForBusiness(selectedBusinessId);
+      setIsRefreshing(false);
+    } catch (error) {
+      console.error("Error adding stock:", error);
     }
-    if (selectedBusinessId) {
-      fetchProductsForEachBusiness();
-    }
-  }, [businesses, selectedBusinessId]);
+  };
+
+  const handleProductFormChange = (
+    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>
+  ) => {
+    const { name, value } = e.target;
+    setProductFormData((prev) => ({
+      ...prev,
+      [name]:
+        name === "purchasePrice" ||
+          name === "sellingPrice" ||
+          name === "stock" ||
+          name === "minStock"
+          ? Number(value)
+          : value,
+    }));
+  };
 
   const isLoading = productsLoading || businessesLoading;
-  const currentBusiness = businesses.find((business) => business.id === businessId);
 
-  if (isLoading) {
-    return (
-      <div className="flex justify-center items-center h-64">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-700 mx-auto"></div>
-          <p className="mt-4 text-gray-600 dark:text-gray-400">
-            Cargando productos...
-          </p>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="space-y-6">
@@ -390,7 +281,7 @@ export default function ProductsPage() {
         <div>
           <h1 className="text-2xl font-bold">Productos</h1>
           <p className="text-gray-600 dark:text-gray-400">
-            Gestión de inventario para {currentBusiness?.name || "tu negocio"}
+            Gestión de inventario para el negocio seleccionado
           </p>
         </div>
         <div className="flex items-center gap-4">
@@ -404,35 +295,14 @@ export default function ProductsPage() {
         </div>
       </div>
 
-      {/* Low Stock Alert */}
-      {lowStockProducts.length > 0 && (
-        <div className="bg-amber-50 dark:bg-amber-900/20 border-l-4 border-amber-500 p-4 rounded-md">
-          <div className="flex">
-            <div className="flex-shrink-0">
-              <AlertTriangle className="h-5 w-5 text-amber-500" aria-hidden="true" />
-            </div>
-            <div className="ml-3">
-              <h3 className="text-sm font-medium text-amber-800 dark:text-amber-300">
-                Alerta de Stock Bajo
-              </h3>
-              <div className="mt-2 text-sm text-amber-700 dark:text-amber-200">
-                <p>
-                  Hay {lowStockProducts.length} productos con stock por debajo del mínimo requerido.
-                </p>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Filtro de Negocio */}
+      {/* Filtro de Negocio y Buscador */}
       <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm p-4">
         <div className="flex flex-col md:flex-row gap-4 items-center justify-between">
           <div className="w-full md:w-1/4">
             <select
               className="input w-full"
               value={selectedBusinessId}
-              onChange={handleBusinessFilterChange}
+              onChange={(e) => setSelectedBusinessId(e.target.value)}
             >
               <option value="">Selecciona un negocio</option>
               {businesses.map((business) => (
@@ -442,7 +312,6 @@ export default function ProductsPage() {
               ))}
             </select>
           </div>
-          {/* Se muestra el buscador solo si se eligió un negocio */}
           {selectedBusinessId && (
             <div className="relative w-full md:w-1/2">
               <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
@@ -453,34 +322,36 @@ export default function ProductsPage() {
                 className="input pl-10 w-full"
                 placeholder="Buscar productos..."
                 value={searchQuery}
-                onChange={handleSearchChange}
+                onChange={(e) => setSearchQuery(e.target.value)}
               />
             </div>
           )}
         </div>
       </div>
 
-      {/* Products Table */}
+      {/* Tabla de Productos */}
       {selectedBusinessId ? (
         <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+            <table className="min-w-full table-fixed divide-y divide-gray-200 dark:divide-gray-700">
+              {/* Definir anchos fijos con colgroup */}
+              <colgroup>
+                <col className="w-2/5" /> {/* Producto */}
+                <col className="w-1/5" /> {/* Precios */}
+                <col className="w-1/5" /> {/* Margen */}
+                <col className="w-1/5" /> {/* Stock */}
+                <col className="w-1/5" /> {/* Acciones */}
+              </colgroup>
               <thead className="bg-gray-50 dark:bg-gray-700">
                 <tr>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                     Producto
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                    Código
+                    Precios
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                    Precio de Compra
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                    Margen (%)
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                    Precio de Venta
+                    Margen
                   </th>
                   <th
                     onClick={() => {
@@ -493,10 +364,7 @@ export default function ProductsPage() {
                     }}
                     className="cursor-pointer px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider"
                   >
-                    Stock Actual {sortField === "stock" ? (sortOrder === "asc" ? "↑" : "↓") : ""}
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                    Stock Mínimo
+                    Stock {sortField === "stock" ? (sortOrder === "asc" ? "↑" : "↓") : ""}
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                     Acciones
@@ -504,91 +372,109 @@ export default function ProductsPage() {
                 </tr>
               </thead>
               <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                {isRefreshing ? (
+                {isRefreshing || isLoading ? (
                   <tr>
-                    <td colSpan={8} className="px-6 py-4 text-center">
+                    <td colSpan={5} className="px-6 py-4 text-center">
                       <div className="flex justify-center items-center">
+                        <div className="text-center items-center justify-center flex flex-col">
+
                         <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-700"></div>
+                        <p className="mt-2 text-sm text-gray-600 dark:text-gray-400 mt-2">
+                          Actualizando datos...
+                        </p>
+                        </div>
                       </div>
                     </td>
                   </tr>
                 ) : sortedProducts.length > 0 ? (
-                  sortedProducts.map((product) => (
-                    <tr key={product.id} className="hover:bg-gray-50 dark:hover:bg-gray-700">
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm font-medium text-gray-900 dark:text-white">
-                          {product.name}
-                        </div>
-                        <div className="text-xs text-gray-500 dark:text-gray-400">
-                          {product.description}
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
-                        {product.code}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
-                        ${product.purchasePrice.toFixed(2)}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
-                        <input
-                          type="text"
-                          value={calculateProfitMargin(product.purchasePrice, product.sellingPrice)}
-                          readOnly
-                          className="w-16 bg-transparent text-sm text-gray-500 dark:text-gray-400"
-                        />
-                        %
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
-                        ${product.sellingPrice.toFixed(2)}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span
-                          className={`px-2 py-1 text-xs font-medium rounded-full ${
-                            product.stock <= product.minStock
-                              ? "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300"
-                              : "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300"
-                          }`}
-                        >
-                          {product.stock}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
-                        {product.minStock}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-2">
-                        <button
-                          onClick={() => openEditProductModal(product)}
-                          className="text-green-600 hover:text-green-900 dark:text-green-400 dark:hover:text-green-300"
-                          title="Editar Producto"
-                        >
-                          <Edit className="w-5 h-5" />
-                        </button>
-                        <button
-                          onClick={() => openAddStockModal(product)}
-                          className="text-blue-600 hover:text-blue-900 dark:text-blue-400 dark:hover:text-blue-300"
-                          title="Agregar Stock"
-                        >
-                          Agregar Stock
-                        </button>
-                        <button
-                          onClick={() => openDeleteModal(product)}
-                          className="text-red-600 hover:text-red-900 dark:text-red-400 dark:hover:text-red-300"
-                          title="Eliminar Producto"
-                        >
-                          <Trash2 className="w-5 h-5" />
-                        </button>
-                      </td>
-                    </tr>
-                  ))
+                  sortedProducts.map((product) => {
+                    const marginNum = calculateMargin(product.purchasePrice, product.sellingPrice);
+                    const isExcessiveMargin = marginNum > 1000;
+
+                    return (
+                      <tr key={product.id} className="hover:bg-gray-50 dark:hover:bg-gray-700">
+                        {/* Producto: nombre y código, centrado verticalmente */}
+                        <td className="px-6 py-4 align-middle whitespace-normal break-words">
+                          <div className="text-sm font-medium text-gray-900 dark:text-white">
+                            {product.name}
+                          </div>
+                          <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                            {product.code}
+                          </div>
+                          {product.description && (
+                            <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                              {product.description}
+                            </div>
+                          )}
+                        </td>
+
+                        {/* Precios: Compra arriba, Venta abajo */}
+                        <td className="px-6 py-4 align-middle whitespace-nowrap">
+                          <div className="text-xs text-gray-500 dark:text-gray-400">Compra:</div>
+                          <div className="text-sm font-medium text-gray-900 dark:text-white">
+                            ${product.purchasePrice.toFixed(2)}
+                          </div>
+                          <div className="mt-2 text-xs text-gray-500 dark:text-gray-400">Venta:</div>
+                          <div className="text-sm font-medium text-gray-900 dark:text-white">
+                            ${product.sellingPrice.toFixed(2)}
+                          </div>
+                        </td>
+
+                        {/* Margen */}
+                        <td className="px-6 py-4 align-middle whitespace-nowrap">
+                          {isExcessiveMargin ? (
+                            <span className="inline-block bg-yellow-300 text-black px-2 py-1 text-xs font-medium rounded-full">
+                              Calcular MARGEN
+                            </span>
+                          ) : (
+                            <span>{marginNum.toFixed(2)}%</span>
+                          )}
+                        </td>
+
+                        {/* Stock: Mín arriba, Actual abajo */}
+                        <td className="px-6 py-4 align-middle whitespace-nowrap">
+                          <div className="text-xs text-gray-500 dark:text-gray-400">
+                            Mín: {product.minStock}
+                          </div>
+                          <div className="mt-1">
+                            <span
+                              className={`px-2 py-1 text-xs font-medium rounded-full ${product.stock <= product.minStock
+                                  ? "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300"
+                                  : "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300"
+                                }`}
+                            >
+                              {product.stock}
+                            </span>
+                          </div>
+                        </td>
+
+                        {/* Acciones (vertical) */}
+                        <td className="px-6 py-4 align-middle whitespace-nowrap">
+                          <div className="flex flex-col gap-2">
+                            <button
+                              onClick={() => openEditProductModal(product)}
+                              className="btn btn-primary px-8"
+                            >
+                              Editar
+                            </button>
+                            <button
+                              onClick={() => openDeleteModal(product)}
+                              className="btn btn-danger px-8"
+                            >
+                              Eliminar
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
                 ) : (
                   <tr>
-                    <td
-                      colSpan={8}
-                      className="px-6 py-4 text-center text-sm text-gray-500 dark:text-gray-400"
-                    >
+                    <td colSpan={5} className="px-6 py-4 text-center text-sm text-gray-500 dark:text-gray-400">
                       {searchQuery
                         ? "No se encontraron productos que coincidan con la búsqueda."
-                        : "No hay productos para este negocio."}
+                        : "No hay productos para este negocio."
+                      }
                     </td>
                   </tr>
                 )}
@@ -601,8 +487,8 @@ export default function ProductsPage() {
           Selecciona un negocio para ver los productos.
         </div>
       )}
-      
-      {/* Modal para Agregar/Editar Producto */}
+
+      {/* Modal Agregar/Editar */}
       {isProductModalOpen && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
@@ -672,7 +558,7 @@ export default function ProductsPage() {
                     id="marginPercent"
                     name="marginPercent"
                     value={marginPercent}
-                    onChange={handleMarginChange}
+                    onChange={(e) => setMarginPercent(Number(e.target.value))}
                     min="0"
                     step="0.01"
                     readOnly
@@ -688,7 +574,12 @@ export default function ProductsPage() {
                     id="sellingPrice"
                     name="sellingPrice"
                     value={productFormData.sellingPrice.toFixed(2)}
-                    onChange={handleSellingPriceChange}
+                    onChange={(e) =>
+                      setProductFormData((prev) => ({
+                        ...prev,
+                        sellingPrice: Number(e.target.value),
+                      }))
+                    }
                     className="input"
                   />
                 </div>
@@ -772,7 +663,7 @@ export default function ProductsPage() {
         </div>
       )}
 
-      {/* Modal para Agregar Stock */}
+      {/* Modal Agregar Stock */}
       {isAddStockModalOpen && currentProductForStock && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg max-w-md w-full">
@@ -806,9 +697,7 @@ export default function ProductsPage() {
                   id="stockToAdd"
                   min="1"
                   value={stockToAdd}
-                  onChange={(e) =>
-                    setStockToAdd(Number.parseInt(e.target.value) || 0)
-                  }
+                  onChange={(e) => setStockToAdd(Number.parseInt(e.target.value) || 0)}
                   className="input mt-1"
                 />
               </div>
@@ -834,7 +723,7 @@ export default function ProductsPage() {
         </div>
       )}
 
-      {/* Modal para Eliminar Producto */}
+      {/* Modal Eliminar */}
       {isDeleteModalOpen && currentProductForDelete && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg max-w-md w-full">
@@ -857,16 +746,6 @@ export default function ProductsPage() {
               </div>
             </div>
           </div>
-        </div>
-      )}
-
-      {/* Spinner al refrescar datos */}
-      {isRefreshing && (
-        <div className="text-center py-4">
-          <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-700 inline-block"></div>
-          <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
-            Actualizando datos...
-          </p>
         </div>
       )}
     </div>

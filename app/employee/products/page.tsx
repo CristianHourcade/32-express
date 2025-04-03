@@ -7,6 +7,16 @@ import { Plus, X, Search, AlertTriangle } from "lucide-react";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 
+// Hook para debouncing
+function useDebounce<T>(value: T, delay: number): T {
+  const [debouncedValue, setDebouncedValue] = useState(value);
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedValue(value), delay);
+    return () => clearTimeout(timer);
+  }, [value, delay]);
+  return debouncedValue;
+}
+
 // Definición del tipo Product (asegúrate de que coincide con tu esquema en Supabase)
 export interface Product {
   id: number | string;
@@ -23,19 +33,16 @@ export interface Product {
 }
 
 export default function EmployeeProductsPage() {
-  // Obtenemos el usuario y el negocio desde Redux (para auth y datos del negocio)
+  // Obtenemos el usuario y el negocio desde Redux
   const { user } = useSelector((state: RootState) => state.auth);
-  const { businesses, loading: businessesLoading } = useSelector(
-    (state: RootState) => state.businesses
-  );
-
+  const { businesses, loading: businessesLoading } = useSelector((state: RootState) => state.businesses);
   const businessId = user?.businessId;
 
-  // Estado local para los productos obtenidos desde la base de datos
+  // Estado para los productos y su carga
   const [products, setProducts] = useState<Product[]>([]);
   const [isProductsLoading, setIsProductsLoading] = useState(true);
 
-  // Estados para el modal de Agregar/Editar Producto
+  // Estados para modales y formularios
   const [isProductModalOpen, setIsProductModalOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [productFormData, setProductFormData] = useState({
@@ -43,27 +50,25 @@ export default function EmployeeProductsPage() {
     code: "",
     purchasePrice: 0,
     sellingPrice: 0,
-    stock: 0, // siempre en 0 para el empleado
+    stock: 0,
     minStock: 0,
     description: "",
     businessId: businessId || "",
   });
   const [marginPercent, setMarginPercent] = useState(0);
 
-  // Otros estados (búsqueda, agregar stock, etc.)
+  // Estados para búsqueda y agregar stock
   const [searchQuery, setSearchQuery] = useState("");
+  const debouncedSearchQuery = useDebounce(searchQuery, 150); // Aplica debounce
   const [isAddStockModalOpen, setIsAddStockModalOpen] = useState(false);
   const [currentProduct, setCurrentProduct] = useState<Product | null>(null);
   const [stockToAdd, setStockToAdd] = useState(0);
-  const [searchResults, setSearchResults] = useState<Product[]>([]);
-  const [isSearching, setIsSearching] = useState(false);
 
-  // Estados para ordenamiento por stock
+  // Ordenamiento por stock
   const [sortField, setSortField] = useState<"stock" | null>("stock");
-  // Cambiamos el valor inicial a "desc" para que muestre primero el mayor stock
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
 
-  // Función para obtener los productos filtrados por business_id
+  // Función para obtener los productos por business id
   const fetchProducts = async () => {
     if (!businessId) return;
     setIsProductsLoading(true);
@@ -76,7 +81,6 @@ export default function EmployeeProductsPage() {
       setIsProductsLoading(false);
       return;
     }
-    // Formateamos los datos para que coincidan con nuestro tipo Product
     const formattedProducts: Product[] = (data || []).map((item: any) => ({
       id: item.id,
       name: item.name,
@@ -94,69 +98,36 @@ export default function EmployeeProductsPage() {
     setIsProductsLoading(false);
   };
 
-  // Llamamos a fetchProducts cuando el businessId esté disponible
+  // Cargar productos cuando se tenga el businessId
   useEffect(() => {
     if (businessId) {
       fetchProducts();
     }
   }, [businessId]);
 
-  // Calculamos los productos con bajo stock para la alerta
+  // Calcular productos con bajo stock
   const lowStockProducts = useMemo(() => {
     return products.filter((product) => product.stock <= product.minStock);
   }, [products]);
 
-  // Función para buscar productos en la base de datos (filtrados por businessId)
-  const searchProductsInDB = async (query: string) => {
-    if (!query.trim() || !businessId) {
-      setSearchResults([]);
-      setIsSearching(false);
-      return;
-    }
-    setIsSearching(true);
-    try {
-      const { data, error } = await supabase
-        .from("products")
-        .select("*")
-        .eq("business_id", businessId)
-        .or(
-          `name.ilike.%${query}%,code.ilike.%${query}%,description.ilike.%${query}%`
-        )
-        .limit(20);
-      if (error) throw error;
-      const formattedResults: Product[] = (data || []).map((item: any) => ({
-        id: item.id,
-        name: item.name,
-        code: item.code,
-        description: item.description,
-        purchasePrice: item.purchase_price,
-        sellingPrice: item.selling_price,
-        stock: item.stock,
-        minStock: item.min_stock,
-        businessId: item.business_id,
-        salesCount: item.sales_count || 0,
-        totalRevenue: item.total_revenue || 0,
-      }));
-      setSearchResults(formattedResults);
-    } catch (error) {
-      console.error("Error searching products:", error);
-      setSearchResults([]);
-    } finally {
-      setIsSearching(false);
-    }
-  };
+  // Búsqueda sobre el estado de productos utilizando el valor con debounce
+  const filteredProducts = useMemo(() => {
+    if (!debouncedSearchQuery.trim()) return products;
+    const lowerQuery = debouncedSearchQuery.toLowerCase();
+    return products.filter(
+      (p) =>
+        (p.name ?? "").toLowerCase().includes(lowerQuery) ||
+        (p.code ?? "").toLowerCase().includes(lowerQuery) ||
+        (p.description ?? "").toLowerCase().includes(lowerQuery)
+    );
+  }, [debouncedSearchQuery, products]);
 
+  // Manejador del input de búsqueda
   const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const query = e.target.value;
-    setSearchQuery(query);
-    if (query.trim()) {
-      searchProductsInDB(query);
-    } else {
-      setSearchResults([]);
-    }
+    setSearchQuery(e.target.value);
   };
 
-  // Funcionalidad para agregar stock a un producto
+  // Funcionalidad para agregar stock
   const openAddStockModal = (product: Product) => {
     setCurrentProduct(product);
     setStockToAdd(0);
@@ -173,13 +144,12 @@ export default function EmployeeProductsPage() {
       if (error) throw error;
       setIsAddStockModalOpen(false);
       fetchProducts();
-      if(searchQuery) searchProductsInDB(searchQuery);
     } catch (error) {
       console.error("Error adding stock:", error);
     }
   };
 
-  // Abrir el modal para agregar un nuevo producto
+  // Abrir modal para agregar/editar producto
   const openAddProductModal = () => {
     setEditingProduct(null);
     setProductFormData({
@@ -187,7 +157,7 @@ export default function EmployeeProductsPage() {
       code: "",
       purchasePrice: 0,
       sellingPrice: 0,
-      stock: 0, // siempre en 0 para el empleado
+      stock: 0,
       minStock: 0,
       description: "",
       businessId: businessId || "",
@@ -224,7 +194,6 @@ export default function EmployeeProductsPage() {
     e: React.FormEvent<HTMLFormElement>
   ) => {
     e.preventDefault();
-    // Transformamos los nombres de los campos para que coincidan con la base de datos
     const dbProductData = {
       name: productFormData.name,
       code: productFormData.code,
@@ -258,10 +227,9 @@ export default function EmployeeProductsPage() {
     }
   };
 
-  // Si hay búsqueda se muestran esos resultados; de lo contrario, los productos obtenidos de la DB
-  const displayProducts = searchQuery ? searchResults : products;
+  const displayProducts = filteredProducts;
 
-  // Ordenar los productos por stock actual
+  // Ordenar los productos por stock
   const sortedProducts = useMemo(() => {
     const productsToSort = [...displayProducts];
     if (sortField === "stock") {
@@ -273,23 +241,7 @@ export default function EmployeeProductsPage() {
   }, [displayProducts, sortField, sortOrder]);
 
   const isLoading = isProductsLoading || businessesLoading;
-
-  if (isLoading) {
-    return (
-      <div className="flex justify-center items-center h-64">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-700 mx-auto"></div>
-          <p className="mt-4 text-gray-600 dark:text-gray-400">
-            Cargando productos...
-          </p>
-        </div>
-      </div>
-    );
-  }
-
-  const currentBusiness = businesses.find(
-    (business) => business.id === businessId
-  );
+  const currentBusiness = businesses.find((business) => business.id === businessId);
 
   return (
     <div className="space-y-6">
@@ -305,12 +257,8 @@ export default function EmployeeProductsPage() {
           </p>
         </div>
         <div className="flex items-center gap-4">
-          <button
-            onClick={openAddProductModal}
-            className="btn btn-primary flex items-center"
-          >
-            <Plus className="w-5 h-5 mr-1" />
-            Agregar Producto
+          <button onClick={openAddProductModal} className="btn btn-primary flex items-center">
+            <Plus className="w-5 h-5 mr-1" /> Agregar Producto
           </button>
           <Link href="/employee/dashboard" className="btn btn-secondary">
             Volver al Dashboard
@@ -326,13 +274,9 @@ export default function EmployeeProductsPage() {
               <AlertTriangle className="h-5 w-5 text-amber-500" aria-hidden="true" />
             </div>
             <div className="ml-3">
-              <h3 className="text-sm font-medium text-amber-800 dark:text-amber-300">
-                Alerta de Stock Bajo
-              </h3>
+              <h3 className="text-sm font-medium text-amber-800 dark:text-amber-300">Alerta de Stock Bajo</h3>
               <div className="mt-2 text-sm text-amber-700 dark:text-amber-200">
-                <p>
-                  Hay {lowStockProducts.length} productos con stock por debajo del mínimo requerido.
-                </p>
+                <p>Hay {lowStockProducts.length} productos con stock por debajo del mínimo requerido.</p>
               </div>
             </div>
           </div>
@@ -357,110 +301,107 @@ export default function EmployeeProductsPage() {
         </div>
       </div>
 
-      {/* Indicador de búsqueda */}
-      {isSearching && (
-        <div className="text-center py-2">
-          <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-700 mx-auto"></div>
-          <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
-            Buscando productos...
-          </p>
-        </div>
-      )}
-
-      {/* Tabla de Productos */}
       <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-            <thead className="bg-gray-50 dark:bg-gray-700">
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                  Producto
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                  Código
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                  Precio
-                </th>
-                <th
-                  onClick={() => {
-                    if (sortField === "stock") {
-                      setSortOrder(sortOrder === "asc" ? "desc" : "asc");
-                    } else {
-                      setSortField("stock");
-                      setSortOrder("asc");
-                    }
-                  }}
-                  className="cursor-pointer px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider"
+  <div className="overflow-x-auto">
+    <table className="min-w-full table-fixed divide-y divide-gray-200 dark:divide-gray-700">
+      {/* Define anchos fijos para cada columna */}
+      <colgroup>
+        <col className="w-2/5" /> {/* Producto */}
+        <col className="w-1/5" /> {/* Precio */}
+        <col className="w-1/5" /> {/* Stock */}
+        <col className="w-1/5" /> {/* Acciones */}
+      </colgroup>
+      <thead className="bg-gray-50 dark:bg-gray-700">
+        <tr>
+          {/* Columna Producto */}
+          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+            Producto
+          </th>
+          {/* Columna Precio */}
+          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+            Precio
+          </th>
+          {/* Columna Stock */}
+          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+            Stock
+          </th>
+          {/* Columna Acciones */}
+          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+            Acciones
+          </th>
+        </tr>
+      </thead>
+      <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+        {sortedProducts.length > 0 && !isLoading ? (
+          sortedProducts.map((product) => (
+            <tr
+              key={product.id}
+              className="hover:bg-gray-50 dark:hover:bg-gray-700"
+            >
+              {/* Columna Producto: nombre y código */}
+              <td className="px-6 py-4 whitespace-normal break-words">
+                <div className="text-sm font-medium text-gray-900 dark:text-white">
+                  {product.name}
+                </div>
+                <div className="text-xs text-gray-500 dark:text-gray-400">
+                  {product.code}
+                </div>
+              </td>
+              {/* Columna Precio */}
+              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
+                ${product.sellingPrice.toFixed(2)}
+              </td>
+              {/* Columna Stock */}
+              <td className="px-6 py-4 whitespace-nowrap">
+                <span
+                  className={`px-2 py-1 text-xs font-medium rounded-full ${
+                    product.stock <= product.minStock
+                      ? "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300"
+                      : "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300"
+                  }`}
                 >
-                  Stock Actual {sortField === "stock" ? (sortOrder === "asc" ? "↑" : "↓") : ""}
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                  Stock Mínimo
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                  Acciones
-                </th>
-              </tr>
-            </thead>
-            <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-              {sortedProducts.length > 0 ? (
-                sortedProducts.map((product) => (
-                  <tr key={product.id} className="hover:bg-gray-50 dark:hover:bg-gray-700">
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm font-medium text-gray-900 dark:text-white">
-                        {product.name}
-                      </div>
-                      <div className="text-xs text-gray-500 dark:text-gray-400">
-                        {product.description}
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
-                      {product.code}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
-                      ${product.sellingPrice.toFixed(2)}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span
-                        className={`px-2 py-1 text-xs font-medium rounded-full ${
-                          product.stock <= product.minStock
-                            ? "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300"
-                            : "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300"
-                        }`}
-                      >
-                        {product.stock}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
-                      {product.minStock}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                      <button
-                        onClick={() => openAddStockModal(product)}
-                        className="text-blue-600 hover:text-blue-900 dark:text-blue-400 dark:hover:text-blue-300"
-                      >
-                        Agregar Stock
-                      </button>
-                    </td>
-                  </tr>
-                ))
+                  {product.stock}
+                </span>
+              </td>
+              {/* Columna Acciones */}
+              <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                <button
+                  onClick={() => openAddStockModal(product)}
+                  className="text-blue-600 hover:text-blue-900 dark:text-blue-400 dark:hover:text-blue-300"
+                >
+                  Agregar Stock
+                </button>
+              </td>
+            </tr>
+          ))
+        ) : (
+          <tr>
+            <td
+              colSpan={4}
+              className="px-6 py-4 text-center text-sm text-gray-500 dark:text-gray-400"
+            >
+              {isLoading ? (
+                <div className="flex justify-center items-center h-64">
+                  <div className="text-center">
+                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-700 mx-auto"></div>
+                    <p className="mt-4 text-gray-600 dark:text-gray-400">
+                      Cargando productos...
+                    </p>
+                  </div>
+                </div>
+              ) : searchQuery ? (
+                "No se encontraron productos que coincidan con la búsqueda."
               ) : (
-                <tr>
-                  <td
-                    colSpan={6}
-                    className="px-6 py-4 text-center text-sm text-gray-500 dark:text-gray-400"
-                  >
-                    {searchQuery
-                      ? "No se encontraron productos que coincidan con la búsqueda."
-                      : "No hay productos para mostrar."}
-                  </td>
-                </tr>
+                "No hay productos para mostrar."
               )}
-            </tbody>
-          </table>
-        </div>
-      </div>
+            </td>
+          </tr>
+        )}
+      </tbody>
+    </table>
+  </div>
+</div>
+
 
       {/* Modal para Agregar Stock */}
       {isAddStockModalOpen && currentProduct && (
@@ -468,10 +409,7 @@ export default function EmployeeProductsPage() {
           <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg max-w-md w-full">
             <div className="flex justify-between items-center p-6 border-b border-gray-200 dark:border-gray-700">
               <h2 className="text-xl font-semibold">Agregar Stock</h2>
-              <button
-                onClick={() => setIsAddStockModalOpen(false)}
-                className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
-              >
+              <button onClick={() => setIsAddStockModalOpen(false)} className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300">
                 <X className="w-6 h-6" />
               </button>
             </div>
@@ -485,10 +423,7 @@ export default function EmployeeProductsPage() {
                 <p className="font-medium">{currentProduct.stock}</p>
               </div>
               <div>
-                <label
-                  htmlFor="stockToAdd"
-                  className="block text-sm font-medium text-gray-700 dark:text-gray-300"
-                >
+                <label htmlFor="stockToAdd" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                   Cantidad a Agregar
                 </label>
                 <input
@@ -496,26 +431,15 @@ export default function EmployeeProductsPage() {
                   id="stockToAdd"
                   min="1"
                   value={stockToAdd}
-                  onChange={(e) =>
-                    setStockToAdd(Number.parseInt(e.target.value) || 0)
-                  }
+                  onChange={(e) => setStockToAdd(Number.parseInt(e.target.value) || 0)}
                   className="input mt-1"
                 />
               </div>
               <div className="pt-4 flex justify-end space-x-3">
-                <button
-                  type="button"
-                  onClick={() => setIsAddStockModalOpen(false)}
-                  className="btn btn-secondary"
-                >
+                <button type="button" onClick={() => setIsAddStockModalOpen(false)} className="btn btn-secondary">
                   Cancelar
                 </button>
-                <button
-                  type="button"
-                  onClick={handleAddStock}
-                  disabled={stockToAdd <= 0}
-                  className="btn btn-primary"
-                >
+                <button type="button" onClick={handleAddStock} disabled={stockToAdd <= 0} className="btn btn-primary">
                   Confirmar
                 </button>
               </div>
@@ -532,123 +456,43 @@ export default function EmployeeProductsPage() {
               <h2 className="text-xl font-semibold">
                 {editingProduct ? "Editar Producto" : "Agregar Nuevo Producto"}
               </h2>
-              <button
-                onClick={() => setIsProductModalOpen(false)}
-                className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
-              >
+              <button onClick={() => setIsProductModalOpen(false)} className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300">
                 <X className="w-6 h-6" />
               </button>
             </div>
             <form onSubmit={handleProductFormSubmit} className="p-6 space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label htmlFor="name" className="label">
-                    Nombre
-                  </label>
-                  <input
-                    type="text"
-                    id="name"
-                    name="name"
-                    value={productFormData.name}
-                    onChange={handleProductFormChange}
-                    required
-                    className="input"
-                  />
+                  <label htmlFor="name" className="label">Nombre</label>
+                  <input type="text" id="name" name="name" value={productFormData.name} onChange={handleProductFormChange} required className="input" />
                 </div>
                 <div>
-                  <label htmlFor="code" className="label">
-                    Código
-                  </label>
-                  <input
-                    type="text"
-                    id="code"
-                    name="code"
-                    value={productFormData.code}
-                    onChange={handleProductFormChange}
-                    required
-                    className="input"
-                  />
+                  <label htmlFor="code" className="label">Código</label>
+                  <input type="text" id="code" name="code" value={productFormData.code} onChange={handleProductFormChange} required className="input" />
                 </div>
                 <div>
-                  <label htmlFor="purchasePrice" className="label">
-                    Precio de Compra
-                  </label>
-                  <input
-                    type="number"
-                    id="purchasePrice"
-                    name="purchasePrice"
-                    value={productFormData.purchasePrice}
-                    onChange={handleProductFormChange}
-                    min="0"
-                    step="0.01"
-                    required
-                    className="input"
-                  />
+                  <label htmlFor="purchasePrice" className="label">Precio de Compra</label>
+                  <input type="number" id="purchasePrice" name="purchasePrice" value={productFormData.purchasePrice} onChange={handleProductFormChange} min="0" step="0.01" required className="input" />
                 </div>
                 <div>
-                  <label htmlFor="sellingPrice" className="label">
-                    Precio de Venta
-                  </label>
-                  <input
-                    type="number"
-                    id="sellingPrice"
-                    name="sellingPrice"
-                    value={productFormData.sellingPrice}
-                    onChange={handleProductFormChange}
-                    min="0"
-                    step="0.01"
-                    required
-                    className="input"
-                  />
+                  <label htmlFor="sellingPrice" className="label">Precio de Venta</label>
+                  <input type="number" id="sellingPrice" name="sellingPrice" value={productFormData.sellingPrice} onChange={handleProductFormChange} min="0" step="0.01" required className="input" />
                 </div>
                 <div>
-                  <label htmlFor="stock" className="label">
-                    Stock
-                  </label>
-                  <input
-                    type="number"
-                    id="stock"
-                    name="stock"
-                    value={productFormData.stock}
-                    readOnly
-                    className="input bg-gray-100 dark:bg-gray-700"
-                  />
+                  <label htmlFor="stock" className="label">Stock</label>
+                  <input type="number" id="stock" name="stock" value={productFormData.stock} readOnly className="input bg-gray-100 dark:bg-gray-700" />
                 </div>
                 <div>
-                  <label htmlFor="minStock" className="label">
-                    Stock Mínimo
-                  </label>
-                  <input
-                    type="number"
-                    id="minStock"
-                    name="minStock"
-                    value={productFormData.minStock}
-                    onChange={handleProductFormChange}
-                    min="0"
-                    required
-                    className="input"
-                  />
+                  <label htmlFor="minStock" className="label">Stock Mínimo</label>
+                  <input type="number" id="minStock" name="minStock" value={productFormData.minStock} onChange={handleProductFormChange} min="0" required className="input" />
                 </div>
                 <div className="md:col-span-2">
-                  <label htmlFor="description" className="label">
-                    Descripción
-                  </label>
-                  <textarea
-                    id="description"
-                    name="description"
-                    value={productFormData.description}
-                    onChange={handleProductFormChange}
-                    rows={3}
-                    className="input"
-                  ></textarea>
+                  <label htmlFor="description" className="label">Descripción</label>
+                  <textarea id="description" name="description" value={productFormData.description} onChange={handleProductFormChange} rows={3} className="input"></textarea>
                 </div>
               </div>
               <div className="flex justify-end space-x-3 pt-4">
-                <button
-                  type="button"
-                  onClick={() => setIsProductModalOpen(false)}
-                  className="btn btn-secondary"
-                >
+                <button type="button" onClick={() => setIsProductModalOpen(false)} className="btn btn-secondary">
                   Cancelar
                 </button>
                 <button type="submit" className="btn btn-primary">

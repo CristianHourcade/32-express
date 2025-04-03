@@ -37,15 +37,16 @@ export default function NewSalePage() {
   );
   const { employees } = useSelector((state: RootState) => state.employees);
 
-  // Estado local para los productos
+  // State que guarda TODOS los productos del businessId actual.
+  // Este state se carga al montar el componente y solo se refetchea
+  // al confirmar una venta.
   const [products, setProducts] = useState<any[]>([]);
   const [productsLoading, setProductsLoading] = useState(true);
 
-  // Estados para búsqueda remota
+  // Estado para el término de búsqueda; se filtra sobre el state local de productos.
   const [searchQuery, setSearchQuery] = useState("");
-  const [searchResults, setSearchResults] = useState<any[]>([]);
-  const [isSearching, setIsSearching] = useState(false);
 
+  // Estados para el carrito y venta
   const [cart, setCart] = useState<CartItem[]>([]);
   const [paymentMethod, setPaymentMethod] = useState<
     "cash" | "card" | "transfer" | "mercadopago" | "rappi"
@@ -54,98 +55,53 @@ export default function NewSalePage() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [successMessage, setSuccessMessage] = useState("");
 
-  // Obtenemos el businessId del usuario
   const businessId = user?.businessId;
 
-  // Cargar productos desde la base de datos filtrando por businessId
-  useEffect(() => {
+  // Función para cargar todos los productos del business actual.
+  // Esta función se llama al montar el componente y luego al confirmar una venta.
+  const fetchProducts = async () => {
     if (!businessId) return;
-    const fetchProducts = async () => {
-      setProductsLoading(true);
-      try {
-        const { data, error } = await supabase
-          .from("products")
-          .select("*")
-          .eq("business_id", businessId); // Filtrar por businessId
-        if (error) throw error;
-        setProducts(data);
-        console.log("Productos cargados:", data);
-      } catch (error) {
-        console.error("Error al cargar productos:", error);
-        setProducts([]);
-      } finally {
-        setProductsLoading(false);
-      }
-    };
-    fetchProducts();
+    setProductsLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from("products")
+        .select("*")
+        .eq("business_id", businessId);
+      if (error) throw error;
+      setProducts(data);
+    } catch (error) {
+      console.error("Error al cargar productos:", error);
+      setProducts([]);
+    } finally {
+      setProductsLoading(false);
+    }
+  };
+
+  // Cargar productos al montar el componente.
+  useEffect(() => {
+    if (businessId) {
+      fetchProducts();
+    }
   }, [businessId]);
 
   // Cargar turnos
   useEffect(() => {
-    console.log("🔍 NewSale: Component mounted");
-    console.log("🔍 NewSale: Current user:", user);
     dispatch(getShifts());
   }, [dispatch, user]);
 
-  // Filtrar productos del negocio (si se requiere en alguna parte)
-  const businessProducts = useMemo(
-    () => products.filter((product) => product.business_id === businessId),
-    [products, businessId]
-  );
-
-  // --- Búsqueda remota usando Supabase ---
-  useEffect(() => {
-    const fetchSearchResults = async () => {
-      if (!searchQuery.trim()) {
-        setSearchResults([]);
-        return;
-      }
-      setIsSearching(true);
-      try {
-        const { data, error } = await supabase
-          .from("products")
-          .select("*")
-          .eq("business_id", businessId)
-          .or(
-            `name.ilike.%${searchQuery}%,code.ilike.%${searchQuery}%,description.ilike.%${searchQuery}%`
-          )
-          .limit(20);
-        if (error) throw error;
-
-        const formattedResults = data.map((item) => ({
-          id: item.id,
-          name: item.name,
-          code: item.code,
-          description: item.description,
-          sellingPrice: item.selling_price,
-          stock: item.stock,
-          minStock: item.min_stock,
-          businessId: item.business_id,
-        }));
-
-        setSearchResults(formattedResults);
-      } catch (error) {
-        console.error("Error searching products:", error);
-        setSearchResults([]);
-      } finally {
-        setIsSearching(false);
-      }
-    };
-    fetchSearchResults();
-  }, [searchQuery, businessId]);
-  // --- Fin búsqueda remota ---
-
+  // Obtener el empleado actual
   const currentEmployee = useMemo(() => {
     if (!user) return null;
     const empById = employees.find((emp) => emp.userId === user.id);
     const empByEmail = !empById
       ? employees.find(
-          (emp) => emp.email.toLowerCase() === user.email.toLowerCase()
-        )
+        (emp) => emp.email.toLowerCase() === user.email.toLowerCase()
+      )
       : null;
     return empById || empByEmail;
   }, [employees, user]);
 
+  // Obtener el turno activo del empleado
   const activeShift = useMemo(() => {
     if (!currentEmployee) return null;
     return shifts.find(
@@ -153,34 +109,60 @@ export default function NewSalePage() {
     );
   }, [shifts, currentEmployee]);
 
+  // Búsqueda local: filtra sobre el state de productos.
+  const filteredProducts = useMemo(() => {
+    if (!searchQuery.trim()) return [];
+    const lowerQuery = searchQuery.toLowerCase();
+    return products.filter(
+      (p) =>
+        (p.name ?? "").toLowerCase().includes(lowerQuery) ||
+        (p.code ?? "").toLowerCase().includes(lowerQuery) ||
+        (p.description ?? "").toLowerCase().includes(lowerQuery)
+    );
+  }, [searchQuery, products]);
+
   // Funciones para el carrito
   const addToCart = (product) => {
     const existingItemIndex = cart.findIndex(
       (item) => item.productId === product.id
     );
     if (existingItemIndex >= 0) {
+      // Verificar que la cantidad actual no sea igual al stock
+      if (cart[existingItemIndex].quantity >= product.stock) {
+        return; // No se permite agregar más
+      }
       const updatedCart = [...cart];
       updatedCart[existingItemIndex].quantity += 1;
       updatedCart[existingItemIndex].total =
-        updatedCart[existingItemIndex].quantity *
-        updatedCart[existingItemIndex].price;
+        updatedCart[existingItemIndex].quantity * updatedCart[existingItemIndex].price;
       setCart(updatedCart);
     } else {
-      setCart([
-        ...cart,
-        {
-          productId: product.id,
-          productName: product.name,
-          price: product.sellingPrice,
-          quantity: 1,
-          total: product.sellingPrice,
-        },
-      ]);
+      // Si no está en el carrito, agregarlo solo si hay stock (stock > 0)
+      if (product.stock > 0) {
+        setCart([
+          ...cart,
+          {
+            productId: product.id,
+            productName: product.name,
+            price: product.selling_price || product.sellingPrice,
+            quantity: 1,
+            total: product.selling_price || product.sellingPrice,
+          },
+        ]);
+      }
     }
   };
 
+  // Actualizar la cantidad del carrito, evitando que exceda el stock disponible
   const updateCartItemQuantity = (index: number, newQuantity: number) => {
     if (newQuantity < 1) return;
+    // Buscar el producto en la lista de productos locales para conocer su stock
+    const product = products.find((p) => p.id === cart[index].productId);
+    if (!product) return;
+    // Si la nueva cantidad excede el stock, fijarla al máximo disponible
+    if (newQuantity > product.stock) {
+      newQuantity = product.stock;
+    }
     const updatedCart = [...cart];
     updatedCart[index].quantity = newQuantity;
     updatedCart[index].total = newQuantity * updatedCart[index].price;
@@ -196,13 +178,16 @@ export default function NewSalePage() {
     [cart]
   );
 
+  const formatCurrency = (amount: number) => {
+    return new Intl.NumberFormat("es-AR", {
+      style: "currency",
+      currency: "ARS",
+    }).format(amount);
+  };
+
+  // Completar la venta
   const handleCompleteSale = async () => {
     if (!activeShift || !user || cart.length === 0) return;
-
-    // Agregamos un log para ver el valor actual de products
-    console.log("Valores de products al confirmar la venta:", products);
-
-    console.log("Carrito", cart);
     setIsProcessing(true);
     try {
       const saleData = {
@@ -216,7 +201,7 @@ export default function NewSalePage() {
         timestamp: new Date().toISOString(),
         shiftId: activeShift.id,
       };
-      const result = await dispatch(createSale(saleData));
+      await dispatch(createSale(saleData));
 
       // Actualizar stock de cada producto
       for (const item of cart) {
@@ -237,32 +222,9 @@ export default function NewSalePage() {
       setCart([]);
       setPaymentMethod("cash");
       setIsConfirmModalOpen(false);
-      setIsSearching(true);
-      const { data, error } = await supabase
-      .from("products")
-      .select("*")
-      .eq("business_id", businessId)
-      .or(
-        `name.ilike.%${searchQuery}%,code.ilike.%${searchQuery}%,description.ilike.%${searchQuery}%`
-      )
-      .limit(20);
-    if (error) throw error;
-    setIsSearching(false);
-
-    const formattedResults = data.map((item) => ({
-      id: item.id,
-      name: item.name,
-      code: item.code,
-      description: item.description,
-      sellingPrice: item.selling_price,
-      stock: item.stock,
-      minStock: item.min_stock,
-      businessId: item.business_id,
-    }));
-
-    setSearchResults(formattedResults);
-      setTimeout(async () => {
-
+      // Refetchear los productos para actualizar el state local.
+      await fetchProducts();
+      setTimeout(() => {
         setSuccessMessage("");
       }, 3000);
     } catch (error) {
@@ -273,30 +235,12 @@ export default function NewSalePage() {
   };
 
   const isLoading = productsLoading || shiftsLoading;
-
-  if (isLoading) {
-    return (
-      <div className="flex justify-center items-center h-64">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-700 mx-auto"></div>
-          <p className="mt-4 text-gray-600 dark:text-gray-400">
-            Cargando datos...
-          </p>
-        </div>
-      </div>
-    );
+  if(!activeShift) {
+    location.href="/employee/dashboard";
   }
-
-  const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat("es-AR", {
-      style: "currency",
-      currency: "ARS",
-    }).format(amount);
-  };
-
   return (
     <div className="space-y-6">
-      {/* Cabecera y mensaje */}
+      {/* Cabecera */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
           <h1 className="text-2xl font-bold">Nueva Venta</h1>
@@ -357,7 +301,7 @@ export default function NewSalePage() {
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Buscador de productos y resultados */}
+        {/* Buscador y listado de productos filtrados */}
         <div className="lg:col-span-2 space-y-4">
           <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm p-4">
             <div className="relative">
@@ -375,21 +319,24 @@ export default function NewSalePage() {
             </div>
           </div>
 
-          {/* Resultados de la búsqueda remota */}
-          {searchQuery && (
+          {/* Solo se muestra el listado si hay término de búsqueda */}
+          {searchQuery.trim() && (
             <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm overflow-hidden">
               <div className="p-4 border-b border-gray-200 dark:border-gray-700">
                 <h2 className="font-semibold">Resultados de la búsqueda</h2>
               </div>
               <div className="overflow-x-auto">
-                <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                <table className="min-w-full table-fixed divide-y divide-gray-200 dark:divide-gray-700">
+                  <colgroup>
+                    <col className="w-2/5" /> {/* Producto: Nombre y Código */}
+                    <col className="w-1/5" /> {/* Precio */}
+                    <col className="w-1/5" /> {/* Stock */}
+                    <col className="w-1/5" /> {/* Acciones */}
+                  </colgroup>
                   <thead className="bg-gray-50 dark:bg-gray-700">
                     <tr>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                         Producto
-                      </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                        Código
                       </th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                         Precio
@@ -403,45 +350,31 @@ export default function NewSalePage() {
                     </tr>
                   </thead>
                   <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                    {isSearching ? (
-                      <tr>
-                        <td
-                          colSpan={5}
-                          className="px-6 py-4 text-center text-sm text-gray-500 dark:text-gray-400"
-                        >
-                          <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-700 mx-auto"></div>
-                          <p className="mt-2">Buscando productos...</p>
-                        </td>
-                      </tr>
-                    ) : searchResults.length > 0 ? (
-                      searchResults.map((product) => (
+                    {filteredProducts.length > 0 && !isLoading ? (
+                      filteredProducts.map((product) => (
                         <tr
                           key={product.id}
                           className="hover:bg-gray-50 dark:hover:bg-gray-700"
                         >
-                          <td className="px-6 py-4 whitespace-nowrap">
+                          <td className="px-6 py-4 whitespace-normal break-words">
                             <div className="text-sm font-medium text-gray-900 dark:text-white">
                               {product.name}
                             </div>
                             <div className="text-xs text-gray-500 dark:text-gray-400">
-                              {product.description}
+                              {product.code}
                             </div>
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
-                            {product.code}
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white">
-                            {formatCurrency(product.sellingPrice)}
+                            {formatCurrency(product.selling_price)}
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap">
                             <span
-                              className={`px-2 py-1 text-xs font-medium rounded-full ${
-                                product.stock <= 0
+                              className={`px-2 py-1 text-xs font-medium rounded-full ${product.stock <= 0
                                   ? "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300"
                                   : product.stock <= product.minStock
-                                  ? "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300"
-                                  : "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300"
-                              }`}
+                                    ? "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300"
+                                    : "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300"
+                                }`}
                             >
                               {product.stock}
                             </span>
@@ -458,15 +391,25 @@ export default function NewSalePage() {
                         </tr>
                       ))
                     ) : (
-                      <tr>
-                        <td
-                          colSpan={5}
-                          className="px-6 py-4 text-center text-sm text-gray-500 dark:text-gray-400"
-                        >
-                          No se encontraron productos. Intenta con otra
-                          búsqueda.
-                        </td>
-                      </tr>
+                      isLoading ? (
+                        <div className="flex justify-center items-center h-64">
+                          <div className="text-center">
+                            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-700 mx-auto"></div>
+                            <p className="mt-4 text-gray-600 dark:text-gray-400">
+                              Cargando datos...
+                            </p>
+                          </div>
+                        </div>
+                      ) : (
+                        <tr>
+                          <td
+                            colSpan={4}
+                            className="px-6 py-4 text-center text-sm text-gray-500 dark:text-gray-400"
+                          >
+                            No se encontraron productos. Intenta con otra búsqueda.
+                          </td>
+                        </tr>
+                      )
                     )}
                   </tbody>
                 </table>
@@ -548,55 +491,50 @@ export default function NewSalePage() {
                       <button
                         type="button"
                         onClick={() => setPaymentMethod("cash")}
-                        className={`py-2 px-4 rounded-md text-sm font-medium ${
-                          paymentMethod === "cash"
+                        className={`py-2 px-4 rounded-md text-sm font-medium ${paymentMethod === "cash"
                             ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300 border-2 border-green-500"
                             : "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600"
-                        }`}
+                          }`}
                       >
                         Efectivo
                       </button>
                       <button
                         type="button"
                         onClick={() => setPaymentMethod("card")}
-                        className={`py-2 px-4 rounded-md text-sm font-medium ${
-                          paymentMethod === "card"
+                        className={`py-2 px-4 rounded-md text-sm font-medium ${paymentMethod === "card"
                             ? "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300 border-2 border-blue-500"
                             : "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600"
-                        }`}
+                          }`}
                       >
                         Tarjeta
                       </button>
                       <button
                         type="button"
                         onClick={() => setPaymentMethod("transfer")}
-                        className={`py-2 px-4 rounded-md text-sm font-medium ${
-                          paymentMethod === "transfer"
+                        className={`py-2 px-4 rounded-md text-sm font-medium ${paymentMethod === "transfer"
                             ? "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-300 border-2 border-purple-500"
                             : "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600"
-                        }`}
+                          }`}
                       >
                         Transferencia
                       </button>
                       <button
                         type="button"
                         onClick={() => setPaymentMethod("mercadopago")}
-                        className={`py-2 px-4 rounded-md text-sm font-medium ${
-                          paymentMethod === "mercadopago"
+                        className={`py-2 px-4 rounded-md text-sm font-medium ${paymentMethod === "mercadopago"
                             ? "bg-sky-100 text-sky-800 dark:bg-sky-900 dark:text-sky-300 border-2 border-sky-500"
                             : "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600"
-                        }`}
+                          }`}
                       >
                         MercadoPago
                       </button>
                       <button
                         type="button"
                         onClick={() => setPaymentMethod("rappi")}
-                        className={`py-2 px-4 rounded-md text-sm font-medium ${
-                          paymentMethod === "rappi"
+                        className={`py-2 px-4 rounded-md text-sm font-medium ${paymentMethod === "rappi"
                             ? "bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-300 border-2 border-orange-500"
                             : "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600"
-                        }`}
+                          }`}
                       >
                         Rappi
                       </button>
@@ -654,27 +592,26 @@ export default function NewSalePage() {
                 <div className="flex justify-between text-sm">
                   <span>Método de Pago:</span>
                   <span
-                    className={`px-2 py-1 rounded text-xs font-medium ${
-                      paymentMethod === "cash"
+                    className={`px-2 py-1 rounded text-xs font-medium ${paymentMethod === "cash"
                         ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300"
                         : paymentMethod === "card"
-                        ? "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300"
-                        : paymentMethod === "transfer"
-                        ? "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-300"
-                        : paymentMethod === "mercadopago"
-                        ? "bg-sky-100 text-sky-800 dark:bg-sky-900 dark:text-sky-300"
-                        : "bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-300"
-                    }`}
+                          ? "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300"
+                          : paymentMethod === "transfer"
+                            ? "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-300"
+                            : paymentMethod === "mercadopago"
+                              ? "bg-sky-100 text-sky-800 dark:bg-sky-900 dark:text-sky-300"
+                              : "bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-300"
+                      }`}
                   >
                     {paymentMethod === "cash"
                       ? "Efectivo"
                       : paymentMethod === "card"
-                      ? "Tarjeta"
-                      : paymentMethod === "transfer"
-                      ? "Transferencia"
-                      : paymentMethod === "mercadopago"
-                      ? "MercadoPago"
-                      : "Rappi"}
+                        ? "Tarjeta"
+                        : paymentMethod === "transfer"
+                          ? "Transferencia"
+                          : paymentMethod === "mercadopago"
+                            ? "MercadoPago"
+                            : "Rappi"}
                   </span>
                 </div>
               </div>
