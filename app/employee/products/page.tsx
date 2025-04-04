@@ -72,16 +72,40 @@ export default function EmployeeProductsPage() {
   const fetchProducts = async () => {
     if (!businessId) return;
     setIsProductsLoading(true);
-    const { data, error } = await supabase
-      .from("products")
-      .select("*")
-      .eq("business_id", businessId);
-    if (error) {
-      console.error("Error fetching products:", error);
-      setIsProductsLoading(false);
-      return;
+    const pageSize = 1000;
+    let page = 0;
+    let allProducts: any[] = [];
+    let done = false;
+  
+    while (!done) {
+      const from = page * pageSize;
+      const to = from + pageSize - 1;
+      const { data, error } = await supabase
+        .from("products")
+        .select("*")
+        .eq("business_id", businessId)
+        .range(from, to);
+  
+      if (error) {
+        console.error("Error fetching products:", error);
+        break;
+      }
+  
+      if (data && data.length > 0) {
+        allProducts = allProducts.concat(data);
+        // Si se retornaron menos registros de lo esperado, es que ya no hay más datos.
+        if (data.length < pageSize) {
+          done = true;
+        } else {
+          page++;
+        }
+      } else {
+        done = true;
+      }
     }
-    const formattedProducts: Product[] = (data || []).map((item: any) => ({
+  
+    // Formatea los productos de acuerdo a tu tipo Product
+    const formattedProducts: Product[] = allProducts.map((item: any) => ({
       id: item.id,
       name: item.name,
       code: item.code,
@@ -94,6 +118,7 @@ export default function EmployeeProductsPage() {
       salesCount: item.sales_count || 0,
       totalRevenue: item.total_revenue || 0,
     }));
+  
     setProducts(formattedProducts);
     setIsProductsLoading(false);
   };

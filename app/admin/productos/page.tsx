@@ -92,12 +92,37 @@ export default function ProductsAdminPage() {
   const fetchProductsForBusiness = async (businessId: string) => {
     setProductsLoading(true);
     try {
-      const { data, error } = await supabase
-        .from("products")
-        .select("*")
-        .eq("business_id", businessId);
-      if (error) throw error;
-      const formattedProducts: Product[] = (data || []).map((item: any) => ({
+      const pageSize = 1000;
+      let page = 0;
+      let allProducts: any[] = [];
+      let done = false;
+  
+      while (!done) {
+        const from = page * pageSize;
+        const to = from + pageSize - 1;
+        const { data, error } = await supabase
+          .from("products")
+          .select("*")
+          .eq("business_id", businessId)
+          .range(from, to);
+  
+        if (error) throw error;
+  
+        if (data && data.length > 0) {
+          allProducts = allProducts.concat(data);
+          // Si la cantidad de datos recibidos es menor al tamaño del lote, ya no hay más registros
+          if (data.length < pageSize) {
+            done = true;
+          } else {
+            page++;
+          }
+        } else {
+          done = true;
+        }
+      }
+  
+      // Formateamos los productos de acuerdo al tipo Product
+      const formattedProducts: Product[] = allProducts.map((item: any) => ({
         id: item.id,
         name: item.name,
         code: item.code,
@@ -110,6 +135,7 @@ export default function ProductsAdminPage() {
         salesCount: item.sales_count || 0,
         totalRevenue: item.total_revenue || 0,
       }));
+  
       setProducts(formattedProducts);
     } catch (error) {
       console.error("Error fetching products:", error);
@@ -118,6 +144,7 @@ export default function ProductsAdminPage() {
       setProductsLoading(false);
     }
   };
+  
 
   // Al cambiar de negocio, se cargan los productos
   useEffect(() => {
