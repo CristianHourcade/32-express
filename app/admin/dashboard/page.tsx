@@ -15,7 +15,6 @@ export default function AdminDashboard() {
   const dispatch = useDispatch<AppDispatch>()
   const { businesses, loading: businessesLoading } = useSelector((state: RootState) => state.businesses)
   const { employees, loading: employeesLoading } = useSelector((state: RootState) => state.employees)
-  // Se sigue usando el state global para otros propósitos (productos generales, etc.)
   const { products, loading: productsLoading } = useSelector((state: RootState) => state.products)
   const { shifts, loading: shiftsLoading } = useSelector((state: RootState) => state.shifts)
   const { sales, loading: salesLoading } = useSelector((state: RootState) => state.sales)
@@ -29,11 +28,12 @@ export default function AdminDashboard() {
   // Estado para los productos traídos directamente desde la BD según el negocio seleccionado
   const [dbProducts, setDbProducts] = useState<any[]>([])
   const [dbProductsLoading, setDbProductsLoading] = useState<boolean>(false)
+  // Estado para el filtro de fechas (días)
+  const [daysFilter, setDaysFilter] = useState<number>(7)
 
   // Petición para obtener directSales para el negocio seleccionado
   useEffect(() => {
     const fetchDirectSales = async () => {
-      console.log(selectedBusinessForTopProducts);
       if (!selectedBusinessForTopProducts) return
 
       setDirectSalesLoading(true)
@@ -48,12 +48,10 @@ export default function AdminDashboard() {
         `)
         .eq("business_id", selectedBusinessForTopProducts)
         .order("timestamp", { ascending: false })
-        console.log(data);
 
       if (error) {
         console.error("Error fetching direct sales:", error)
       } else {
-        console.log("Direct sales data:", data)
         setDirectSales(data || [])
       }
       setDirectSalesLoading(false)
@@ -117,9 +115,17 @@ export default function AdminDashboard() {
     : []
 
   // ---------------------------------------------------
-  // TOP PRODUCTOS: Se agrupan los items usando directSales y dbProducts
+  // TOP PRODUCTOS: Se agrupan los items usando directSales, dbProducts y el filtro de fechas
   // ---------------------------------------------------
   const topProducts = useMemo(() => {
+    // Filtrar las ventas según el rango de días seleccionado
+    const now = new Date()
+    const filteredSales = directSales.filter((sale) => {
+      const saleDate = new Date(sale.timestamp)
+      const diffDays = (now.getTime() - saleDate.getTime()) / (1000 * 3600 * 24)
+      return diffDays <= daysFilter
+    })
+
     const productMap = new Map<
       string,
       {
@@ -131,15 +137,13 @@ export default function AdminDashboard() {
         totalRevenue: number
       }
     >()
-    console.log(dbProducts);
 
-    // Agrupamos los items de las ventas filtradas
-    for (const sale of directSales) {
+    // Agrupar los items usando las ventas filtradas
+    for (const sale of filteredSales) {
       if (!sale.sale_items) continue
       for (const item of sale.sale_items) {
         // Buscamos el producto en los productos traídos desde la BD para el negocio seleccionado
         const prod = dbProducts.find((p) => p.id === item.product_id)
-        console.log("producto", prod, item)
         if (!prod) continue
 
         const key = `${item.product_id}-${prod.businessId}`
@@ -174,7 +178,7 @@ export default function AdminDashboard() {
     })
 
     return arr.slice(0, 15)
-  }, [directSales, dbProducts, sortColumn, sortDirection])
+  }, [directSales, dbProducts, sortColumn, sortDirection, daysFilter])
 
   // ---------------------------------------------------
   // NEGOCIOS CON DATOS DEL MES (Ventas, Gastos, Profit, etc.)
@@ -440,25 +444,40 @@ export default function AdminDashboard() {
       <div>
         <div className="flex justify-between items-center mb-4">
           <h2 className="text-xl font-semibold">Productos Principales</h2>
-          <select
-            className="input max-w-xs"
-            value={selectedBusinessForTopProducts}
-            onChange={(e) => {
-              setSelectedBusinessForTopProducts(e.target.value)
-              // Reiniciamos directSales al cambiar la selección si es necesario
-              setDirectSales([])
-            }}
-          >
-            <option value="">Selecciona un negocio</option>
-            {businesses.map((business) => (
-              <option key={business.id} value={business.id}>
-                {business.name}
-              </option>
-            ))}
-          </select>
+          <div className="flex items-center gap-4">
+            <select
+              className="input max-w-xs"
+              value={selectedBusinessForTopProducts}
+              onChange={(e) => {
+                setSelectedBusinessForTopProducts(e.target.value)
+                // Reiniciamos directSales al cambiar la selección si es necesario
+                setDirectSales([])
+              }}
+            >
+              <option value="">Selecciona un negocio</option>
+              {businesses.map((business) => (
+                <option key={business.id} value={business.id}>
+                  {business.name}
+                </option>
+              ))}
+            </select>
+            {/* Selector para filtro de fechas */}
+            <select
+              className="input max-w-xs"
+              value={daysFilter}
+              onChange={(e) => setDaysFilter(Number(e.target.value))}
+            >
+              <option value={3}>Últimos 3 días</option>
+              <option value={7}>Últimos 7 días</option>
+              <option value={14}>Últimos 14 días</option>
+              <option value={30}>Últimos 30 días</option>
+            </select>
+          </div>
         </div>
         {selectedBusinessForTopProducts === "" ? (
-          <p className="text-gray-500 dark:text-gray-400">Por favor, selecciona un negocio para ver los productos principales.</p>
+          <p className="text-gray-500 dark:text-gray-400">
+            Por favor, selecciona un negocio para ver los productos principales.
+          </p>
         ) : directSalesLoading || dbProductsLoading ? (
           <div className="flex justify-center items-center h-32">
             <p>Cargando productos...</p>

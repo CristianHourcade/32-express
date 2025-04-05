@@ -63,12 +63,35 @@ export default function NewSalePage() {
     if (!businessId) return;
     setProductsLoading(true);
     try {
-      const { data, error } = await supabase
-        .from("products")
-        .select("*")
-        .eq("business_id", businessId);
-      if (error) throw error;
-      setProducts(data);
+      const pageSize = 1000;
+      let page = 0;
+      let allProducts: any[] = [];
+      let done = false;
+  
+      while (!done) {
+        const from = page * pageSize;
+        const to = from + pageSize - 1;
+        const { data, error } = await supabase
+          .from("products")
+          .select("*")
+          .eq("business_id", businessId)
+          .range(from, to);
+  
+        if (error) throw error;
+  
+        if (data && data.length > 0) {
+          allProducts = allProducts.concat(data);
+          if (data.length < pageSize) {
+            done = true;
+          } else {
+            page++;
+          }
+        } else {
+          done = true;
+        }
+      }
+  
+      setProducts(allProducts);
     } catch (error) {
       console.error("Error al cargar productos:", error);
       setProducts([]);
@@ -76,6 +99,7 @@ export default function NewSalePage() {
       setProductsLoading(false);
     }
   };
+  
 
   // Cargar productos al montar el componente.
   useEffect(() => {
