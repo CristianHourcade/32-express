@@ -67,7 +67,7 @@ export default function NewSalePage() {
       let page = 0;
       let allProducts: any[] = [];
       let done = false;
-  
+
       while (!done) {
         const from = page * pageSize;
         const to = from + pageSize - 1;
@@ -76,9 +76,9 @@ export default function NewSalePage() {
           .select("*")
           .eq("business_id", businessId)
           .range(from, to);
-  
+
         if (error) throw error;
-  
+
         if (data && data.length > 0) {
           allProducts = allProducts.concat(data);
           if (data.length < pageSize) {
@@ -90,7 +90,7 @@ export default function NewSalePage() {
           done = true;
         }
       }
-  
+
       setProducts(allProducts);
     } catch (error) {
       console.error("Error al cargar productos:", error);
@@ -99,7 +99,6 @@ export default function NewSalePage() {
       setProductsLoading(false);
     }
   };
-  
 
   // Cargar productos al montar el componente.
   useEffect(() => {
@@ -119,8 +118,8 @@ export default function NewSalePage() {
     const empById = employees.find((emp) => emp.userId === user.id);
     const empByEmail = !empById
       ? employees.find(
-        (emp) => emp.email.toLowerCase() === user.email.toLowerCase()
-      )
+          (emp) => emp.email.toLowerCase() === user.email.toLowerCase()
+        )
       : null;
     return empById || empByEmail;
   }, [employees, user]);
@@ -158,7 +157,8 @@ export default function NewSalePage() {
       const updatedCart = [...cart];
       updatedCart[existingItemIndex].quantity += 1;
       updatedCart[existingItemIndex].total =
-        updatedCart[existingItemIndex].quantity * updatedCart[existingItemIndex].price;
+        updatedCart[existingItemIndex].quantity *
+        updatedCart[existingItemIndex].price;
       setCart(updatedCart);
     } else {
       // Si no está en el carrito, agregarlo solo si hay stock (stock > 0)
@@ -259,8 +259,8 @@ export default function NewSalePage() {
   };
 
   const isLoading = productsLoading || shiftsLoading;
-  if(!activeShift) {
-    location.href="/employee/dashboard";
+  if (!activeShift) {
+    location.href = "/employee/dashboard";
   }
   return (
     <div className="space-y-6">
@@ -340,6 +340,17 @@ export default function NewSalePage() {
                 onChange={(e) => setSearchQuery(e.target.value)}
                 disabled={!activeShift}
               />
+              <button
+                onClick={() => setSearchQuery("")}
+                className="absolute inset-y-0 right-0 pr-3 flex items-center"
+                style={{
+                  backgroundColor:'gainsboro',
+                  padding:'0px 30px',
+                  color:'black'
+                }}
+              >
+                Limpiar
+              </button>
             </div>
           </div>
 
@@ -354,7 +365,6 @@ export default function NewSalePage() {
                   <colgroup>
                     <col className="w-2/5" /> {/* Producto: Nombre y Código */}
                     <col className="w-1/5" /> {/* Precio */}
-                    <col className="w-1/5" /> {/* Stock */}
                     <col className="w-1/5" /> {/* Acciones */}
                   </colgroup>
                   <thead className="bg-gray-50 dark:bg-gray-700">
@@ -364,9 +374,6 @@ export default function NewSalePage() {
                       </th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                         Precio
-                      </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                        Stock
                       </th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                         Acciones
@@ -391,49 +398,42 @@ export default function NewSalePage() {
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
                             {formatCurrency(product.selling_price)}
                           </td>
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <span
-                              className={`px-2 py-1 text-xs font-medium rounded-full ${product.stock <= 0
-                                  ? "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300"
-                                  : product.stock <= product.minStock
-                                    ? "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300"
-                                    : "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300"
-                                }`}
-                            >
-                              {product.stock}
-                            </span>
-                          </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                             <button
                               onClick={() => addToCart(product)}
                               disabled={product.stock <= 0 || !activeShift}
-                              className="text-blue-600 hover:text-blue-900 dark:text-blue-400 dark:hover:text-blue-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                              style={{
+                                backgroundColor: product.stock <= 0 ? 'red' : 'green',
+                                padding: '10px 0px',
+                                width: 100,
+                                borderRadius:5,
+                                color: product.stock <= 0 ? 'black' : 'white',
+                              }}
                             >
-                              Agregar al Carrito
+                              {product.stock <= 0 ? 'SIN STOCK' : 'AGREGAR'}
                             </button>
                           </td>
                         </tr>
                       ))
-                    ) : (
-                      isLoading ? (
-                        <div className="flex justify-center items-center h-64">
-                          <div className="text-center">
-                            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-700 mx-auto"></div>
-                            <p className="mt-4 text-gray-600 dark:text-gray-400">
-                              Cargando datos...
-                            </p>
-                          </div>
+                    ) : isLoading ? (
+                      <div className="flex justify-center items-center h-64">
+                        <div className="text-center">
+                          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-700 mx-auto"></div>
+                          <p className="mt-4 text-gray-600 dark:text-gray-400">
+                            Cargando datos...
+                          </p>
                         </div>
-                      ) : (
-                        <tr>
-                          <td
-                            colSpan={4}
-                            className="px-6 py-4 text-center text-sm text-gray-500 dark:text-gray-400"
-                          >
-                            No se encontraron productos. Intenta con otra búsqueda.
-                          </td>
-                        </tr>
-                      )
+                      </div>
+                    ) : (
+                      <tr>
+                        <td
+                          colSpan={4}
+                          className="px-6 py-4 text-center text-sm text-gray-500 dark:text-gray-400"
+                        >
+                          No se encontraron productos. Intenta con otra
+                          búsqueda.
+                        </td>
+                      </tr>
                     )}
                   </tbody>
                 </table>
@@ -515,50 +515,55 @@ export default function NewSalePage() {
                       <button
                         type="button"
                         onClick={() => setPaymentMethod("cash")}
-                        className={`py-2 px-4 rounded-md text-sm font-medium ${paymentMethod === "cash"
+                        className={`py-2 px-4 rounded-md text-sm font-medium ${
+                          paymentMethod === "cash"
                             ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300 border-2 border-green-500"
                             : "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600"
-                          }`}
+                        }`}
                       >
                         Efectivo
                       </button>
                       <button
                         type="button"
                         onClick={() => setPaymentMethod("card")}
-                        className={`py-2 px-4 rounded-md text-sm font-medium ${paymentMethod === "card"
+                        className={`py-2 px-4 rounded-md text-sm font-medium ${
+                          paymentMethod === "card"
                             ? "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300 border-2 border-blue-500"
                             : "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600"
-                          }`}
+                        }`}
                       >
                         Tarjeta
                       </button>
                       <button
                         type="button"
                         onClick={() => setPaymentMethod("transfer")}
-                        className={`py-2 px-4 rounded-md text-sm font-medium ${paymentMethod === "transfer"
+                        className={`py-2 px-4 rounded-md text-sm font-medium ${
+                          paymentMethod === "transfer"
                             ? "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-300 border-2 border-purple-500"
                             : "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600"
-                          }`}
+                        }`}
                       >
                         Transferencia
                       </button>
                       <button
                         type="button"
                         onClick={() => setPaymentMethod("mercadopago")}
-                        className={`py-2 px-4 rounded-md text-sm font-medium ${paymentMethod === "mercadopago"
+                        className={`py-2 px-4 rounded-md text-sm font-medium ${
+                          paymentMethod === "mercadopago"
                             ? "bg-sky-100 text-sky-800 dark:bg-sky-900 dark:text-sky-300 border-2 border-sky-500"
                             : "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600"
-                          }`}
+                        }`}
                       >
                         MercadoPago
                       </button>
                       <button
                         type="button"
                         onClick={() => setPaymentMethod("rappi")}
-                        className={`py-2 px-4 rounded-md text-sm font-medium ${paymentMethod === "rappi"
+                        className={`py-2 px-4 rounded-md text-sm font-medium ${
+                          paymentMethod === "rappi"
                             ? "bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-300 border-2 border-orange-500"
                             : "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600"
-                          }`}
+                        }`}
                       >
                         Rappi
                       </button>
@@ -616,26 +621,27 @@ export default function NewSalePage() {
                 <div className="flex justify-between text-sm">
                   <span>Método de Pago:</span>
                   <span
-                    className={`px-2 py-1 rounded text-xs font-medium ${paymentMethod === "cash"
+                    className={`px-2 py-1 rounded text-xs font-medium ${
+                      paymentMethod === "cash"
                         ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300"
                         : paymentMethod === "card"
-                          ? "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300"
-                          : paymentMethod === "transfer"
-                            ? "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-300"
-                            : paymentMethod === "mercadopago"
-                              ? "bg-sky-100 text-sky-800 dark:bg-sky-900 dark:text-sky-300"
-                              : "bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-300"
-                      }`}
+                        ? "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300"
+                        : paymentMethod === "transfer"
+                        ? "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-300"
+                        : paymentMethod === "mercadopago"
+                        ? "bg-sky-100 text-sky-800 dark:bg-sky-900 dark:text-sky-300"
+                        : "bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-300"
+                    }`}
                   >
                     {paymentMethod === "cash"
                       ? "Efectivo"
                       : paymentMethod === "card"
-                        ? "Tarjeta"
-                        : paymentMethod === "transfer"
-                          ? "Transferencia"
-                          : paymentMethod === "mercadopago"
-                            ? "MercadoPago"
-                            : "Rappi"}
+                      ? "Tarjeta"
+                      : paymentMethod === "transfer"
+                      ? "Transferencia"
+                      : paymentMethod === "mercadopago"
+                      ? "MercadoPago"
+                      : "Rappi"}
                   </span>
                 </div>
               </div>
