@@ -572,7 +572,7 @@ export default function AdminDashboard() {
               {/* Profit del Mes (en verde) */}
               <div className="mb-2">
                 <p className="text-sm text-slate-400">Profit</p>
-                <p className="text-green-400 font-medium">
+                <p className="font-bold text-lg text-green-600 dark:text-green-400">
                   $ {formatPrice(business.profit)}
                 </p>
               </div>
