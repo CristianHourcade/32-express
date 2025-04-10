@@ -1,19 +1,138 @@
 "use client";
 
-import React, { useEffect, useState, useMemo } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import type { AppDispatch, RootState } from "@/lib/redux/store";
 import {
-  getProducts,
   createProduct,
   editProduct,
   removeProduct,
   type Product,
 } from "@/lib/redux/slices/productSlice";
 import { fetchBusinesses } from "@/lib/redux/slices/businessSlice";
-import { Plus, Edit, Trash2, X, Search } from "lucide-react";
+import { Plus, X, Search } from "lucide-react";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
+
+// Lista de categorías para la edición/creación de producto
+const categories = [
+  "ALMACEN",
+  "CIGARRILLOS",
+  "GOLOSINAS",
+  "BEBIDA",
+  "CERVEZA",
+  "FIAMBRES",
+  "TABACO",
+  "HUEVOS",
+  "HIGIENE",
+];
+
+// Componente para dropdown multi-select (para filtrar la tabla)
+function MultiSelectDropdown({
+  options,
+  selectedOptions,
+  onChange,
+  placeholder = "Selecciona categorías",
+}: {
+  options: string[];
+  selectedOptions: string[];
+  onChange: (selected: string[]) => void;
+  placeholder?: string;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+
+  const toggleOption = (option: string) => {
+    let newSelected;
+    if (selectedOptions.includes(option)) {
+      newSelected = selectedOptions.filter((o) => o !== option);
+    } else {
+      newSelected = [...selectedOptions, option];
+    }
+    onChange(newSelected);
+  };
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setIsOpen(!isOpen)}
+        className="input w-full text-left flex items-center justify-between"
+      >
+        <span>
+          {selectedOptions.length > 0 ? selectedOptions.join(", ") : placeholder}
+        </span>
+      </button>
+      {isOpen && (
+        <div className="absolute z-10 mt-1 bg-white dark:bg-gray-800 shadow-lg border rounded w-full">
+          <div className="max-h-60 overflow-y-auto">
+            {options.map((option) => (
+              <label
+                key={option}
+                className="flex items-center px-2 py-1 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700"
+              >
+                <input
+                  type="checkbox"
+                  checked={selectedOptions.includes(option)}
+                  onChange={() => toggleOption(option)}
+                  className="mr-2"
+                />
+                <span className="text-sm">{option}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Componente para dropdown de selección única (para elegir la categoría en el modal)
+function SingleSelectDropdown({
+  options,
+  selectedOption,
+  onChange,
+  placeholder = "Selecciona categoría",
+}: {
+  options: string[];
+  selectedOption: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+
+  const handleOptionSelect = (option: string) => {
+    onChange(option);
+    setIsOpen(false);
+  };
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setIsOpen(!isOpen)}
+        className="input w-full text-left flex items-center justify-between"
+      >
+        <span>{selectedOption || placeholder}</span>
+      </button>
+      {isOpen && (
+        <div className="absolute z-10 mt-1 bg-white dark:bg-gray-800 shadow-lg border rounded w-full">
+          <div className="max-h-60 overflow-y-auto">
+            {options.map((option) => (
+              <button
+                key={option}
+                type="button"
+                onClick={() => handleOptionSelect(option)}
+                className="w-full text-left px-2 py-1 hover:bg-gray-100 dark:hover:bg-gray-700"
+              >
+                {option}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 // Función para calcular el margen
 function calculateMargin(purchasePrice: number, sellingPrice: number): number {
@@ -21,12 +140,20 @@ function calculateMargin(purchasePrice: number, sellingPrice: number): number {
   return ((sellingPrice - purchasePrice) / purchasePrice) * 100;
 }
 
+// Helper que extrae la categoría al inicio del nombre
+function extractCategory(name: string): { category: string | null; baseName: string } {
+  const parts = name.trim().split(" ");
+  if (parts.length > 1 && categories.includes(parts[0].toUpperCase())) {
+    return { category: parts[0].toUpperCase(), baseName: parts.slice(1).join(" ") };
+  }
+  return { category: null, baseName: name };
+}
+
 export default function ProductsAdminPage() {
   const dispatch = useDispatch<AppDispatch>();
   const { businesses, loading: businessesLoading } = useSelector(
     (state: RootState) => state.businesses
   );
-  // Si tu auth trae un businessId por defecto, úsalo. Si no, lo puedes omitir.
   const businessIdFromAuth = useSelector(
     (state: RootState) => state.auth.user?.businessId
   );
@@ -36,14 +163,15 @@ export default function ProductsAdminPage() {
   // ---------------------------
   const [products, setProducts] = useState<Product[]>([]);
   const [productsLoading, setProductsLoading] = useState(false);
-
-  // Negocio seleccionado
   const [selectedBusinessId, setSelectedBusinessId] = useState<string>("");
-
-  // Búsqueda local
   const [searchQuery, setSearchQuery] = useState("");
 
-  // Modales y formularios
+  // Para el filtro de la tabla, combinamos las categorías conocidas más la opción "SIN CATEGORÍA"
+  const allFilterOptions = [...categories, "SIN CATEGORIA"];
+  const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
+
+  // Estados para modal (crear/editar producto)
+  // Se agrega el campo "category", y en "name" se ingresa el nombre sin la categoría (base)
   const [isProductModalOpen, setIsProductModalOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [productFormData, setProductFormData] = useState({
@@ -55,6 +183,7 @@ export default function ProductsAdminPage() {
     minStock: 0,
     description: "",
     businessId: "",
+    category: "",
   });
   const [marginPercent, setMarginPercent] = useState(0);
 
@@ -65,10 +194,7 @@ export default function ProductsAdminPage() {
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [currentProductForDelete, setCurrentProductForDelete] = useState<Product | null>(null);
 
-  // Para mostrar spinner al refrescar
   const [isRefreshing, setIsRefreshing] = useState(false);
-
-  // Ordenamiento
   const [sortField, setSortField] = useState<"stock" | null>("stock");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
 
@@ -79,7 +205,6 @@ export default function ProductsAdminPage() {
     dispatch(fetchBusinesses());
   }, [dispatch]);
 
-  // Si no hay negocio seleccionado, se usa el del auth o el primero
   useEffect(() => {
     if (businesses.length > 0 && !selectedBusinessId) {
       setSelectedBusinessId(businessIdFromAuth || businesses[0].id);
@@ -96,7 +221,6 @@ export default function ProductsAdminPage() {
       let page = 0;
       let allProducts: any[] = [];
       let done = false;
-  
       while (!done) {
         const from = page * pageSize;
         const to = from + pageSize - 1;
@@ -105,23 +229,15 @@ export default function ProductsAdminPage() {
           .select("*")
           .eq("business_id", businessId)
           .range(from, to);
-  
         if (error) throw error;
-  
         if (data && data.length > 0) {
           allProducts = allProducts.concat(data);
-          // Si la cantidad de datos recibidos es menor al tamaño del lote, ya no hay más registros
-          if (data.length < pageSize) {
-            done = true;
-          } else {
-            page++;
-          }
+          if (data.length < pageSize) done = true;
+          else page++;
         } else {
           done = true;
         }
       }
-  
-      // Formateamos los productos de acuerdo al tipo Product
       const formattedProducts: Product[] = allProducts.map((item: any) => ({
         id: item.id,
         name: item.name,
@@ -135,7 +251,6 @@ export default function ProductsAdminPage() {
         salesCount: item.sales_count || 0,
         totalRevenue: item.total_revenue || 0,
       }));
-  
       setProducts(formattedProducts);
     } catch (error) {
       console.error("Error fetching products:", error);
@@ -144,9 +259,7 @@ export default function ProductsAdminPage() {
       setProductsLoading(false);
     }
   };
-  
 
-  // Al cambiar de negocio, se cargan los productos
   useEffect(() => {
     if (selectedBusinessId) {
       fetchProductsForBusiness(selectedBusinessId);
@@ -154,18 +267,32 @@ export default function ProductsAdminPage() {
   }, [selectedBusinessId]);
 
   // ---------------------------
-  // BÚSQUEDA LOCAL
+  // FILTROS: BÚSQUEDA y CATEGORÍAS (MultiSelectDropdown)
   // ---------------------------
   const filteredProducts = useMemo(() => {
-    if (!searchQuery.trim()) return products;
-    const lowerQuery = searchQuery.toLowerCase();
-    return products.filter(
-      (p) =>
-        (p.name ?? "").toLowerCase().includes(lowerQuery) ||
-        (p.code ?? "").toLowerCase().includes(lowerQuery) ||
-        (p.description ?? "").toLowerCase().includes(lowerQuery)
-    );
-  }, [searchQuery, products]);
+    let filtered = products;
+    if (searchQuery.trim()) {
+      const lowerQuery = searchQuery.toLowerCase();
+      filtered = filtered.filter(
+        (p) =>
+          (p.name ?? "").toLowerCase().includes(lowerQuery) ||
+          (p.code ?? "").toLowerCase().includes(lowerQuery) ||
+          (p.description ?? "").toLowerCase().includes(lowerQuery)
+      );
+    }
+    if (selectedCategories.length > 0) {
+      filtered = filtered.filter((p) => {
+        // Se toma la primera palabra en mayúsculas
+        const firstWord = p.name.trim().split(" ")[0].toUpperCase();
+        const tieneCategoria = categories.includes(firstWord);
+        return (
+          (tieneCategoria && selectedCategories.includes(firstWord)) ||
+          (!tieneCategoria && selectedCategories.includes("SIN CATEGORIA"))
+        );
+      });
+    }
+    return filtered;
+  }, [searchQuery, products, selectedCategories]);
 
   // ---------------------------
   // ORDENAMIENTO
@@ -179,7 +306,7 @@ export default function ProductsAdminPage() {
   }, [filteredProducts, sortField, sortOrder]);
 
   // ---------------------------
-  // FUNCIONES DE MODALES / ACCIONES
+  // FUNCIONES DE MODALES / ACCIONES (Crear/Editar)
   // ---------------------------
   const openAddProductModal = () => {
     setEditingProduct(null);
@@ -192,14 +319,16 @@ export default function ProductsAdminPage() {
       minStock: 0,
       description: "",
       businessId: selectedBusinessId,
+      category: "",
     });
     setIsProductModalOpen(true);
   };
 
   const openEditProductModal = (product: Product) => {
+    const { category, baseName } = extractCategory(product.name);
     setEditingProduct(product);
     setProductFormData({
-      name: product.name,
+      name: baseName,
       code: product.code,
       purchasePrice: product.purchasePrice,
       sellingPrice: product.sellingPrice,
@@ -207,6 +336,7 @@ export default function ProductsAdminPage() {
       minStock: product.minStock,
       description: product.description,
       businessId: product.businessId,
+      category: category || "",
     });
     setMarginPercent(
       product.purchasePrice > 0
@@ -234,15 +364,24 @@ export default function ProductsAdminPage() {
     }
   };
 
+  // Al enviar el formulario se arma el nombre final (si se seleccionó categoría, se antepone con espacio)
   const handleProductFormSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     try {
+      const finalName =
+        productFormData.category !== ""
+          ? `${productFormData.category} ${productFormData.name}`
+          : productFormData.name;
+      const newProductData = {
+        ...productFormData,
+        name: finalName,
+      };
       if (editingProduct) {
-        await dispatch(editProduct({ ...editingProduct, ...productFormData })).unwrap();
+        await dispatch(editProduct({ ...editingProduct, ...newProductData })).unwrap();
       } else {
         await dispatch(
           createProduct({
-            ...productFormData,
+            ...newProductData,
             createdAt: new Date().toISOString(),
             salesCount: 0,
             totalRevenue: 0,
@@ -254,7 +393,7 @@ export default function ProductsAdminPage() {
       await fetchProductsForBusiness(selectedBusinessId);
       setIsRefreshing(false);
     } catch (error) {
-      console.error("Error updating/creating product:", error);
+      console.error("Error creating/updating product:", error);
     }
   };
 
@@ -290,16 +429,15 @@ export default function ProductsAdminPage() {
       ...prev,
       [name]:
         name === "purchasePrice" ||
-          name === "sellingPrice" ||
-          name === "stock" ||
-          name === "minStock"
+        name === "sellingPrice" ||
+        name === "stock" ||
+        name === "minStock"
           ? Number(value)
           : value,
     }));
   };
 
   const isLoading = productsLoading || businessesLoading;
-
 
   return (
     <div className="space-y-6">
@@ -322,9 +460,9 @@ export default function ProductsAdminPage() {
         </div>
       </div>
 
-      {/* Filtro de Negocio y Buscador */}
+      {/* Filtros: Negocio, Dropdown multi-select (categorías) y Búsqueda */}
       <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm p-4">
-        <div className="flex flex-col md:flex-row gap-4 items-center justify-between">
+        <div className="flex flex-col md:flex-row gap-4 items-center">
           <div className="w-full md:w-1/4">
             <select
               className="input w-full"
@@ -339,8 +477,16 @@ export default function ProductsAdminPage() {
               ))}
             </select>
           </div>
+          <div className="w-full md:w-1/2">
+            <MultiSelectDropdown
+              options={[...categories, "SIN CATEGORIA"]}
+              selectedOptions={selectedCategories}
+              onChange={setSelectedCategories}
+              placeholder="Filtrar por categorías"
+            />
+          </div>
           {selectedBusinessId && (
-            <div className="relative w-full md:w-1/2">
+            <div className="relative w-full md:w-1/4">
               <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                 <Search className="h-5 w-5 text-gray-400" />
               </div>
@@ -361,13 +507,12 @@ export default function ProductsAdminPage() {
         <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm overflow-hidden">
           <div className="overflow-x-auto">
             <table className="min-w-full table-fixed divide-y divide-gray-200 dark:divide-gray-700">
-              {/* Definir anchos fijos con colgroup */}
               <colgroup>
-                <col className="w-2/5" /> {/* Producto */}
-                <col className="w-1/5" /> {/* Precios */}
-                <col className="w-1/5" /> {/* Margen */}
-                <col className="w-1/5" /> {/* Stock */}
-                <col className="w-1/5" /> {/* Acciones */}
+                <col className="w-2/5" />
+                <col className="w-1/5" />
+                <col className="w-1/5" />
+                <col className="w-1/5" />
+                <col className="w-1/5" />
               </colgroup>
               <thead className="bg-gray-50 dark:bg-gray-700">
                 <tr>
@@ -403,12 +548,11 @@ export default function ProductsAdminPage() {
                   <tr>
                     <td colSpan={5} className="px-6 py-4 text-center">
                       <div className="flex justify-center items-center">
-                        <div className="text-center items-center justify-center flex flex-col">
-
-                        <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-700"></div>
-                        <p className="mt-2 text-sm text-gray-600 dark:text-gray-400 mt-2">
-                          Actualizando datos...
-                        </p>
+                        <div className="text-center flex flex-col">
+                          <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-700"></div>
+                          <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
+                            Actualizando datos...
+                          </p>
                         </div>
                       </div>
                     </td>
@@ -417,10 +561,8 @@ export default function ProductsAdminPage() {
                   sortedProducts.map((product) => {
                     const marginNum = calculateMargin(product.purchasePrice, product.sellingPrice);
                     const isExcessiveMargin = marginNum > 1000;
-
                     return (
                       <tr key={product.id} className="hover:bg-gray-50 dark:hover:bg-gray-700">
-                        {/* Producto: nombre y código, centrado verticalmente */}
                         <td className="px-6 py-4 align-middle whitespace-normal break-words">
                           <div className="text-sm font-medium text-gray-900 dark:text-white">
                             {product.name}
@@ -434,8 +576,6 @@ export default function ProductsAdminPage() {
                             </div>
                           )}
                         </td>
-
-                        {/* Precios: Compra arriba, Venta abajo */}
                         <td className="px-6 py-4 align-middle whitespace-nowrap">
                           <div className="text-xs text-gray-500 dark:text-gray-400">Compra:</div>
                           <div className="text-sm font-medium text-gray-900 dark:text-white">
@@ -446,8 +586,6 @@ export default function ProductsAdminPage() {
                             ${product.sellingPrice.toFixed(2)}
                           </div>
                         </td>
-
-                        {/* Margen */}
                         <td className="px-6 py-4 align-middle whitespace-nowrap">
                           {isExcessiveMargin ? (
                             <span className="inline-block bg-yellow-300 text-black px-2 py-1 text-xs font-medium rounded-full">
@@ -457,37 +595,28 @@ export default function ProductsAdminPage() {
                             <span>{marginNum.toFixed(2)}%</span>
                           )}
                         </td>
-
-                        {/* Stock: Mín arriba, Actual abajo */}
                         <td className="px-6 py-4 align-middle whitespace-nowrap">
                           <div className="text-xs text-gray-500 dark:text-gray-400">
                             Mín: {product.minStock}
                           </div>
                           <div className="mt-1">
                             <span
-                              className={`px-2 py-1 text-xs font-medium rounded-full ${product.stock <= product.minStock
+                              className={`px-2 py-1 text-xs font-medium rounded-full ${
+                                product.stock <= product.minStock
                                   ? "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300"
                                   : "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300"
-                                }`}
+                              }`}
                             >
                               {product.stock}
                             </span>
                           </div>
                         </td>
-
-                        {/* Acciones (vertical) */}
                         <td className="px-6 py-4 align-middle whitespace-nowrap">
                           <div className="flex flex-col gap-2">
-                            <button
-                              onClick={() => openEditProductModal(product)}
-                              className="btn btn-primary px-8"
-                            >
+                            <button onClick={() => openEditProductModal(product)} className="btn btn-primary px-8">
                               Editar
                             </button>
-                            <button
-                              onClick={() => openDeleteModal(product)}
-                              className="btn btn-danger px-8"
-                            >
+                            <button onClick={() => openDeleteModal(product)} className="btn btn-danger px-8">
                               Eliminar
                             </button>
                           </div>
@@ -500,8 +629,7 @@ export default function ProductsAdminPage() {
                     <td colSpan={5} className="px-6 py-4 text-center text-sm text-gray-500 dark:text-gray-400">
                       {searchQuery
                         ? "No se encontraron productos que coincidan con la búsqueda."
-                        : "No hay productos para este negocio."
-                      }
+                        : "No hay productos para este negocio."}
                     </td>
                   </tr>
                 )}
@@ -515,7 +643,7 @@ export default function ProductsAdminPage() {
         </div>
       )}
 
-      {/* Modal Agregar/Editar */}
+      {/* Modal Agregar/Editar Producto */}
       {isProductModalOpen && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
@@ -523,19 +651,27 @@ export default function ProductsAdminPage() {
               <h2 className="text-xl font-semibold">
                 {editingProduct ? "Editar Producto" : "Agregar Nuevo Producto"}
               </h2>
-              <button
-                onClick={() => setIsProductModalOpen(false)}
-                className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
-              >
+              <button onClick={() => setIsProductModalOpen(false)} className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300">
                 <X className="w-6 h-6" />
               </button>
             </div>
             <form onSubmit={handleProductFormSubmit} className="p-6 space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Dropdown para categoría */}
                 <div>
-                  <label htmlFor="name" className="label">
-                    Nombre
-                  </label>
+                  <label className="label">Categoría</label>
+                  <SingleSelectDropdown
+                    options={categories}
+                    selectedOption={productFormData.category}
+                    onChange={(value) =>
+                      setProductFormData((prev) => ({ ...prev, category: value }))
+                    }
+                    placeholder="Selecciona categoría"
+                  />
+                </div>
+                {/* Nombre sin categoría */}
+                <div>
+                  <label htmlFor="name" className="label">Nombre del Producto</label>
                   <input
                     type="text"
                     id="name"
@@ -544,12 +680,11 @@ export default function ProductsAdminPage() {
                     onChange={handleProductFormChange}
                     required
                     className="input"
+                    placeholder="Nombre sin categoría"
                   />
                 </div>
                 <div>
-                  <label htmlFor="code" className="label">
-                    Código
-                  </label>
+                  <label htmlFor="code" className="label">Código</label>
                   <input
                     type="text"
                     id="code"
@@ -561,9 +696,7 @@ export default function ProductsAdminPage() {
                   />
                 </div>
                 <div>
-                  <label htmlFor="purchasePrice" className="label">
-                    Precio de Compra
-                  </label>
+                  <label htmlFor="purchasePrice" className="label">Precio de Compra</label>
                   <input
                     type="number"
                     id="purchasePrice"
@@ -577,9 +710,7 @@ export default function ProductsAdminPage() {
                   />
                 </div>
                 <div className="flex flex-col gap-2">
-                  <label htmlFor="marginPercent" className="label">
-                    Margen de Ganancia (%)
-                  </label>
+                  <label htmlFor="marginPercent" className="label">Margen de Ganancia (%)</label>
                   <input
                     type="number"
                     id="marginPercent"
@@ -593,9 +724,7 @@ export default function ProductsAdminPage() {
                   />
                 </div>
                 <div>
-                  <label htmlFor="sellingPrice" className="label">
-                    Precio de Venta
-                  </label>
+                  <label htmlFor="sellingPrice" className="label">Precio de Venta</label>
                   <input
                     type="number"
                     id="sellingPrice"
@@ -611,9 +740,7 @@ export default function ProductsAdminPage() {
                   />
                 </div>
                 <div>
-                  <label htmlFor="stock" className="label">
-                    Stock Actual
-                  </label>
+                  <label htmlFor="stock" className="label">Stock Actual</label>
                   <input
                     type="number"
                     id="stock"
@@ -626,9 +753,7 @@ export default function ProductsAdminPage() {
                   />
                 </div>
                 <div>
-                  <label htmlFor="minStock" className="label">
-                    Stock Mínimo
-                  </label>
+                  <label htmlFor="minStock" className="label">Stock Mínimo</label>
                   <input
                     type="number"
                     id="minStock"
@@ -641,9 +766,7 @@ export default function ProductsAdminPage() {
                   />
                 </div>
                 <div className="md:col-span-2">
-                  <label htmlFor="description" className="label">
-                    Descripción
-                  </label>
+                  <label htmlFor="description" className="label">Descripción</label>
                   <textarea
                     id="description"
                     name="description"
@@ -654,9 +777,7 @@ export default function ProductsAdminPage() {
                   ></textarea>
                 </div>
                 <div className="md:col-span-2">
-                  <label htmlFor="businessId" className="label">
-                    Negocio
-                  </label>
+                  <label htmlFor="businessId" className="label">Negocio</label>
                   <select
                     id="businessId"
                     name="businessId"
@@ -674,11 +795,7 @@ export default function ProductsAdminPage() {
                 </div>
               </div>
               <div className="flex justify-end space-x-3 pt-4">
-                <button
-                  type="button"
-                  onClick={() => setIsProductModalOpen(false)}
-                  className="btn btn-secondary"
-                >
+                <button type="button" onClick={() => setIsProductModalOpen(false)} className="btn btn-secondary">
                   Cancelar
                 </button>
                 <button type="submit" className="btn btn-primary">
@@ -696,10 +813,7 @@ export default function ProductsAdminPage() {
           <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg max-w-md w-full">
             <div className="flex justify-between items-center p-6 border-b border-gray-200 dark:border-gray-700">
               <h2 className="text-xl font-semibold">Agregar Stock</h2>
-              <button
-                onClick={() => setIsAddStockModalOpen(false)}
-                className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
-              >
+              <button onClick={() => setIsAddStockModalOpen(false)} className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300">
                 <X className="w-6 h-6" />
               </button>
             </div>
@@ -713,10 +827,7 @@ export default function ProductsAdminPage() {
                 <p className="font-medium">{currentProductForStock.stock}</p>
               </div>
               <div>
-                <label
-                  htmlFor="stockToAdd"
-                  className="block text-sm font-medium text-gray-700 dark:text-gray-300"
-                >
+                <label htmlFor="stockToAdd" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                   Cantidad a Agregar
                 </label>
                 <input
@@ -729,11 +840,7 @@ export default function ProductsAdminPage() {
                 />
               </div>
               <div className="pt-4 flex justify-end space-x-3">
-                <button
-                  type="button"
-                  onClick={() => setIsAddStockModalOpen(false)}
-                  className="btn btn-secondary"
-                >
+                <button type="button" onClick={() => setIsAddStockModalOpen(false)} className="btn btn-secondary">
                   Cancelar
                 </button>
                 <button
@@ -757,14 +864,10 @@ export default function ProductsAdminPage() {
             <div className="p-6">
               <h2 className="text-xl font-semibold mb-4">Confirmar Eliminación</h2>
               <p className="mb-6">
-                ¿Estás seguro de que deseas eliminar el producto "
-                {currentProductForDelete.name}"? Esta acción no se puede deshacer.
+                ¿Estás seguro de que deseas eliminar el producto "{currentProductForDelete.name}"? Esta acción no se puede deshacer.
               </p>
               <div className="flex justify-end space-x-3">
-                <button
-                  onClick={() => setIsDeleteModalOpen(false)}
-                  className="btn btn-secondary"
-                >
+                <button onClick={() => setIsDeleteModalOpen(false)} className="btn btn-secondary">
                   Cancelar
                 </button>
                 <button onClick={handleDelete} className="btn btn-danger">
