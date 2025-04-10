@@ -43,6 +43,7 @@ const categories = [
   "TABACO",
   "HUEVOS",
   "HIGIENE",
+  "ALCOHOL",
 ];
 
 // Componente para dropdown multi-select (para filtrar el listado)
