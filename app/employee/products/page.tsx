@@ -358,8 +358,8 @@ export default function EmployeeProductsPage() {
       ...prev,
       [name]:
         name === "purchasePrice" ||
-        name === "sellingPrice" ||
-        name === "minStock"
+          name === "sellingPrice" ||
+          name === "minStock"
           ? Number(value)
           : value,
     }));
@@ -539,23 +539,35 @@ export default function EmployeeProductsPage() {
                 sortedProducts.map((product) => (
                   <tr key={product.id} className="hover:bg-gray-50 dark:hover:bg-gray-700">
                     <td className="px-6 py-4 whitespace-normal break-words">
-                      <div className="text-sm font-medium text-gray-900 dark:text-white">
-                        {product.name}
-                      </div>
-                      <div className="text-xs text-gray-500 dark:text-gray-400">
-                        {product.code}
-                      </div>
+                      {(() => {
+                        // Extrae la categoría y el nombre base
+                        const { category, baseName } = extractCategory(product.name);
+                        return (
+                          <>
+                            {category && (
+                              <div className="text-xs font-bold text-blue-400 dark:text-blue-300">
+                                {category}
+                              </div>
+                            )}
+                            <div className="text-sm font-medium text-gray-900 dark:text-white">
+                              {baseName}
+                            </div>
+                            <div className="text-xs text-gray-500 dark:text-gray-400">
+                              {product.code}
+                            </div>
+                          </>
+                        );
+                      })()}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
                       ${product.sellingPrice.toFixed(2)}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <span
-                        className={`px-2 py-1 text-xs font-medium rounded-full ${
-                          product.stock <= product.minStock
+                        className={`px-2 py-1 text-xs font-medium rounded-full ${product.stock <= product.minStock
                             ? "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300"
                             : "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300"
-                        }`}
+                          }`}
                       >
                         {product.stock}
                       </span>
@@ -576,8 +588,8 @@ export default function EmployeeProductsPage() {
                     {isLoading
                       ? "Cargando productos..."
                       : searchQuery
-                      ? "No se encontraron productos que coincidan con la búsqueda."
-                      : "No hay productos para mostrar."}
+                        ? "No se encontraron productos que coincidan con la búsqueda."
+                        : "No hay productos para mostrar."}
                   </td>
                 </tr>
               )}

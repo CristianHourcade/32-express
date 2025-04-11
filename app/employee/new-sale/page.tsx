@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useDispatch, useSelector } from "react-redux";
 import type { AppDispatch, RootState } from "@/lib/redux/store";
@@ -28,37 +28,67 @@ type CartItem = {
   total: number;
 };
 
+// LISTA DE CATEGORÍAS PARA CREAR/EDITAR PRODUCTOS
+const categories = [
+  "ALMACEN",
+  "CIGARRILLOS",
+  "GOLOSINAS",
+  "BEBIDA",
+  "CERVEZA",
+  "FIAMBRES",
+  "TABACO",
+  "HUEVOS",
+  "HIGIENE",
+  "ALCOHOL",
+];
+
+// Helper que extrae la categoría al inicio del nombre
+function extractCategory(name: string): { category: string | null; baseName: string } {
+  const parts = name.trim().split(" ");
+  if (parts.length > 1 && categories.includes(parts[0].toUpperCase())) {
+    return { category: parts[0].toUpperCase(), baseName: parts.slice(1).join(" ") };
+  }
+  return { category: null, baseName: name };
+}
+
+// Hook para debounce
+function useDebounce<T>(value: T, delay: number): T {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const timer = setTimeout(() => setDebounced(value), delay);
+    return () => clearTimeout(timer);
+  }, [value, delay]);
+  return debounced;
+}
+
 export default function NewSalePage() {
   const router = useRouter();
   const dispatch = useDispatch<AppDispatch>();
   const { user } = useSelector((state: RootState) => state.auth);
-  const { shifts, loading: shiftsLoading } = useSelector(
-    (state: RootState) => state.shifts
-  );
+  const { shifts, loading: shiftsLoading } = useSelector((state: RootState) => state.shifts);
   const { employees } = useSelector((state: RootState) => state.employees);
 
-  // State que guarda TODOS los productos del businessId actual.
-  // Este state se carga al montar el componente y solo se refetchea
-  // al confirmar una venta.
+  // Estado para guardar productos del negocio actual
   const [products, setProducts] = useState<any[]>([]);
   const [productsLoading, setProductsLoading] = useState(true);
 
-  // Estado para el término de búsqueda; se filtra sobre el state local de productos.
+  // Estado para el término de búsqueda y usamos debounce de 300ms
   const [searchQuery, setSearchQuery] = useState("");
+  const debouncedSearchQuery = useDebounce(searchQuery, 300);
 
-  // Estados para el carrito y venta
+  // Estados para el carrito y la venta
   const [cart, setCart] = useState<CartItem[]>([]);
-  const [paymentMethod, setPaymentMethod] = useState<
-    "cash" | "card" | "transfer" | "mercadopago" | "rappi"
-  >("cash");
+  const [paymentMethod, setPaymentMethod] = useState<"cash" | "card" | "transfer" | "mercadopago" | "rappi">("cash");
   const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [successMessage, setSuccessMessage] = useState("");
 
   const businessId = user?.businessId;
 
-  // Función para cargar todos los productos del business actual.
-  // Esta función se llama al montar el componente y luego al confirmar una venta.
+  // Ref para mantener siempre el foco en el input de búsqueda
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Función para cargar productos
   const fetchProducts = async () => {
     if (!businessId) return;
     setProductsLoading(true);
@@ -67,7 +97,6 @@ export default function NewSalePage() {
       let page = 0;
       let allProducts: any[] = [];
       let done = false;
-
       while (!done) {
         const from = page * pageSize;
         const to = from + pageSize - 1;
@@ -76,9 +105,7 @@ export default function NewSalePage() {
           .select("*")
           .eq("business_id", businessId)
           .range(from, to);
-
         if (error) throw error;
-
         if (data && data.length > 0) {
           allProducts = allProducts.concat(data);
           if (data.length < pageSize) {
@@ -90,7 +117,6 @@ export default function NewSalePage() {
           done = true;
         }
       }
-
       setProducts(allProducts);
     } catch (error) {
       console.error("Error al cargar productos:", error);
@@ -100,7 +126,7 @@ export default function NewSalePage() {
     }
   };
 
-  // Cargar productos al montar el componente.
+  // Cargar productos al montar el componente
   useEffect(() => {
     if (businessId) {
       fetchProducts();
@@ -112,19 +138,58 @@ export default function NewSalePage() {
     dispatch(getShifts());
   }, [dispatch, user]);
 
-  // Obtener el empleado actual
+  // Listener global para capturar entrada desde el escáner (incluso si el input no tiene foco)
+  useEffect(() => {
+    let barcodeBuffer = "";
+    let timeoutId: ReturnType<typeof setTimeout>;
+
+    const handleKeyPress = (event: KeyboardEvent) => {
+      // Reinicia el timeout
+      clearTimeout(timeoutId);
+      // Siempre se mantiene el foco en el input
+      inputRef.current?.focus();
+
+      if (event.key === "Enter") {
+        // Al presionar Enter se asume que se terminó de escanear
+        const scannedCode = barcodeBuffer;
+        setSearchQuery(scannedCode);
+        // Permite que el debounce capte el código, luego limpia el input después de 500ms
+        setTimeout(() => {
+          setSearchQuery("");
+          inputRef.current?.focus();
+        }, 500);
+        barcodeBuffer = "";
+      } else {
+        barcodeBuffer += event.key;
+      }
+      // Si no se reciben teclas por 150ms, se limpia el buffer
+      timeoutId = setTimeout(() => {
+        barcodeBuffer = "";
+      }, 150);
+    };
+
+    document.addEventListener("keypress", handleKeyPress);
+    return () => {
+      document.removeEventListener("keypress", handleKeyPress);
+    };
+  }, []);
+
+  // Enfoque inicial en el input al montar el componente
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
+
+  // Obtener empleado actual
   const currentEmployee = useMemo(() => {
     if (!user) return null;
     const empById = employees.find((emp) => emp.userId === user.id);
     const empByEmail = !empById
-      ? employees.find(
-          (emp) => emp.email.toLowerCase() === user.email.toLowerCase()
-        )
+      ? employees.find((emp) => emp.email.toLowerCase() === user.email.toLowerCase())
       : null;
     return empById || empByEmail;
   }, [employees, user]);
 
-  // Obtener el turno activo del empleado
+  // Obtener turno activo
   const activeShift = useMemo(() => {
     if (!currentEmployee) return null;
     return shifts.find(
@@ -132,36 +197,28 @@ export default function NewSalePage() {
     );
   }, [shifts, currentEmployee]);
 
-  // Búsqueda local: filtra sobre el state de productos.
+  // Filtrado de productos usando el término debounced
   const filteredProducts = useMemo(() => {
-    if (!searchQuery.trim()) return [];
-    const lowerQuery = searchQuery.toLowerCase();
+    if (!debouncedSearchQuery.trim()) return [];
+    const lowerQuery = debouncedSearchQuery.toLowerCase();
     return products.filter(
       (p) =>
         (p.name ?? "").toLowerCase().includes(lowerQuery) ||
         (p.code ?? "").toLowerCase().includes(lowerQuery) ||
         (p.description ?? "").toLowerCase().includes(lowerQuery)
     );
-  }, [searchQuery, products]);
+  }, [debouncedSearchQuery, products]);
 
   // Funciones para el carrito
-  const addToCart = (product) => {
-    const existingItemIndex = cart.findIndex(
-      (item) => item.productId === product.id
-    );
+  const addToCart = (product: any) => {
+    const existingItemIndex = cart.findIndex((item) => item.productId === product.id);
     if (existingItemIndex >= 0) {
-      // Verificar que la cantidad actual no sea igual al stock
-      if (cart[existingItemIndex].quantity >= product.stock) {
-        return; // No se permite agregar más
-      }
+      if (cart[existingItemIndex].quantity >= product.stock) return;
       const updatedCart = [...cart];
       updatedCart[existingItemIndex].quantity += 1;
-      updatedCart[existingItemIndex].total =
-        updatedCart[existingItemIndex].quantity *
-        updatedCart[existingItemIndex].price;
+      updatedCart[existingItemIndex].total = updatedCart[existingItemIndex].quantity * updatedCart[existingItemIndex].price;
       setCart(updatedCart);
     } else {
-      // Si no está en el carrito, agregarlo solo si hay stock (stock > 0)
       if (product.stock > 0) {
         setCart([
           ...cart,
@@ -177,16 +234,11 @@ export default function NewSalePage() {
     }
   };
 
-  // Actualizar la cantidad del carrito, evitando que exceda el stock disponible
   const updateCartItemQuantity = (index: number, newQuantity: number) => {
     if (newQuantity < 1) return;
-    // Buscar el producto en la lista de productos locales para conocer su stock
     const product = products.find((p) => p.id === cart[index].productId);
     if (!product) return;
-    // Si la nueva cantidad excede el stock, fijarla al máximo disponible
-    if (newQuantity > product.stock) {
-      newQuantity = product.stock;
-    }
+    if (newQuantity > product.stock) newQuantity = product.stock;
     const updatedCart = [...cart];
     updatedCart[index].quantity = newQuantity;
     updatedCart[index].total = newQuantity * updatedCart[index].price;
@@ -197,10 +249,7 @@ export default function NewSalePage() {
     setCart(cart.filter((_, i) => i !== index));
   };
 
-  const cartTotal = useMemo(
-    () => cart.reduce((sum, item) => sum + item.total, 0),
-    [cart]
-  );
+  const cartTotal = useMemo(() => cart.reduce((sum, item) => sum + item.total, 0), [cart]);
 
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat("es-AR", {
@@ -227,7 +276,7 @@ export default function NewSalePage() {
       };
       await dispatch(createSale(saleData));
 
-      // Actualizar stock de cada producto
+      // Actualiza stock de cada producto vendido
       for (const item of cart) {
         const product = products.find((p) => p.id === item.productId);
         if (product) {
@@ -246,11 +295,9 @@ export default function NewSalePage() {
       setCart([]);
       setPaymentMethod("cash");
       setIsConfirmModalOpen(false);
-      // Refetchear los productos para actualizar el state local.
+      // Refetchea productos para actualizar stock
       await fetchProducts();
-      setTimeout(() => {
-        setSuccessMessage("");
-      }, 3000);
+      setTimeout(() => setSuccessMessage(""), 3000);
     } catch (error) {
       console.error("Error completing sale:", error);
     } finally {
@@ -262,6 +309,7 @@ export default function NewSalePage() {
   if (!activeShift) {
     location.href = "/employee/dashboard";
   }
+
   return (
     <div className="space-y-6">
       {/* Cabecera */}
@@ -269,8 +317,7 @@ export default function NewSalePage() {
         <div>
           <h1 className="text-2xl font-bold">Nueva Venta</h1>
           <p className="text-gray-600 dark:text-gray-400">
-            Registra una nueva venta para{" "}
-            {activeShift?.businessName || "tu negocio"}
+            Registra una nueva venta para {activeShift?.businessName || "tu negocio"}
           </p>
         </div>
         <Link href="/employee/dashboard" className="btn btn-secondary">
@@ -283,22 +330,14 @@ export default function NewSalePage() {
         <div className="bg-red-50 dark:bg-red-900/20 border-l-4 border-red-500 p-4 rounded-md">
           <div className="flex">
             <div className="flex-shrink-0">
-              <AlertTriangle
-                className="h-5 w-5 text-red-500"
-                aria-hidden="true"
-              />
+              <AlertTriangle className="h-5 w-5 text-red-500" aria-hidden="true" />
             </div>
             <div className="ml-3">
-              <h3 className="text-sm font-medium text-red-800 dark:text-red-300">
-                No hay un turno activo
-              </h3>
+              <h3 className="text-sm font-medium text-red-800 dark:text-red-300">No hay un turno activo</h3>
               <div className="mt-2 text-sm text-red-700 dark:text-red-200">
                 <p>
                   Debes iniciar un turno antes de poder registrar ventas.
-                  <Link
-                    href="/employee/dashboard"
-                    className="ml-2 font-medium underline"
-                  >
+                  <Link href="/employee/dashboard" className="ml-2 font-medium underline">
                     Ir al Dashboard
                   </Link>
                 </p>
@@ -316,9 +355,7 @@ export default function NewSalePage() {
               <Check className="h-5 w-5 text-green-500" aria-hidden="true" />
             </div>
             <div className="ml-3">
-              <p className="text-sm font-medium text-green-800 dark:text-green-300">
-                {successMessage}
-              </p>
+              <p className="text-sm font-medium text-green-800 dark:text-green-300">{successMessage}</p>
             </div>
           </div>
         </div>
@@ -333,6 +370,7 @@ export default function NewSalePage() {
                 <Search className="h-5 w-5 text-gray-400" />
               </div>
               <input
+                ref={inputRef}
                 type="text"
                 className="input pl-10 w-full"
                 placeholder="Buscar productos por nombre o código..."
@@ -341,12 +379,15 @@ export default function NewSalePage() {
                 disabled={!activeShift}
               />
               <button
-                onClick={() => setSearchQuery("")}
+                onClick={() => {
+                  setSearchQuery("");
+                  inputRef.current?.focus();
+                }}
                 className="absolute inset-y-0 right-0 pr-3 flex items-center"
                 style={{
-                  backgroundColor:'gainsboro',
-                  padding:'0px 30px',
-                  color:'black'
+                  backgroundColor: "gainsboro",
+                  padding: "0px 30px",
+                  color: "black",
                 }}
               >
                 Limpiar
@@ -354,8 +395,8 @@ export default function NewSalePage() {
             </div>
           </div>
 
-          {/* Solo se muestra el listado si hay término de búsqueda */}
-          {searchQuery.trim() && (
+          {/* Se muestra el listado solo si hay término de búsqueda */}
+          {debouncedSearchQuery.trim() && (
             <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm overflow-hidden">
               <div className="p-4 border-b border-gray-200 dark:border-gray-700">
                 <h2 className="font-semibold">Resultados de la búsqueda</h2>
@@ -369,31 +410,32 @@ export default function NewSalePage() {
                   </colgroup>
                   <thead className="bg-gray-50 dark:bg-gray-700">
                     <tr>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                        Producto
-                      </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                        Precio
-                      </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                        Acciones
-                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Producto</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Precio</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Acciones</th>
                     </tr>
                   </thead>
                   <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
                     {filteredProducts.length > 0 && !isLoading ? (
                       filteredProducts.map((product) => (
-                        <tr
-                          key={product.id}
-                          className="hover:bg-gray-50 dark:hover:bg-gray-700"
-                        >
+                        <tr key={product.id} className="hover:bg-gray-50 dark:hover:bg-gray-700">
                           <td className="px-6 py-4 whitespace-normal break-words">
-                            <div className="text-sm font-medium text-gray-900 dark:text-white">
-                              {product.name}
-                            </div>
-                            <div className="text-xs text-gray-500 dark:text-gray-400">
-                              {product.code}
-                            </div>
+                            {(() => {
+                              const { category, baseName } = extractCategory(product.name);
+                              return (
+                                <>
+                                  {category && (
+                                    <div className="text-xs font-bold text-blue-400 dark:text-blue-300">
+                                      {category}
+                                    </div>
+                                  )}
+                                  <div className="text-sm font-medium text-gray-900 dark:text-white">{baseName}</div>
+                                  <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                    {product.code}
+                                  </div>
+                                </>
+                              );
+                            })()}
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
                             {formatCurrency(product.selling_price)}
@@ -403,35 +445,33 @@ export default function NewSalePage() {
                               onClick={() => addToCart(product)}
                               disabled={product.stock <= 0 || !activeShift}
                               style={{
-                                backgroundColor: product.stock <= 0 ? 'red' : 'green',
-                                padding: '10px 0px',
+                                backgroundColor: product.stock <= 0 ? "red" : "green",
+                                padding: "10px 0px",
                                 width: 100,
-                                borderRadius:5,
-                                color: product.stock <= 0 ? 'black' : 'white',
+                                borderRadius: 5,
+                                color: product.stock <= 0 ? "black" : "white",
                               }}
                             >
-                              {product.stock <= 0 ? 'SIN STOCK' : 'AGREGAR'}
+                              {product.stock <= 0 ? "SIN STOCK" : "AGREGAR"}
                             </button>
                           </td>
                         </tr>
                       ))
                     ) : isLoading ? (
-                      <div className="flex justify-center items-center h-64">
-                        <div className="text-center">
-                          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-700 mx-auto"></div>
-                          <p className="mt-4 text-gray-600 dark:text-gray-400">
-                            Cargando datos...
-                          </p>
-                        </div>
-                      </div>
+                      <tr>
+                        <td colSpan={3} className="px-6 py-4 text-center text-sm text-gray-500 dark:text-gray-400">
+                          <div className="flex justify-center items-center h-64">
+                            <div className="text-center">
+                              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-700 mx-auto"></div>
+                              <p className="mt-4 text-gray-600 dark:text-gray-400">Cargando datos...</p>
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
                     ) : (
                       <tr>
-                        <td
-                          colSpan={4}
-                          className="px-6 py-4 text-center text-sm text-gray-500 dark:text-gray-400"
-                        >
-                          No se encontraron productos. Intenta con otra
-                          búsqueda.
+                        <td colSpan={3} className="px-6 py-4 text-center text-sm text-gray-500 dark:text-gray-400">
+                          No se encontraron productos. Intenta con otra búsqueda.
                         </td>
                       </tr>
                     )}
@@ -447,8 +487,7 @@ export default function NewSalePage() {
           <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm p-4">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-lg font-semibold flex items-center">
-                <ShoppingCart className="h-5 w-5 mr-2" />
-                Carrito
+                <ShoppingCart className="h-5 w-5 mr-2" /> Carrito
               </h2>
               <span className="text-sm bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded-full">
                 {cart.length} {cart.length === 1 ? "producto" : "productos"}
@@ -458,10 +497,7 @@ export default function NewSalePage() {
             {cart.length > 0 ? (
               <div className="space-y-4">
                 {cart.map((item, index) => (
-                  <div
-                    key={index}
-                    className="flex justify-between items-center p-3 bg-gray-50 dark:bg-gray-700 rounded-lg"
-                  >
+                  <div key={index} className="flex justify-between items-center p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
                     <div className="flex-1">
                       <p className="font-medium text-sm">{item.productName}</p>
                       <p className="text-xs text-gray-500 dark:text-gray-400">
@@ -470,18 +506,14 @@ export default function NewSalePage() {
                     </div>
                     <div className="flex items-center space-x-2">
                       <button
-                        onClick={() =>
-                          updateCartItemQuantity(index, item.quantity - 1)
-                        }
+                        onClick={() => updateCartItemQuantity(index, item.quantity - 1)}
                         className="p-1 rounded-full bg-gray-200 dark:bg-gray-600 hover:bg-gray-300 dark:hover:bg-gray-500"
                       >
                         <Minus className="h-4 w-4" />
                       </button>
                       <span className="w-8 text-center">{item.quantity}</span>
                       <button
-                        onClick={() =>
-                          updateCartItemQuantity(index, item.quantity + 1)
-                        }
+                        onClick={() => updateCartItemQuantity(index, item.quantity + 1)}
                         className="p-1 rounded-full bg-gray-200 dark:bg-gray-600 hover:bg-gray-300 dark:hover:bg-gray-500"
                       >
                         <Plus className="h-4 w-4" />
@@ -494,9 +526,7 @@ export default function NewSalePage() {
                       </button>
                     </div>
                     <div className="ml-4 text-right">
-                      <p className="font-medium">
-                        {formatCurrency(item.total)}
-                      </p>
+                      <p className="font-medium">{formatCurrency(item.total)}</p>
                     </div>
                   </div>
                 ))}
@@ -582,12 +612,8 @@ export default function NewSalePage() {
             ) : (
               <div className="text-center py-8">
                 <ShoppingCart className="h-12 w-12 mx-auto text-gray-400" />
-                <p className="mt-2 text-gray-500 dark:text-gray-400">
-                  El carrito está vacío
-                </p>
-                <p className="text-sm text-gray-500 dark:text-gray-400">
-                  Busca productos y agrégalos al carrito
-                </p>
+                <p className="mt-2 text-gray-500 dark:text-gray-400">El carrito está vacío</p>
+                <p className="text-sm text-gray-500 dark:text-gray-400">Busca productos y agrégalos al carrito</p>
               </div>
             )}
           </div>
@@ -608,15 +634,11 @@ export default function NewSalePage() {
               </button>
             </div>
             <div className="p-6 space-y-4">
-              <p className="text-gray-700 dark:text-gray-300">
-                ¿Estás seguro de que deseas completar esta venta?
-              </p>
+              <p className="text-gray-700 dark:text-gray-300">¿Estás seguro de que deseas completar esta venta?</p>
               <div className="bg-gray-50 dark:bg-gray-700 p-4 rounded-md">
                 <div className="flex justify-between mb-2">
                   <span className="font-medium">Total:</span>
-                  <span className="font-medium">
-                    {formatCurrency(cartTotal)}
-                  </span>
+                  <span className="font-medium">{formatCurrency(cartTotal)}</span>
                 </div>
                 <div className="flex justify-between text-sm">
                   <span>Método de Pago:</span>
@@ -646,19 +668,10 @@ export default function NewSalePage() {
                 </div>
               </div>
               <div className="pt-4 flex justify-end space-x-3">
-                <button
-                  type="button"
-                  onClick={() => setIsConfirmModalOpen(false)}
-                  className="btn btn-secondary"
-                >
+                <button type="button" onClick={() => setIsConfirmModalOpen(false)} className="btn btn-secondary">
                   Cancelar
                 </button>
-                <button
-                  type="button"
-                  onClick={handleCompleteSale}
-                  disabled={isProcessing}
-                  className="btn btn-primary"
-                >
+                <button type="button" onClick={handleCompleteSale} disabled={isProcessing} className="btn btn-primary">
                   {isProcessing ? "Procesando..." : "Confirmar"}
                 </button>
               </div>

@@ -545,96 +545,119 @@ export default function ProductsAdminPage() {
                 </tr>
               </thead>
               <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                {isRefreshing || isLoading ? (
-                  <tr>
-                    <td colSpan={5} className="px-6 py-4 text-center">
-                      <div className="flex justify-center items-center">
-                        <div className="text-center flex flex-col">
-                          <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-700"></div>
-                          <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
-                            Actualizando datos...
-                          </p>
-                        </div>
-                      </div>
-                    </td>
-                  </tr>
-                ) : sortedProducts.length > 0 ? (
-                  sortedProducts.map((product) => {
-                    const marginNum = calculateMargin(product.purchasePrice, product.sellingPrice);
-                    const isExcessiveMargin = marginNum > 1000;
-                    return (
-                      <tr key={product.id} className="hover:bg-gray-50 dark:hover:bg-gray-700">
-                        <td className="px-6 py-4 align-middle whitespace-normal break-words">
-                          <div className="text-sm font-medium text-gray-900 dark:text-white">
-                            {product.name}
-                          </div>
-                          <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                            {product.code}
-                          </div>
-                          {product.description && (
-                            <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                              {product.description}
-                            </div>
-                          )}
-                        </td>
-                        <td className="px-6 py-4 align-middle whitespace-nowrap">
-                          <div className="text-xs text-gray-500 dark:text-gray-400">Compra:</div>
-                          <div className="text-sm font-medium text-gray-900 dark:text-white">
-                            ${product.purchasePrice.toFixed(2)}
-                          </div>
-                          <div className="mt-2 text-xs text-gray-500 dark:text-gray-400">Venta:</div>
-                          <div className="text-sm font-medium text-gray-900 dark:text-white">
-                            ${product.sellingPrice.toFixed(2)}
-                          </div>
-                        </td>
-                        <td className="px-6 py-4 align-middle whitespace-nowrap">
-                          {isExcessiveMargin ? (
-                            <span className="inline-block bg-yellow-300 text-black px-2 py-1 text-xs font-medium rounded-full">
-                              Calcular MARGEN
-                            </span>
-                          ) : (
-                            <span>{marginNum.toFixed(2)}%</span>
-                          )}
-                        </td>
-                        <td className="px-6 py-4 align-middle whitespace-nowrap">
-                          <div className="text-xs text-gray-500 dark:text-gray-400">
-                            Mín: {product.minStock}
-                          </div>
-                          <div className="mt-1">
-                            <span
-                              className={`px-2 py-1 text-xs font-medium rounded-full ${
-                                product.stock <= product.minStock
-                                  ? "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300"
-                                  : "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300"
-                              }`}
-                            >
-                              {product.stock}
-                            </span>
-                          </div>
-                        </td>
-                        <td className="px-6 py-4 align-middle whitespace-nowrap">
-                          <div className="flex flex-col gap-2">
-                            <button onClick={() => openEditProductModal(product)} className="btn btn-primary px-8">
-                              Editar
-                            </button>
-                            <button onClick={() => openDeleteModal(product)} className="btn btn-danger px-8">
-                              Eliminar
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })
-                ) : (
-                  <tr>
-                    <td colSpan={5} className="px-6 py-4 text-center text-sm text-gray-500 dark:text-gray-400">
-                      {searchQuery
-                        ? "No se encontraron productos que coincidan con la búsqueda."
-                        : "No hay productos para este negocio."}
-                    </td>
-                  </tr>
-                )}
-              </tbody>
+  {isRefreshing || isLoading ? (
+    <tr>
+      <td colSpan={5} className="px-6 py-4 text-center">
+        <div className="flex justify-center items-center">
+          <div className="text-center flex flex-col">
+            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-700"></div>
+            <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
+              Actualizando datos...
+            </p>
+          </div>
+        </div>
+      </td>
+    </tr>
+  ) : sortedProducts.length > 0 ? (
+    sortedProducts.map((product) => {
+      const marginNum = calculateMargin(
+        product.purchasePrice,
+        product.sellingPrice
+      );
+      const isExcessiveMargin = marginNum > 1000;
+      return (
+        <tr key={product.id} className="hover:bg-gray-50 dark:hover:bg-gray-700">
+          {/* Columna de Producto */}
+          <td className="px-6 py-4 align-middle whitespace-normal break-words">
+            {(() => {
+              const { category, baseName } = extractCategory(product.name);
+              return (
+                <>
+                  {category && (
+                    <div className="text-xs font-bold text-blue-400 dark:text-blue-300">
+                      {category}
+                    </div>
+                  )}
+                  <div className="text-sm font-medium text-gray-900 dark:text-white">
+                    {baseName}
+                  </div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                    {product.code}
+                  </div>
+                  {product.description && (
+                    <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                      {product.description}
+                    </div>
+                  )}
+                </>
+              );
+            })()}
+          </td>
+          {/* Otras columnas: Precios, Margen, Stock y Acciones */}
+          <td className="px-6 py-4 align-middle whitespace-nowrap">
+            <div className="text-xs text-gray-500 dark:text-gray-400">Compra:</div>
+            <div className="text-sm font-medium text-gray-900 dark:text-white">
+              ${product.purchasePrice.toFixed(2)}
+            </div>
+            <div className="mt-2 text-xs text-gray-500 dark:text-gray-400">Venta:</div>
+            <div className="text-sm font-medium text-gray-900 dark:text-white">
+              ${product.sellingPrice.toFixed(2)}
+            </div>
+          </td>
+          <td className="px-6 py-4 align-middle whitespace-nowrap">
+            {isExcessiveMargin ? (
+              <span className="inline-block bg-yellow-300 text-black px-2 py-1 text-xs font-medium rounded-full">
+                Calcular MARGEN
+              </span>
+            ) : (
+              <span>{marginNum.toFixed(2)}%</span>
+            )}
+          </td>
+          <td className="px-6 py-4 align-middle whitespace-nowrap">
+            <div className="text-xs text-gray-500 dark:text-gray-400">
+              Mín: {product.minStock}
+            </div>
+            <div className="mt-1">
+              <span
+                className={`px-2 py-1 text-xs font-medium rounded-full ${
+                  product.stock <= product.minStock
+                    ? "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300"
+                    : "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300"
+                }`}
+              >
+                {product.stock}
+              </span>
+            </div>
+          </td>
+          <td className="px-6 py-4 align-middle whitespace-nowrap">
+            <div className="flex flex-col gap-2">
+              <button
+                onClick={() => openEditProductModal(product)}
+                className="btn btn-primary px-8"
+              >
+                Editar
+              </button>
+              <button
+                onClick={() => openDeleteModal(product)}
+                className="btn btn-danger px-8"
+              >
+                Eliminar
+              </button>
+            </div>
+          </td>
+        </tr>
+      );
+    })
+  ) : (
+    <tr>
+      <td colSpan={5} className="px-6 py-4 text-center text-sm text-gray-500 dark:text-gray-400">
+        {searchQuery
+          ? "No se encontraron productos que coincidan con la búsqueda."
+          : "No hay productos para este negocio."}
+      </td>
+    </tr>
+  )}
+</tbody>
             </table>
           </div>
         </div>
