@@ -87,12 +87,12 @@ export const addSale = async (sale: Omit<Sale, "id">): Promise<Sale> => {
       }
 
       // Registrar actividad con el userId correcto
-      await activityService.logActivity({
-        userId: userId, // Usar el ID de usuario en lugar del ID de empleado
-        businessId: sale.businessId,
-        action: "New Sale",
-        details: `Created a new sale for $${sale.total}`,
-      })
+      // await activityService.logActivity({
+      //   userId: userId, // Usar el ID de usuario en lugar del ID de empleado
+      //   businessId: sale.businessId,
+      //   action: "New Sale",
+      //   details: `Created a new sale for $${sale.total}`,
+      // })
     } catch (error) {
       console.error("🔍 SalesService: Error during activity logging:", error)
     }
