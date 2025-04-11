@@ -138,41 +138,46 @@ export default function NewSalePage() {
     dispatch(getShifts());
   }, [dispatch, user]);
 
-  // Listener global para capturar entrada desde el escáner (incluso si el input no tiene foco)
+  // Listener global para capturar entrada desde el escáner (solo si el input NO está enfocado)
   useEffect(() => {
     let barcodeBuffer = "";
-    let timeoutId: ReturnType<typeof setTimeout>;
+    let commitTimeout: ReturnType<typeof setTimeout>;
+    // Tiempo en ms que define el fin de un escaneo al no recibir nuevas teclas
+    const interKeyDelay = 300;
 
     const handleKeyPress = (event: KeyboardEvent) => {
-      // Reinicia el timeout
-      clearTimeout(timeoutId);
-      // Siempre se mantiene el foco en el input
-      inputRef.current?.focus();
-
-      if (event.key === "Enter") {
-        // Al presionar Enter se asume que se terminó de escanear
-        const scannedCode = barcodeBuffer;
-        setSearchQuery(scannedCode);
-        // Permite que el debounce capte el código, luego limpia el input después de 500ms
-        setTimeout(() => {
-          setSearchQuery("");
-          inputRef.current?.focus();
-        }, 500);
-        barcodeBuffer = "";
-      } else {
-        barcodeBuffer += event.key;
+      // Si el input está enfocado, se asume que el usuario está escribiendo manualmente
+      if (document.activeElement === inputRef.current) {
+        return;
       }
-      // Si no se reciben teclas por 150ms, se limpia el buffer
-      timeoutId = setTimeout(() => {
+
+      // Si ya hay un resultado de un escaneo anterior y el buffer está vacío,
+      // es el inicio de un nuevo escaneo, así que se limpia el valor previo.
+      if (!barcodeBuffer && searchQuery) {
+        setSearchQuery("");
+      }
+
+      // Agrega la tecla al buffer
+      barcodeBuffer += event.key;
+
+      // Reinicia el timeout para detectar la inactividad entre teclas
+      clearTimeout(commitTimeout);
+      commitTimeout = setTimeout(() => {
+        // Opcional: se puede verificar la longitud mínima para confirmar que es un código válido
+        if (barcodeBuffer.length > 3) {
+          setSearchQuery(barcodeBuffer);
+        }
+        // Reinicia el buffer para el próximo escaneo
         barcodeBuffer = "";
-      }, 150);
+      }, interKeyDelay);
     };
 
     document.addEventListener("keypress", handleKeyPress);
     return () => {
+      clearTimeout(commitTimeout);
       document.removeEventListener("keypress", handleKeyPress);
     };
-  }, []);
+  }, [searchQuery]);
 
   // Enfoque inicial en el input al montar el componente
   useEffect(() => {
@@ -410,9 +415,15 @@ export default function NewSalePage() {
                   </colgroup>
                   <thead className="bg-gray-50 dark:bg-gray-700">
                     <tr>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Producto</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Precio</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Acciones</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                        Producto
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                        Precio
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                        Acciones
+                      </th>
                     </tr>
                   </thead>
                   <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
@@ -429,7 +440,9 @@ export default function NewSalePage() {
                                       {category}
                                     </div>
                                   )}
-                                  <div className="text-sm font-medium text-gray-900 dark:text-white">{baseName}</div>
+                                  <div className="text-sm font-medium text-gray-900 dark:text-white">
+                                    {baseName}
+                                  </div>
                                   <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
                                     {product.code}
                                   </div>
