@@ -23,6 +23,7 @@ import {
   Building2,
   ClipboardList,
   BarChart2,
+  Apple,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
@@ -34,6 +35,7 @@ const navItems = [
   { name: "Estadistica", href: "/admin/estadistica", icon: BarChart2 },
   { name: "Empleados", href: "/admin/employees", icon: Users },
   { name: "Negocios", href: "/admin/business", icon: Building2 },
+  { name: "Promos", href: "/admin/promos", icon: Apple },
   // { name: "Actividad", href: "/admin/activity", icon: Activity },
   // { name: "Ventas", href: "/admin/sales", icon: ShoppingCart },
   // { name: "Flujo de Caja", href: "/admin/caja", icon: CreditCard },
