@@ -143,7 +143,7 @@ export default function NewSalePage() {
           stock: 999,
         };
       });
-      setProducts([...allProducts, ...listProm]);
+      setProducts([...listProm, ...allProducts]);
     } catch (error) {
       console.error("Error al cargar productos:", error);
       setProducts([]);
@@ -272,7 +272,6 @@ export default function NewSalePage() {
     }
   };
 
-  console.log("Carrito", cart);
   const updateCartItemQuantity = (index: number, newQuantity: number) => {
     if (newQuantity < 1) return;
     const product = products.find((p) => p.id === cart[index].productId);
