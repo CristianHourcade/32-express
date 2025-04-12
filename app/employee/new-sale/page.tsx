@@ -43,10 +43,16 @@ const categories = [
 ];
 
 // Helper que extrae la categoría al inicio del nombre
-function extractCategory(name: string): { category: string | null; baseName: string } {
+function extractCategory(name: string): {
+  category: string | null;
+  baseName: string;
+} {
   const parts = name.trim().split(" ");
   if (parts.length > 1 && categories.includes(parts[0].toUpperCase())) {
-    return { category: parts[0].toUpperCase(), baseName: parts.slice(1).join(" ") };
+    return {
+      category: parts[0].toUpperCase(),
+      baseName: parts.slice(1).join(" "),
+    };
   }
   return { category: null, baseName: name };
 }
@@ -65,7 +71,9 @@ export default function NewSalePage() {
   const router = useRouter();
   const dispatch = useDispatch<AppDispatch>();
   const { user } = useSelector((state: RootState) => state.auth);
-  const { shifts, loading: shiftsLoading } = useSelector((state: RootState) => state.shifts);
+  const { shifts, loading: shiftsLoading } = useSelector(
+    (state: RootState) => state.shifts
+  );
   const { employees } = useSelector((state: RootState) => state.employees);
 
   // Estado para guardar productos del negocio actual
@@ -77,8 +85,10 @@ export default function NewSalePage() {
   const debouncedSearchQuery = useDebounce(searchQuery, 300);
 
   // Estados para el carrito y la venta
-  const [cart, setCart] = useState<CartItem[]>([]);
-  const [paymentMethod, setPaymentMethod] = useState<"cash" | "card" | "transfer" | "mercadopago" | "rappi">("cash");
+  const [cart, setCart] = useState<any[]>([]);
+  const [paymentMethod, setPaymentMethod] = useState<
+    "cash" | "card" | "transfer" | "mercadopago" | "rappi"
+  >("cash");
   const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [successMessage, setSuccessMessage] = useState("");
@@ -117,7 +127,23 @@ export default function NewSalePage() {
           done = true;
         }
       }
-      setProducts(allProducts);
+      const { data, error } = await supabase
+        .from("promotions")
+        .select("*")
+        .eq("businesses_id", businessId);
+
+      const listProm = data.map((promo) => {
+        return {
+          business_id: promo.businesses_id,
+          code: "Promo",
+          id: promo.id,
+          name: promo.name,
+          selling_price: promo.price,
+          products: promo.products,
+          stock: 999,
+        };
+      });
+      setProducts([...allProducts, ...listProm]);
     } catch (error) {
       console.error("Error al cargar productos:", error);
       setProducts([]);
@@ -189,7 +215,9 @@ export default function NewSalePage() {
     if (!user) return null;
     const empById = employees.find((emp) => emp.userId === user.id);
     const empByEmail = !empById
-      ? employees.find((emp) => emp.email.toLowerCase() === user.email.toLowerCase())
+      ? employees.find(
+          (emp) => emp.email.toLowerCase() === user.email.toLowerCase()
+        )
       : null;
     return empById || empByEmail;
   }, [employees, user]);
@@ -216,12 +244,16 @@ export default function NewSalePage() {
 
   // Funciones para el carrito
   const addToCart = (product: any) => {
-    const existingItemIndex = cart.findIndex((item) => item.productId === product.id);
+    const existingItemIndex = cart.findIndex(
+      (item) => item.productId === product.id
+    );
     if (existingItemIndex >= 0) {
       if (cart[existingItemIndex].quantity >= product.stock) return;
       const updatedCart = [...cart];
       updatedCart[existingItemIndex].quantity += 1;
-      updatedCart[existingItemIndex].total = updatedCart[existingItemIndex].quantity * updatedCart[existingItemIndex].price;
+      updatedCart[existingItemIndex].total =
+        updatedCart[existingItemIndex].quantity *
+        updatedCart[existingItemIndex].price;
       setCart(updatedCart);
     } else {
       if (product.stock > 0) {
@@ -233,12 +265,14 @@ export default function NewSalePage() {
             price: product.selling_price || product.sellingPrice,
             quantity: 1,
             total: product.selling_price || product.sellingPrice,
+            listID: product.products,
           },
         ]);
       }
     }
   };
 
+  console.log("Carrito", cart);
   const updateCartItemQuantity = (index: number, newQuantity: number) => {
     if (newQuantity < 1) return;
     const product = products.find((p) => p.id === cart[index].productId);
@@ -254,7 +288,10 @@ export default function NewSalePage() {
     setCart(cart.filter((_, i) => i !== index));
   };
 
-  const cartTotal = useMemo(() => cart.reduce((sum, item) => sum + item.total, 0), [cart]);
+  const cartTotal = useMemo(
+    () => cart.reduce((sum, item) => sum + item.total, 0),
+    [cart]
+  );
 
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat("es-AR", {
@@ -283,16 +320,28 @@ export default function NewSalePage() {
 
       // Actualiza stock de cada producto vendido
       for (const item of cart) {
-        const product = products.find((p) => p.id === item.productId);
-        if (product) {
-          await dispatch(
-            editProduct({
-              ...product,
-              stock: product.stock - item.quantity,
-              salesCount: product.salesCount + item.quantity,
-              totalRevenue: product.totalRevenue + item.total,
-            })
-          );
+        if (item.listID) {
+          item.listID.forEach(async (prom: any) => {
+            const product = products.find((p) => p.id === prom.id);
+            if (product) {
+              await dispatch(
+                editProduct({
+                  ...product,
+                  stock: product.stock - prom.qty * item.quantity,
+                })
+              );
+            }
+          });
+        } else {
+          const product = products.find((p) => p.id === item.productId);
+          if (product) {
+            await dispatch(
+              editProduct({
+                ...product,
+                stock: product.stock - item.quantity,
+              })
+            );
+          }
         }
       }
 
@@ -322,7 +371,8 @@ export default function NewSalePage() {
         <div>
           <h1 className="text-2xl font-bold">Nueva Venta</h1>
           <p className="text-gray-600 dark:text-gray-400">
-            Registra una nueva venta para {activeShift?.businessName || "tu negocio"}
+            Registra una nueva venta para{" "}
+            {activeShift?.businessName || "tu negocio"}
           </p>
         </div>
         <Link href="/employee/dashboard" className="btn btn-secondary">
@@ -335,14 +385,22 @@ export default function NewSalePage() {
         <div className="bg-red-50 dark:bg-red-900/20 border-l-4 border-red-500 p-4 rounded-md">
           <div className="flex">
             <div className="flex-shrink-0">
-              <AlertTriangle className="h-5 w-5 text-red-500" aria-hidden="true" />
+              <AlertTriangle
+                className="h-5 w-5 text-red-500"
+                aria-hidden="true"
+              />
             </div>
             <div className="ml-3">
-              <h3 className="text-sm font-medium text-red-800 dark:text-red-300">No hay un turno activo</h3>
+              <h3 className="text-sm font-medium text-red-800 dark:text-red-300">
+                No hay un turno activo
+              </h3>
               <div className="mt-2 text-sm text-red-700 dark:text-red-200">
                 <p>
                   Debes iniciar un turno antes de poder registrar ventas.
-                  <Link href="/employee/dashboard" className="ml-2 font-medium underline">
+                  <Link
+                    href="/employee/dashboard"
+                    className="ml-2 font-medium underline"
+                  >
                     Ir al Dashboard
                   </Link>
                 </p>
@@ -360,7 +418,9 @@ export default function NewSalePage() {
               <Check className="h-5 w-5 text-green-500" aria-hidden="true" />
             </div>
             <div className="ml-3">
-              <p className="text-sm font-medium text-green-800 dark:text-green-300">{successMessage}</p>
+              <p className="text-sm font-medium text-green-800 dark:text-green-300">
+                {successMessage}
+              </p>
             </div>
           </div>
         </div>
@@ -429,10 +489,15 @@ export default function NewSalePage() {
                   <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
                     {filteredProducts.length > 0 && !isLoading ? (
                       filteredProducts.map((product) => (
-                        <tr key={product.id} className="hover:bg-gray-50 dark:hover:bg-gray-700">
+                        <tr
+                          key={product.id}
+                          className="hover:bg-gray-50 dark:hover:bg-gray-700"
+                        >
                           <td className="px-6 py-4 whitespace-normal break-words">
                             {(() => {
-                              const { category, baseName } = extractCategory(product.name);
+                              const { category, baseName } = extractCategory(
+                                product.name
+                              );
                               return (
                                 <>
                                   {category && (
@@ -441,10 +506,16 @@ export default function NewSalePage() {
                                     </div>
                                   )}
                                   <div className="text-sm font-medium text-gray-900 dark:text-white">
-                                    {baseName}
+                                    {baseName.toUpperCase()}
                                   </div>
-                                  <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                                    {product.code}
+                                  <div
+                                    className={`text-xs mt-1 ${
+                                      product.code.toUpperCase() === "PROMO"
+                                        ? "text-red-500"
+                                        : "text-gray-500 dark:text-gray-400"
+                                    }`}
+                                  >
+                                    {product.code.toUpperCase()}!
                                   </div>
                                 </>
                               );
@@ -458,7 +529,8 @@ export default function NewSalePage() {
                               onClick={() => addToCart(product)}
                               disabled={product.stock <= 0 || !activeShift}
                               style={{
-                                backgroundColor: product.stock <= 0 ? "red" : "green",
+                                backgroundColor:
+                                  product.stock <= 0 ? "red" : "green",
                                 padding: "10px 0px",
                                 width: 100,
                                 borderRadius: 5,
@@ -472,19 +544,28 @@ export default function NewSalePage() {
                       ))
                     ) : isLoading ? (
                       <tr>
-                        <td colSpan={3} className="px-6 py-4 text-center text-sm text-gray-500 dark:text-gray-400">
+                        <td
+                          colSpan={3}
+                          className="px-6 py-4 text-center text-sm text-gray-500 dark:text-gray-400"
+                        >
                           <div className="flex justify-center items-center h-64">
                             <div className="text-center">
                               <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-700 mx-auto"></div>
-                              <p className="mt-4 text-gray-600 dark:text-gray-400">Cargando datos...</p>
+                              <p className="mt-4 text-gray-600 dark:text-gray-400">
+                                Cargando datos...
+                              </p>
                             </div>
                           </div>
                         </td>
                       </tr>
                     ) : (
                       <tr>
-                        <td colSpan={3} className="px-6 py-4 text-center text-sm text-gray-500 dark:text-gray-400">
-                          No se encontraron productos. Intenta con otra búsqueda.
+                        <td
+                          colSpan={3}
+                          className="px-6 py-4 text-center text-sm text-gray-500 dark:text-gray-400"
+                        >
+                          No se encontraron productos. Intenta con otra
+                          búsqueda.
                         </td>
                       </tr>
                     )}
@@ -510,7 +591,10 @@ export default function NewSalePage() {
             {cart.length > 0 ? (
               <div className="space-y-4">
                 {cart.map((item, index) => (
-                  <div key={index} className="flex justify-between items-center p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                  <div
+                    key={index}
+                    className="flex justify-between items-center p-3 bg-gray-50 dark:bg-gray-700 rounded-lg"
+                  >
                     <div className="flex-1">
                       <p className="font-medium text-sm">{item.productName}</p>
                       <p className="text-xs text-gray-500 dark:text-gray-400">
@@ -519,14 +603,18 @@ export default function NewSalePage() {
                     </div>
                     <div className="flex items-center space-x-2">
                       <button
-                        onClick={() => updateCartItemQuantity(index, item.quantity - 1)}
+                        onClick={() =>
+                          updateCartItemQuantity(index, item.quantity - 1)
+                        }
                         className="p-1 rounded-full bg-gray-200 dark:bg-gray-600 hover:bg-gray-300 dark:hover:bg-gray-500"
                       >
                         <Minus className="h-4 w-4" />
                       </button>
                       <span className="w-8 text-center">{item.quantity}</span>
                       <button
-                        onClick={() => updateCartItemQuantity(index, item.quantity + 1)}
+                        onClick={() =>
+                          updateCartItemQuantity(index, item.quantity + 1)
+                        }
                         className="p-1 rounded-full bg-gray-200 dark:bg-gray-600 hover:bg-gray-300 dark:hover:bg-gray-500"
                       >
                         <Plus className="h-4 w-4" />
@@ -539,7 +627,9 @@ export default function NewSalePage() {
                       </button>
                     </div>
                     <div className="ml-4 text-right">
-                      <p className="font-medium">{formatCurrency(item.total)}</p>
+                      <p className="font-medium">
+                        {formatCurrency(item.total)}
+                      </p>
                     </div>
                   </div>
                 ))}
@@ -625,8 +715,12 @@ export default function NewSalePage() {
             ) : (
               <div className="text-center py-8">
                 <ShoppingCart className="h-12 w-12 mx-auto text-gray-400" />
-                <p className="mt-2 text-gray-500 dark:text-gray-400">El carrito está vacío</p>
-                <p className="text-sm text-gray-500 dark:text-gray-400">Busca productos y agrégalos al carrito</p>
+                <p className="mt-2 text-gray-500 dark:text-gray-400">
+                  El carrito está vacío
+                </p>
+                <p className="text-sm text-gray-500 dark:text-gray-400">
+                  Busca productos y agrégalos al carrito
+                </p>
               </div>
             )}
           </div>
@@ -647,11 +741,15 @@ export default function NewSalePage() {
               </button>
             </div>
             <div className="p-6 space-y-4">
-              <p className="text-gray-700 dark:text-gray-300">¿Estás seguro de que deseas completar esta venta?</p>
+              <p className="text-gray-700 dark:text-gray-300">
+                ¿Estás seguro de que deseas completar esta venta?
+              </p>
               <div className="bg-gray-50 dark:bg-gray-700 p-4 rounded-md">
                 <div className="flex justify-between mb-2">
                   <span className="font-medium">Total:</span>
-                  <span className="font-medium">{formatCurrency(cartTotal)}</span>
+                  <span className="font-medium">
+                    {formatCurrency(cartTotal)}
+                  </span>
                 </div>
                 <div className="flex justify-between text-sm">
                   <span>Método de Pago:</span>
@@ -681,10 +779,19 @@ export default function NewSalePage() {
                 </div>
               </div>
               <div className="pt-4 flex justify-end space-x-3">
-                <button type="button" onClick={() => setIsConfirmModalOpen(false)} className="btn btn-secondary">
+                <button
+                  type="button"
+                  onClick={() => setIsConfirmModalOpen(false)}
+                  className="btn btn-secondary"
+                >
                   Cancelar
                 </button>
-                <button type="button" onClick={handleCompleteSale} disabled={isProcessing} className="btn btn-primary">
+                <button
+                  type="button"
+                  onClick={handleCompleteSale}
+                  disabled={isProcessing}
+                  className="btn btn-primary"
+                >
                   {isProcessing ? "Procesando..." : "Confirmar"}
                 </button>
               </div>

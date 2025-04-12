@@ -61,7 +61,7 @@ export class SalesService extends SupabaseService<Sale> {
           const items =
             saleItems?.map((item) => ({
               productId: item.product_id,
-              productName: item.products?.name || "Producto desconocido",
+              productName: item.products?.name || item.promo_name,
               quantity: item.quantity,
               price: item.price,
               total: item.total,
@@ -243,13 +243,18 @@ export class SalesService extends SupabaseService<Sale> {
       console.log("🔍 SalesService (Supabase): Sale created successfully:", newSale)
 
       // 3. Insertar los items de la venta
-      const saleItems = sale.items.map((item) => ({
-        sale_id: newSale.id,
-        product_id: item.productId,
-        quantity: item.quantity,
-        price: item.price,
-        total: item.quantity * item.price, // Añadir el campo total
-      }))
+      const saleItems = sale.items.map((item: any) => {
+        console.log(item);
+        return {
+          sale_id: newSale.id,
+          product_id: item.listID ? undefined : item.productId,
+          promotion_id: item.listID ? item.productId : undefined,
+          promo_name: item.productName,
+          quantity: item.quantity,
+          price: item.price,
+          total: item.quantity * item.price,
+        }
+      })
 
       console.log("🔍 SalesService (Supabase): Inserting sale items:", saleItems)
 
@@ -317,7 +322,7 @@ export class SalesService extends SupabaseService<Sale> {
       const items =
         saleItems?.map((item) => ({
           productId: item.product_id,
-          productName: item.products?.name || "Producto desconocido",
+          productName: item.products?.name || item.promo_name,
           quantity: item.quantity,
           price: item.price,
           total: item.total,
