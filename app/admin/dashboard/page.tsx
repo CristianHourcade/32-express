@@ -3,11 +3,65 @@
 import { useEffect, useState, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
 
+/* ========= COMPONENTE: MultiSelectDropdown ========= */
+function MultiSelectDropdown({
+  options,
+  selectedOptions,
+  onChange,
+  placeholder = "Selecciona categorías",
+}: {
+  options: string[];
+  selectedOptions: string[];
+  onChange: (selected: string[]) => void;
+  placeholder?: string;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+
+  const toggleOption = (option: string) => {
+    let newSelected = selectedOptions.includes(option)
+      ? selectedOptions.filter((o) => o !== option)
+      : [...selectedOptions, option];
+    onChange(newSelected);
+  };
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setIsOpen(!isOpen)}
+        className="input w-full text-left flex items-center justify-between"
+      >
+        <span>
+          {selectedOptions.length > 0
+            ? selectedOptions.join(", ")
+            : placeholder}
+        </span>
+      </button>
+      {isOpen && (
+        <div className="absolute z-10 mt-1 bg-white dark:bg-gray-800 shadow-lg border rounded w-full">
+          <div className="max-h-60 overflow-y-auto">
+            {options.map((option) => (
+              <label
+                key={option}
+                className="flex items-center px-2 py-1 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700"
+              >
+                <input
+                  type="checkbox"
+                  checked={selectedOptions.includes(option)}
+                  onChange={() => toggleOption(option)}
+                  className="mr-2"
+                />
+                <span className="text-sm">{option}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ========= FETCH HELPERS ========= */
-/**
- * Función genérica para traer datos paginados.
- * Se realizan peticiones de 1000 items y se continúa hasta recibir menos.
- */
 async function fetchAllPaginated(
   queryFn: (
     from: number,
@@ -51,7 +105,6 @@ async function loadBusinesses(): Promise<any[]> {
     console.error("Error loading businesses:", error);
     return [];
   }
-  console.log("loadBusinesses - Data:", data);
   return data || [];
 }
 
@@ -110,33 +163,61 @@ async function loadShifts(businessId: string): Promise<any[]> {
   );
 }
 
-function formatNumberAbbreviation(num) {
+/* ========= OTRAS FUNCIONES DE UTILIDAD ========= */
+function formatNumberAbbreviation(num: number): string {
   const sign = num < 0 ? "-" : "";
   const absNum = Math.abs(num);
-
   if (absNum >= 1.0e6) {
-    // >= 1 millón
     return sign + (absNum / 1.0e6).toFixed(1) + "M";
   } else if (absNum >= 1.0e3) {
-    // >= 1 mil
     return sign + (absNum / 1.0e3).toFixed(1) + "k";
   } else {
-    // < 1000
     return sign + absNum.toFixed(0);
   }
 }
 
+/* ========= FILTRADO POR CATEGORÍAS ========= */
+// Arreglo de categorías conocidas
+const categories = [
+  "ALMACEN",
+  "CIGARRILLOS",
+  "GOLOSINAS",
+  "BEBIDA",
+  "CERVEZA",
+  "FIAMBRES",
+  "TABACO",
+  "HUEVOS",
+  "HIGIENE",
+  "ALCOHOL",
+];
+
+// Función para extraer la categoría a partir del nombre de producto.
+// Si el nombre inicia con alguna de las categorías definidas (sin importar mayúsculas/minúsculas),
+// se retorna esa categoría; de lo contrario, retorna null.
+function extractCategory(name: string): {
+  category: string | null;
+  baseName: string;
+} {
+  const parts = name.trim().split(" ");
+  if (parts.length > 1 && categories.includes(parts[0].toUpperCase())) {
+    return {
+      category: parts[0].toUpperCase(),
+      baseName: parts.slice(1).join(" "),
+    };
+  }
+  return { category: null, baseName: name };
+}
+
+/* ========= COMPONENTE: AdminDashboard ========= */
 export default function AdminDashboard() {
-  // Estados para datos globales (Negocios, Ventas, Gastos, Turnos)
+  // Estados globales
   const [businesses, setBusinesses] = useState<any[]>([]);
   const [sales, setSales] = useState<any[]>([]);
   const [expenses, setExpenses] = useState<any[]>([]);
   const [shifts, setShifts] = useState<any[]>([]);
-
-  // Estado para empleados
   const [employees, setEmployees] = useState<any[]>([]);
 
-  // Estados para la sección de Top Productos (datos específicos del negocio seleccionado)
+  // Estados para la sección "Top Productos"
   const [directSales, setDirectSales] = useState<any[]>([]);
   const [directSalesLoading, setDirectSalesLoading] = useState<boolean>(false);
   const [selectedBusinessForTopProducts, setSelectedBusinessForTopProducts] =
@@ -145,24 +226,27 @@ export default function AdminDashboard() {
   const [dbProductsLoading, setDbProductsLoading] = useState<boolean>(false);
   const [daysFilter, setDaysFilter] = useState<number>(7);
 
-  // Estados para ordenación en la tabla de Top Productos
+  // Estado para el filtro por categorías.
+  const allCategoryOptions = [...categories, "SIN CATEGORIA"];
+  const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
+
+  // Estados para ordenación de Top Productos
   const [sortColumn, setSortColumn] = useState<"salesCount" | "totalRevenue">(
     "salesCount"
   );
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
 
-  // Estado de carga general
+  // Estado de carga global
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
-  // Función para formatear números de precio (ej.: 100,000.00)
-  const formatPrice = (num: number): string => {
-    return num.toLocaleString("en-US", {
+  // Función para formatear precios
+  const formatPrice = (num: number): string =>
+    num.toLocaleString("en-US", {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
     });
-  };
 
-  // Obtener el nombre del mes actual en español (ej.: "Abril")
+  // Obtener el nombre del mes actual en español
   const currentMonthName = new Date().toLocaleString("es-ES", {
     month: "long",
   });
@@ -170,30 +254,25 @@ export default function AdminDashboard() {
     currentMonthName.charAt(0).toUpperCase() + currentMonthName.slice(1)
   }`;
 
-  // Carga global: Negocios, Ventas, Gastos, Turnos
+  /* ========= CARGA GLOBAL DE DATOS ========= */
   useEffect(() => {
     async function loadGlobalData() {
       try {
         const businessesData = await loadBusinesses();
-        console.log("Negocios cargados:", businessesData);
         setBusinesses(businessesData);
 
-        // Variables temporales para concatenar datos de cada negocio.
+        // Concatenar datos para cada negocio.
         let allSales: any[] = [];
         let allExpenses: any[] = [];
         let allShifts: any[] = [];
 
         await Promise.all(
           businessesData.map(async (business) => {
-            console.log("Cargando datos para negocio:", business.id);
             const [salesData, expensesData, shiftsData] = await Promise.all([
               loadSales(business.id),
               loadExpenses(business.id),
               loadShifts(business.id),
             ]);
-            console.log(
-              `Negocio ${business.id} - Ventas: ${salesData.length}, Gastos: ${expensesData.length}, Turnos: ${shiftsData.length}`
-            );
             allSales = allSales.concat(salesData);
             allExpenses = allExpenses.concat(expensesData);
             allShifts = allShifts.concat(shiftsData);
@@ -254,11 +333,10 @@ export default function AdminDashboard() {
     fetchProductsForBusiness();
   }, [selectedBusinessForTopProducts]);
 
-  // ---------------------------------------------------
-  // TOP PRODUCTOS: Agrupar los items usando directSales, dbProducts y filtro de fechas.
-  // ---------------------------------------------------
+  /* ========= CÁLCULO DE TOP PRODUCTOS CON FILTRO DE FECHAS Y CATEGORÍAS ========= */
   const topProducts = useMemo(() => {
     const now = new Date();
+    // Filtra las ventas según el rango de días seleccionado.
     const filteredSales = directSales.filter((sale) => {
       const saleDate = new Date(sale.timestamp);
       const diffDays =
@@ -278,10 +356,11 @@ export default function AdminDashboard() {
       }
     >();
 
+    // Agrupar las ventas filtradas.
     for (const sale of filteredSales) {
       if (!sale.sale_items) continue;
       for (const item of sale.sale_items) {
-        // Buscar el producto en los productos del negocio seleccionado
+        // Buscar el producto en los productos del negocio seleccionado.
         const prod = dbProducts.find((p) => p.id === item.product_id);
         if (!prod) continue;
         const key = `${item.product_id}-${prod.business_id}`;
@@ -300,7 +379,20 @@ export default function AdminDashboard() {
         data.totalRevenue += item.total;
       }
     }
+
     let arr = Array.from(productMap.values());
+
+    // Aplicar filtro por categorías
+    if (selectedCategories.length > 0) {
+      arr = arr.filter((item) => {
+        const { category } = extractCategory(item.productName);
+        return category
+          ? selectedCategories.includes(category)
+          : selectedCategories.includes("SIN CATEGORIA");
+      });
+    }
+
+    // Ordenar según la columna y dirección de ordenación seleccionada.
     arr.sort((a, b) => {
       if (sortColumn === "salesCount") {
         return sortDirection === "asc"
@@ -313,12 +405,18 @@ export default function AdminDashboard() {
       }
       return 0;
     });
-    return arr.slice(0, 15);
-  }, [directSales, dbProducts, sortColumn, sortDirection, daysFilter]);
 
-  // ---------------------------------------------------
-  // NEGOCIOS CON DATOS DEL MES (Ventas, Gastos, Profit, etc.)
-  // ---------------------------------------------------
+    return arr.slice(0, 15);
+  }, [
+    directSales,
+    dbProducts,
+    sortColumn,
+    sortDirection,
+    daysFilter,
+    selectedCategories,
+  ]);
+
+  /* ========= CÁLCULO DE DATOS MENSUALES POR NEGOCIO ========= */
   const calculateBusinessMonthlyData = () => {
     const businessDataMap = new Map<
       string,
@@ -337,7 +435,6 @@ export default function AdminDashboard() {
       }
     >();
 
-    // Inicializar para cada negocio
     businesses.forEach((business) => {
       businessDataMap.set(business.id, {
         transactions: 0,
@@ -358,7 +455,6 @@ export default function AdminDashboard() {
     const currentMonth = today.getMonth();
     const currentYear = today.getFullYear();
 
-    // Procesar ventas del mes actual usando "payment_method"
     sales.forEach((sale) => {
       const saleDate = new Date(sale.timestamp);
       if (
@@ -376,7 +472,6 @@ export default function AdminDashboard() {
       }
     });
 
-    // Procesar gastos del mes actual
     expenses.forEach((expense) => {
       const expenseDate = new Date(expense.date);
       if (
@@ -390,7 +485,6 @@ export default function AdminDashboard() {
       }
     });
 
-    // Calcular profit y estructurar datos para cada negocio
     return businesses.map((business) => {
       const data = businessDataMap.get(business.id) || {
         transactions: 0,
@@ -421,12 +515,8 @@ export default function AdminDashboard() {
 
   const businessesWithMonthlyData = calculateBusinessMonthlyData();
 
-  // ---------------------------------------------------
-  // TURNOS ACTIVOS
-  // ---------------------------------------------------
-  // Función para calcular totales de cada turno
+  /* ========= CÁLCULO DE TURNOS ACTIVOS ========= */
   const calculateShiftTotals = (shift: any) => {
-    // Filtrar ventas que corresponden a este turno usando "shift_id"
     const shiftSales = sales.filter((sale) => sale.shift_id === shift.id);
     const paymentMethods = {
       cash: 0,
@@ -448,7 +538,6 @@ export default function AdminDashboard() {
     return { paymentMethods, totalSales };
   };
 
-  // Funciones de apoyo para estilos y traducciones
   const translatePaymentMethod = (method: string) => {
     const translations: { [key: string]: string } = {
       cash: "Efectivo",
@@ -471,7 +560,7 @@ export default function AdminDashboard() {
     return classes[method] || "bg-gray-100 dark:bg-gray-700 p-2 rounded";
   };
 
-  // Encabezado ordenable para la tabla de Top Productos
+  /* ========= COMPONENTE: SortableHeader para Top Productos ========= */
   const SortableHeader = ({
     column,
     label,
@@ -499,7 +588,7 @@ export default function AdminDashboard() {
     </th>
   );
 
-  // Mostrar loader mientras se cargan los datos globales
+  /* ========= RENDER DEL DASHBOARD ========= */
   if (isLoading) {
     return (
       <div className="flex justify-center items-center h-64">
@@ -513,7 +602,7 @@ export default function AdminDashboard() {
     );
   }
 
-  // Filtrar únicamente turnos activos: se considera activo si no tiene "end_time"
+  // Filtrar turnos activos
   const activeShifts = Array.isArray(shifts)
     ? shifts
         .filter((shift) => !shift.end_time)
@@ -526,12 +615,12 @@ export default function AdminDashboard() {
 
   return (
     <div className="space-y-6 p-4">
-        <div>
-          <h1 className="text-2xl font-bold">Negocios</h1>
-          <p className="text-slate-600 dark:text-slate-400">
-            Estadistica del mes actual
-          </p>
-        </div>
+      {/* Encabezado global */}
+      <div>
+        <h1 className="text-2xl font-bold">Negocios</h1>
+        <p className="text-slate-600 dark:text-slate-400">{monthHeader}</p>
+      </div>
+
       {/* Sección de Negocios */}
       <div>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -540,75 +629,54 @@ export default function AdminDashboard() {
               key={business.id}
               className="bg-white dark:bg-slate-800 p-5 rounded-lg shadow hover:shadow-lg transition-shadow"
             >
-              {/* Nombre del negocio */}
               <h3 className="text-lg font-semibold mb-4 dark:text-white">
                 {business.name}
               </h3>
-
-              {/* Ventas del Mes */}
               <div className="mb-2">
                 <p className="text-sm text-slate-400">Ventas realizadas</p>
                 <p className="dark:text-white font-medium">
                   {formatNumberAbbreviation(business.transactions)}
                 </p>
               </div>
-
-              {/* Monto del Mes */}
               <div className="mb-2">
                 <p className="text-sm text-slate-400">Venta acumulada</p>
                 <p className="dark:text-white font-medium">
                   $ {formatPrice(business.totalAmount)}
                 </p>
               </div>
-
-              {/* Gasto del Mes (en rojo) */}
               <div className="mb-2">
                 <p className="text-sm text-slate-400">Gasto acumulado</p>
                 <p className="text-red-400 font-medium">
                   $ {formatPrice(business.totalExpense)}
                 </p>
               </div>
-
-              {/* Profit del Mes (en verde) */}
               <div className="mb-2">
                 <p className="text-sm text-slate-400">Profit</p>
                 <p className="font-bold text-lg text-green-600 dark:text-green-400">
                   $ {formatPrice(business.profit)}
                 </p>
               </div>
-
-              {/* Ticket Promedio */}
               <div className="mb-4">
                 <p className="text-sm text-slate-400">Ticket Promedio</p>
                 <p className="dark:text-white font-medium">
                   $ {formatPrice(business.avgTicket)}
                 </p>
               </div>
-
               <hr className="border-slate-700 mb-3" />
-
-              {/* Métodos de Pago */}
               <p className="text-sm text-slate-400 mb-2">Métodos de Pago</p>
-
-              {/* Efectivo (ocupa toda la fila, sin abreviación) */}
               <div className="bg-green-100 dark:bg-green-900 rounded px-2 py-1 text-[12px] mb-2">
                 <p className="text-slate-700 dark:text-slate-300">Efectivo</p>
                 <p className="font-bold text-slate-800 dark:text-slate-50">
                   $ {business.paymentMethods.cash.toLocaleString("en-US")}
                 </p>
               </div>
-
-              {/* El resto de métodos (2 por fila), usando K/M si procede */}
               <div className="grid grid-cols-2 gap-2">
-                {/* Tarjetas */}
                 <div className="bg-blue-100 dark:bg-blue-900 rounded px-2 py-1 text-[12px]">
                   <p className="text-slate-700 dark:text-slate-300">Tarjetas</p>
                   <p className="font-bold text-slate-800 dark:text-slate-50">
                     $ {formatNumberAbbreviation(business.paymentMethods.card)}
                   </p>
                 </div>
-
-                {/* Mercadopago */}
                 <div className="bg-sky-100 dark:bg-sky-900 rounded px-2 py-1 text-[12px]">
                   <p className="text-slate-700 dark:text-slate-300">
                     Mercadopago
@@ -620,16 +688,12 @@ export default function AdminDashboard() {
                     )}
                   </p>
                 </div>
-
-                {/* Rappi */}
                 <div className="bg-orange-100 dark:bg-orange-900 rounded px-2 py-1 text-[12px]">
                   <p className="text-slate-700 dark:text-slate-300">Rappi</p>
                   <p className="font-bold text-slate-800 dark:text-slate-50">
                     $ {formatNumberAbbreviation(business.paymentMethods.rappi)}
                   </p>
                 </div>
-
-                {/* Transferencia */}
                 <div className="bg-purple-100 dark:bg-purple-900 rounded px-2 py-1 text-[12px]">
                   <p className="text-slate-700 dark:text-slate-300">
                     Transferencia
@@ -648,9 +712,7 @@ export default function AdminDashboard() {
       {/* Sección Top Productos */}
       <div>
         <div className="flex flex-col sm:flex-row justify-between items-center mb-4">
-          <h2 className="text-2xl font-semibold mb-2 sm:mb-0">
-            Más vendidos
-          </h2>
+          <h2 className="text-2xl font-semibold mb-2 sm:mb-0">Más vendidos</h2>
           <div className="flex gap-4">
             <select
               className="input max-w-xs p-2 rounded shadow-sm border"
@@ -677,8 +739,17 @@ export default function AdminDashboard() {
               <option value={14}>Últimos 14 días</option>
               <option value={30}>Últimos 30 días</option>
             </select>
+            <div className="w-[500px]">
+              <MultiSelectDropdown
+                options={allCategoryOptions}
+                selectedOptions={selectedCategories}
+                onChange={setSelectedCategories}
+                placeholder="Filtrar por categorías"
+              />
+            </div>
           </div>
         </div>
+
         <div className="card bg-white dark:bg-slate-800 p-4 rounded-lg shadow-md">
           <div className="table-container overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
@@ -726,7 +797,8 @@ export default function AdminDashboard() {
                       colSpan={4}
                       className="px-4 py-8 text-center text-gray-500"
                     >
-                      No se encontraron productos en este rango de fechas.
+                      No se encontraron productos en este rango de fechas con
+                      los filtros aplicados.
                     </td>
                   </tr>
                 ) : (
@@ -749,7 +821,11 @@ export default function AdminDashboard() {
                           {item.totalQuantity}
                         </td>
                         <td className="px-4 py-2 whitespace-nowrap text-sm">
-                          ${formatPrice(item.totalRevenue)}
+                          ${" "}
+                          {Number(item.totalRevenue).toLocaleString("en-US", {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                          })}
                         </td>
                       </tr>
                     );
@@ -766,9 +842,7 @@ export default function AdminDashboard() {
         <h2 className="text-2xl font-semibold mb-4">Turnos Activos</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {activeShifts.map((shift) => {
-            // Calcula los totales por método de pago de este turno
             const shiftTotals = calculateShiftTotals(shift);
-            // Buscar el empleado correspondiente según el employee_id del turno
             const employee = employees.find(
               (emp) => emp.id === shift.employee_id
             );
@@ -778,7 +852,6 @@ export default function AdminDashboard() {
                 className="card bg-white dark:bg-slate-800 p-6 rounded-lg shadow-md hover:shadow-xl transition-shadow"
               >
                 <div className="flex justify-between items-start mb-4">
-                  {/* Mostrar nombre del empleado si se encontró, de lo contrario, mostrar employee_id */}
                   <div>
                     <h3 className="text-xl font-semibold">
                       {employee ? employee.name : shift.employee_id}
@@ -791,8 +864,6 @@ export default function AdminDashboard() {
                     Activo
                   </span>
                 </div>
-
-                {/* Fecha/hora de inicio del turno */}
                 <div className="mb-4">
                   <p className="text-sm text-gray-500 dark:text-gray-400">
                     Iniciado:{" "}
@@ -801,25 +872,22 @@ export default function AdminDashboard() {
                     </span>
                   </p>
                 </div>
-
-                {/* Ventas Totales */}
                 <div className="mb-4">
                   <p className="text-sm text-gray-500 dark:text-gray-400">
                     Ventas Totales:
                   </p>
                   <p className="text-lg font-bold text-green-600 dark:text-green-400">
-                    ${formatPrice(shiftTotals.totalSales)}
+                    $ {formatPrice(shiftTotals.totalSales)}
                   </p>
                 </div>
-
-                {/* Métodos de Pago */}
                 <div>
                   <p className="text-sm text-gray-500 dark:text-gray-400 mb-2">
                     Métodos de Pago
                   </p>
                   <div className="grid grid-cols-2 gap-4">
-                    {/* Efectivo ocupa toda la fila */}
-                    <div className={`col-span-2 ${getPaymentMethodClass("cash")}`}>
+                    <div
+                      className={`col-span-2 ${getPaymentMethodClass("cash")}`}
+                    >
                       <p className="text-xs text-gray-500 dark:text-gray-400">
                         Efectivo
                       </p>
@@ -827,7 +895,6 @@ export default function AdminDashboard() {
                         ${formatPrice(shiftTotals.paymentMethods.cash)}
                       </p>
                     </div>
-                    {/* Los demás métodos: 2 por fila */}
                     <div className={getPaymentMethodClass("card")}>
                       <p className="text-xs text-gray-500 dark:text-gray-400">
                         Tarjetas
