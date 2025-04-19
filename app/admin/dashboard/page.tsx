@@ -8,7 +8,7 @@ function MultiSelectDropdown({
   options,
   selectedOptions,
   onChange,
-  placeholder = "Selecciona categorías",
+  placeholder = "Categorias",
 }: {
   options: string[];
   selectedOptions: string[];
@@ -29,16 +29,16 @@ function MultiSelectDropdown({
       <button
         type="button"
         onClick={() => setIsOpen(!isOpen)}
-        className="input w-full text-left flex items-center justify-between"
+        className="input max-w-[100px] rounded shadow-sm border bg-white text-xs"
       >
         <span>
           {selectedOptions.length > 0
             ? selectedOptions.join(", ")
-            : placeholder}
+            : 'Categorias'}
         </span>
       </button>
       {isOpen && (
-        <div className="absolute z-10 mt-1 bg-white dark:bg-gray-800 shadow-lg border rounded w-full">
+        <div className="absolute z-10 mt-1 bg-white dark:bg-gray-800 shadow-lg border rounded w-full min-w-[200px]">
           <div className="max-h-60 overflow-y-auto">
             {options.map((option) => (
               <label
@@ -177,7 +177,6 @@ function formatNumberAbbreviation(num: number): string {
 }
 
 /* ========= FILTRADO POR CATEGORÍAS ========= */
-// Arreglo de categorías conocidas
 const categories = [
   "ALMACEN",
   "CIGARRILLOS",
@@ -191,9 +190,6 @@ const categories = [
   "ALCOHOL",
 ];
 
-// Función para extraer la categoría a partir del nombre de producto.
-// Si el nombre inicia con alguna de las categorías definidas (sin importar mayúsculas/minúsculas),
-// se retorna esa categoría; de lo contrario, retorna null.
 function extractCategory(name: string): {
   category: string | null;
   baseName: string;
@@ -210,14 +206,14 @@ function extractCategory(name: string): {
 
 /* ========= COMPONENTE: AdminDashboard ========= */
 export default function AdminDashboard() {
-  // Estados globales
+  /* ======= ESTADOS ======= */
   const [businesses, setBusinesses] = useState<any[]>([]);
   const [sales, setSales] = useState<any[]>([]);
   const [expenses, setExpenses] = useState<any[]>([]);
   const [shifts, setShifts] = useState<any[]>([]);
   const [employees, setEmployees] = useState<any[]>([]);
 
-  // Estados para la sección "Top Productos"
+  // Top Productos
   const [directSales, setDirectSales] = useState<any[]>([]);
   const [directSalesLoading, setDirectSalesLoading] = useState<boolean>(false);
   const [selectedBusinessForTopProducts, setSelectedBusinessForTopProducts] =
@@ -225,43 +221,40 @@ export default function AdminDashboard() {
   const [dbProducts, setDbProducts] = useState<any[]>([]);
   const [dbProductsLoading, setDbProductsLoading] = useState<boolean>(false);
   const [daysFilter, setDaysFilter] = useState<number>(7);
+  const [itemsLimit, setItemsLimit] = useState<number>(20); // NUEVO: tope de productos
 
-  // Estado para el filtro por categorías.
+  // Categorías
   const allCategoryOptions = [...categories, "SIN CATEGORIA"];
   const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
 
-  // Estados para ordenación de Top Productos
-  const [sortColumn, setSortColumn] = useState<"salesCount" | "totalRevenue">(
-    "salesCount"
-  );
+  // Ordenación
+  const [sortColumn, setSortColumn] = useState<
+    "salesCount" | "totalRevenue"
+  >("salesCount");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
 
-  // Estado de carga global
+  // Carga global
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
-  // Función para formatear precios
   const formatPrice = (num: number): string =>
     num.toLocaleString("en-US", {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
     });
 
-  // Obtener el nombre del mes actual en español
   const currentMonthName = new Date().toLocaleString("es-ES", {
     month: "long",
   });
-  const monthHeader = `Negocios – Mes ${
-    currentMonthName.charAt(0).toUpperCase() + currentMonthName.slice(1)
-  }`;
+  const monthHeader = `Negocios – Mes ${currentMonthName.charAt(0).toUpperCase() + currentMonthName.slice(1)
+    }`;
 
-  /* ========= CARGA GLOBAL DE DATOS ========= */
+  /* ======= CARGA DE DATOS ======= */
   useEffect(() => {
     async function loadGlobalData() {
       try {
         const businessesData = await loadBusinesses();
         setBusinesses(businessesData);
 
-        // Concatenar datos para cada negocio.
         let allSales: any[] = [];
         let allExpenses: any[] = [];
         let allShifts: any[] = [];
@@ -290,7 +283,6 @@ export default function AdminDashboard() {
     loadGlobalData();
   }, []);
 
-  // Cargar empleados
   useEffect(() => {
     async function loadEmployees() {
       const { data, error } = await supabase
@@ -306,7 +298,7 @@ export default function AdminDashboard() {
     loadEmployees();
   }, []);
 
-  // Cargar directSales para el negocio seleccionado en "Top Productos"
+  // Ventas negocio seleccionado
   useEffect(() => {
     const fetchDirectSales = async () => {
       if (!selectedBusinessForTopProducts) return;
@@ -318,7 +310,7 @@ export default function AdminDashboard() {
     fetchDirectSales();
   }, [selectedBusinessForTopProducts]);
 
-  // Cargar productos para el negocio seleccionado en "Top Productos"
+  // Productos negocio seleccionado
   useEffect(() => {
     const fetchProductsForBusiness = async () => {
       if (!selectedBusinessForTopProducts) {
@@ -333,10 +325,9 @@ export default function AdminDashboard() {
     fetchProductsForBusiness();
   }, [selectedBusinessForTopProducts]);
 
-  /* ========= CÁLCULO DE TOP PRODUCTOS CON FILTRO DE FECHAS Y CATEGORÍAS ========= */
+  /* ======= TOP PRODUCTOS (con stock + limit) ======= */
   const topProducts = useMemo(() => {
     const now = new Date();
-    // Filtra las ventas según el rango de días seleccionado.
     const filteredSales = directSales.filter((sale) => {
       const saleDate = new Date(sale.timestamp);
       const diffDays =
@@ -349,6 +340,7 @@ export default function AdminDashboard() {
       {
         productName: string;
         businessId: string;
+        stock: number | null;
         purchasePrice: number;
         sellingPrice: number;
         totalQuantity: number;
@@ -356,11 +348,9 @@ export default function AdminDashboard() {
       }
     >();
 
-    // Agrupar las ventas filtradas.
     for (const sale of filteredSales) {
       if (!sale.sale_items) continue;
       for (const item of sale.sale_items) {
-        // Buscar el producto en los productos del negocio seleccionado.
         const prod = dbProducts.find((p) => p.id === item.product_id);
         if (!prod) continue;
         const key = `${item.product_id}-${prod.business_id}`;
@@ -368,6 +358,11 @@ export default function AdminDashboard() {
           productMap.set(key, {
             productName: item.products?.name || "Producto desconocido",
             businessId: prod.business_id,
+            stock:
+              prod.stock ??
+              prod.current_stock ??
+              prod.quantity ??
+              null, // Soporte campo stock variable
             purchasePrice: prod.purchasePrice,
             sellingPrice: prod.sellingPrice,
             totalQuantity: 0,
@@ -382,7 +377,6 @@ export default function AdminDashboard() {
 
     let arr = Array.from(productMap.values());
 
-    // Aplicar filtro por categorías
     if (selectedCategories.length > 0) {
       arr = arr.filter((item) => {
         const { category } = extractCategory(item.productName);
@@ -392,21 +386,19 @@ export default function AdminDashboard() {
       });
     }
 
-    // Ordenar según la columna y dirección de ordenación seleccionada.
     arr.sort((a, b) => {
       if (sortColumn === "salesCount") {
         return sortDirection === "asc"
           ? a.totalQuantity - b.totalQuantity
           : b.totalQuantity - a.totalQuantity;
-      } else if (sortColumn === "totalRevenue") {
+      } else {
         return sortDirection === "asc"
           ? a.totalRevenue - b.totalRevenue
           : b.totalRevenue - a.totalRevenue;
       }
-      return 0;
     });
 
-    return arr.slice(0, 15);
+    return arr.slice(0, itemsLimit);
   }, [
     directSales,
     dbProducts,
@@ -414,9 +406,10 @@ export default function AdminDashboard() {
     sortDirection,
     daysFilter,
     selectedCategories,
+    itemsLimit,
   ]);
 
-  /* ========= CÁLCULO DE DATOS MENSUALES POR NEGOCIO ========= */
+  /* ======= DATOS MENSUALES NEGOCIOS ======= */
   const calculateBusinessMonthlyData = () => {
     const businessDataMap = new Map<
       string,
@@ -515,7 +508,7 @@ export default function AdminDashboard() {
 
   const businessesWithMonthlyData = calculateBusinessMonthlyData();
 
-  /* ========= CÁLCULO DE TURNOS ACTIVOS ========= */
+  /* ======= TURNOS ACTIVOS ======= */
   const calculateShiftTotals = (shift: any) => {
     const shiftSales = sales.filter((sale) => sale.shift_id === shift.id);
     const paymentMethods = {
@@ -560,7 +553,7 @@ export default function AdminDashboard() {
     return classes[method] || "bg-gray-100 dark:bg-gray-700 p-2 rounded";
   };
 
-  /* ========= COMPONENTE: SortableHeader para Top Productos ========= */
+  /* ======= Sortable Header ======= */
   const SortableHeader = ({
     column,
     label,
@@ -588,7 +581,7 @@ export default function AdminDashboard() {
     </th>
   );
 
-  /* ========= RENDER DEL DASHBOARD ========= */
+  /* ======= RENDER ======= */
   if (isLoading) {
     return (
       <div className="flex justify-center items-center h-64">
@@ -602,26 +595,24 @@ export default function AdminDashboard() {
     );
   }
 
-  // Filtrar turnos activos
   const activeShifts = Array.isArray(shifts)
     ? shifts
-        .filter((shift) => !shift.end_time)
-        .sort((a, b) => {
-          const totalsA = calculateShiftTotals(a).totalSales;
-          const totalsB = calculateShiftTotals(b).totalSales;
-          return totalsB - totalsA;
-        })
+      .filter((shift) => !shift.end_time)
+      .sort((a, b) => {
+        const totalsA = calculateShiftTotals(a).totalSales;
+        const totalsB = calculateShiftTotals(b).totalSales;
+        return totalsB - totalsA;
+      })
     : [];
 
   return (
     <div className="space-y-6 p-4">
-      {/* Encabezado global */}
+      {/* Negocios */}
       <div>
         <h1 className="text-2xl font-bold">Negocios</h1>
         <p className="text-slate-600 dark:text-slate-400">{monthHeader}</p>
       </div>
 
-      {/* Sección de Negocios */}
       <div>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
           {businessesWithMonthlyData.map((business) => (
@@ -709,28 +700,29 @@ export default function AdminDashboard() {
         </div>
       </div>
 
-      {/* Sección Top Productos */}
+      {/* ======= TOP PRODUCTOS ======= */}
       <div>
         <div className="flex flex-col sm:flex-row justify-between items-center mb-4">
           <h2 className="text-2xl font-semibold mb-2 sm:mb-0">Más vendidos</h2>
-          <div className="flex gap-4">
+          <div className="flex gap-4 items-center">
             <select
-              className="input max-w-xs p-2 rounded shadow-sm border"
+              className="input max-w-[100px] text-xs p-2 rounded shadow-sm border"
               value={selectedBusinessForTopProducts}
               onChange={(e) => {
                 setSelectedBusinessForTopProducts(e.target.value);
-                setDirectSales([]); // Reiniciar ventas al cambiar negocio
+                setDirectSales([]);
               }}
             >
-              <option value="">Selecciona un negocio</option>
+              <option value="">Negocio</option>
               {businesses.map((business) => (
                 <option key={business.id} value={business.id}>
                   {business.name}
                 </option>
               ))}
             </select>
+
             <select
-              className="input max-w-xs p-2 rounded shadow-sm border"
+              className="input w-[200px] text-xs p-2 rounded shadow-sm border"
               value={daysFilter}
               onChange={(e) => setDaysFilter(Number(e.target.value))}
             >
@@ -739,14 +731,24 @@ export default function AdminDashboard() {
               <option value={14}>Últimos 14 días</option>
               <option value={30}>Últimos 30 días</option>
             </select>
-            <div className="w-[500px]">
-              <MultiSelectDropdown
-                options={allCategoryOptions}
-                selectedOptions={selectedCategories}
-                onChange={setSelectedCategories}
-                placeholder="Filtrar por categorías"
-              />
-            </div>
+
+
+            <MultiSelectDropdown
+              options={allCategoryOptions}
+              selectedOptions={selectedCategories}
+              onChange={setSelectedCategories}
+              placeholder="Filtrar por categorías"
+            />
+            <select
+              className="input max-w-[60px] text-xs p-2 rounded shadow-sm border"
+              value={itemsLimit}
+              onChange={(e) => setItemsLimit(Number(e.target.value))}
+            >
+              <option value={10}>10</option>
+              <option value={20}>20</option>
+              <option value={40}>40</option>
+              <option value={100}>100</option>
+            </select>
           </div>
         </div>
 
@@ -760,6 +762,9 @@ export default function AdminDashboard() {
                   </th>
                   <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
                     Negocio
+                  </th>
+                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
+                    Stock
                   </th>
                   <SortableHeader
                     column="salesCount"
@@ -775,7 +780,7 @@ export default function AdminDashboard() {
                 {selectedBusinessForTopProducts === "" ? (
                   <tr>
                     <td
-                      colSpan={4}
+                      colSpan={5}
                       className="px-4 py-8 text-center text-gray-500"
                     >
                       Por favor, selecciona un negocio para ver los productos
@@ -785,7 +790,7 @@ export default function AdminDashboard() {
                 ) : directSalesLoading || dbProductsLoading ? (
                   <tr>
                     <td
-                      colSpan={4}
+                      colSpan={5}
                       className="px-4 py-8 text-center text-gray-500"
                     >
                       Cargando productos...
@@ -794,7 +799,7 @@ export default function AdminDashboard() {
                 ) : topProducts.length === 0 ? (
                   <tr>
                     <td
-                      colSpan={4}
+                      colSpan={5}
                       className="px-4 py-8 text-center text-gray-500"
                     >
                       No se encontraron productos en este rango de fechas con
@@ -818,6 +823,9 @@ export default function AdminDashboard() {
                           {business?.name || "Desconocido"}
                         </td>
                         <td className="px-4 py-2 whitespace-nowrap text-sm">
+                          {item.stock ?? "—"}
+                        </td>
+                        <td className="px-4 py-2 whitespace-nowrap text-sm">
                           {item.totalQuantity}
                         </td>
                         <td className="px-4 py-2 whitespace-nowrap text-sm">
@@ -837,7 +845,7 @@ export default function AdminDashboard() {
         </div>
       </div>
 
-      {/* Sección Turnos Activos */}
+      {/* ======= TURNOS ACTIVOS ======= */}
       <div>
         <h2 className="text-2xl font-semibold mb-4">Turnos Activos</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
