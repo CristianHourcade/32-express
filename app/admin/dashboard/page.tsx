@@ -18,7 +18,7 @@ function MultiSelectDropdown({
   const [isOpen, setIsOpen] = useState(false);
 
   const toggleOption = (option: string) => {
-    let newSelected = selectedOptions.includes(option)
+    const newSelected = selectedOptions.includes(option)
       ? selectedOptions.filter((o) => o !== option)
       : [...selectedOptions, option];
     onChange(newSelected);
@@ -31,11 +31,7 @@ function MultiSelectDropdown({
         onClick={() => setIsOpen(!isOpen)}
         className="input max-w-[100px] rounded shadow-sm border bg-white text-xs"
       >
-        <span>
-          {selectedOptions.length > 0
-            ? selectedOptions.join(", ")
-            : 'Categorias'}
-        </span>
+        {selectedOptions.length > 0 ? selectedOptions.join(", ") : "Categorias"}
       </button>
       {isOpen && (
         <div className="absolute z-10 mt-1 bg-white dark:bg-gray-800 shadow-lg border rounded w-full min-w-[200px]">
@@ -82,11 +78,8 @@ async function fetchAllPaginated(
     }
     if (data) {
       allData = allData.concat(data);
-      if (data.length < pageSize) {
-        done = true;
-      } else {
-        page++;
-      }
+      if (data.length < pageSize) done = true;
+      else page++;
     } else {
       done = true;
     }
@@ -95,8 +88,7 @@ async function fetchAllPaginated(
 }
 
 /* ========= FETCH FUNCTIONS ========= */
-// Negocios
-async function loadBusinesses(): Promise<any[]> {
+const loadBusinesses = async () => {
   const { data, error } = await supabase
     .from("businesses")
     .select("*")
@@ -106,11 +98,10 @@ async function loadBusinesses(): Promise<any[]> {
     return [];
   }
   return data || [];
-}
+};
 
-// Ventas (paginado)
-async function loadSales(businessId: string): Promise<any[]> {
-  return await fetchAllPaginated((from, to) =>
+const loadSales = async (businessId: string) =>
+  fetchAllPaginated((from, to) =>
     supabase
       .from("sales")
       .select(
@@ -126,22 +117,14 @@ async function loadSales(businessId: string): Promise<any[]> {
       .order("timestamp", { ascending: false })
       .range(from, to)
   );
-}
 
-// Productos (paginado)
-async function loadProducts(businessId: string): Promise<any[]> {
-  return await fetchAllPaginated((from, to) =>
-    supabase
-      .from("products")
-      .select("*")
-      .eq("business_id", businessId)
-      .range(from, to)
+const loadProducts = async (businessId: string) =>
+  fetchAllPaginated((from, to) =>
+    supabase.from("products").select("*").eq("business_id", businessId).range(from, to)
   );
-}
 
-// Gastos (paginado)
-async function loadExpenses(businessId: string): Promise<any[]> {
-  return await fetchAllPaginated((from, to) =>
+const loadExpenses = async (businessId: string) =>
+  fetchAllPaginated((from, to) =>
     supabase
       .from("expenses")
       .select("*")
@@ -149,11 +132,9 @@ async function loadExpenses(businessId: string): Promise<any[]> {
       .order("date", { ascending: false })
       .range(from, to)
   );
-}
 
-// Turnos (paginado)
-async function loadShifts(businessId: string): Promise<any[]> {
-  return await fetchAllPaginated((from, to) =>
+const loadShifts = async (businessId: string) =>
+  fetchAllPaginated((from, to) =>
     supabase
       .from("shifts")
       .select("*")
@@ -161,22 +142,16 @@ async function loadShifts(businessId: string): Promise<any[]> {
       .order("start_time", { ascending: false })
       .range(from, to)
   );
-}
 
-/* ========= OTRAS FUNCIONES DE UTILIDAD ========= */
-function formatNumberAbbreviation(num: number): string {
+/* ========= UTILIDADES ========= */
+const formatNumberAbbreviation = (num: number) => {
   const sign = num < 0 ? "-" : "";
-  const absNum = Math.abs(num);
-  if (absNum >= 1.0e6) {
-    return sign + (absNum / 1.0e6).toFixed(1) + "M";
-  } else if (absNum >= 1.0e3) {
-    return sign + (absNum / 1.0e3).toFixed(1) + "k";
-  } else {
-    return sign + absNum.toFixed(0);
-  }
-}
+  const abs = Math.abs(num);
+  if (abs >= 1e6) return sign + (abs / 1e6).toFixed(1) + "M";
+  if (abs >= 1e3) return sign + (abs / 1e3).toFixed(1) + "k";
+  return sign + abs.toFixed(0);
+};
 
-/* ========= FILTRADO POR CATEGORÍAS ========= */
 const categories = [
   "ALMACEN",
   "CIGARRILLOS",
@@ -190,196 +165,159 @@ const categories = [
   "ALCOHOL",
 ];
 
-function extractCategory(name: string): {
-  category: string | null;
-  baseName: string;
-} {
+function extractCategory(name: string) {
   const parts = name.trim().split(" ");
   if (parts.length > 1 && categories.includes(parts[0].toUpperCase())) {
-    return {
-      category: parts[0].toUpperCase(),
-      baseName: parts.slice(1).join(" "),
-    };
+    return { category: parts[0].toUpperCase(), baseName: parts.slice(1).join(" ") };
   }
   return { category: null, baseName: name };
 }
 
-/* ========= COMPONENTE: AdminDashboard ========= */
+/* ========= DASHBOARD ========= */
 export default function AdminDashboard() {
-  /* ======= ESTADOS ======= */
+  /* ---------- ESTADOS ---------- */
   const [businesses, setBusinesses] = useState<any[]>([]);
   const [sales, setSales] = useState<any[]>([]);
   const [expenses, setExpenses] = useState<any[]>([]);
   const [shifts, setShifts] = useState<any[]>([]);
   const [employees, setEmployees] = useState<any[]>([]);
 
-  // Top Productos
+  /* Top productos */
   const [directSales, setDirectSales] = useState<any[]>([]);
-  const [directSalesLoading, setDirectSalesLoading] = useState<boolean>(false);
+  const [directSalesLoading, setDirectSalesLoading] = useState(false);
   const [selectedBusinessForTopProducts, setSelectedBusinessForTopProducts] =
-    useState<string>("");
+    useState("");
   const [dbProducts, setDbProducts] = useState<any[]>([]);
-  const [dbProductsLoading, setDbProductsLoading] = useState<boolean>(false);
-  const [daysFilter, setDaysFilter] = useState<number>(7);
-  const [itemsLimit, setItemsLimit] = useState<number>(20); // NUEVO: tope de productos
+  const [dbProductsLoading, setDbProductsLoading] = useState(false);
+  const [daysFilter, setDaysFilter] = useState(7);
+  const [itemsLimit, setItemsLimit] = useState(20);
 
-  // Categorías
   const allCategoryOptions = [...categories, "SIN CATEGORIA"];
   const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
 
-  // Ordenación
-  const [sortColumn, setSortColumn] = useState<
-    "salesCount" | "totalRevenue"
-  >("salesCount");
+  const [sortColumn, setSortColumn] = useState<"salesCount" | "totalRevenue">(
+    "salesCount"
+  );
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
 
-  // Carga global
-  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [isLoading, setIsLoading] = useState(true);
 
-  const formatPrice = (num: number): string =>
-    num.toLocaleString("en-US", {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    });
+  const formatPrice = (n: number) =>
+    n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-  const currentMonthName = new Date().toLocaleString("es-ES", {
-    month: "long",
-  });
-  const monthHeader = `Negocios – Mes ${currentMonthName.charAt(0).toUpperCase() + currentMonthName.slice(1)
-    }`;
-
-  /* ======= CARGA DE DATOS ======= */
+  /* ---------- CARGA INICIAL ---------- */
   useEffect(() => {
-    async function loadGlobalData() {
+    (async () => {
       try {
-        const businessesData = await loadBusinesses();
-        setBusinesses(businessesData);
+        const biz = await loadBusinesses();
+        setBusinesses(biz);
 
         let allSales: any[] = [];
         let allExpenses: any[] = [];
         let allShifts: any[] = [];
 
         await Promise.all(
-          businessesData.map(async (business) => {
-            const [salesData, expensesData, shiftsData] = await Promise.all([
-              loadSales(business.id),
-              loadExpenses(business.id),
-              loadShifts(business.id),
+          biz.map(async (b) => {
+            const [s, e, sh] = await Promise.all([
+              loadSales(b.id),
+              loadExpenses(b.id),
+              loadShifts(b.id),
             ]);
-            allSales = allSales.concat(salesData);
-            allExpenses = allExpenses.concat(expensesData);
-            allShifts = allShifts.concat(shiftsData);
+            allSales = allSales.concat(s);
+            allExpenses = allExpenses.concat(e);
+            allShifts = allShifts.concat(sh);
           })
         );
+
         setSales(allSales);
         setExpenses(allExpenses);
         setShifts(allShifts);
-      } catch (error) {
-        console.error("Error loading global data:", error);
+      } catch (err) {
+        console.error(err);
       } finally {
         setIsLoading(false);
       }
-    }
-    loadGlobalData();
+    })();
   }, []);
 
   useEffect(() => {
-    async function loadEmployees() {
+    (async () => {
       const { data, error } = await supabase
         .from("employees")
         .select("*")
         .order("name");
-      if (error) {
-        console.error("Error loading employees:", error);
-        return;
-      }
-      setEmployees(data || []);
-    }
-    loadEmployees();
+      if (error) console.error(error);
+      else setEmployees(data || []);
+    })();
   }, []);
 
-  // Ventas negocio seleccionado
+  /* ---------- VENTAS & PRODUCTOS (negocio seleccionado) ---------- */
   useEffect(() => {
-    const fetchDirectSales = async () => {
-      if (!selectedBusinessForTopProducts) return;
+    if (!selectedBusinessForTopProducts) return;
+    (async () => {
       setDirectSalesLoading(true);
-      const salesData = await loadSales(selectedBusinessForTopProducts);
-      setDirectSales(salesData);
+      setDirectSales(await loadSales(selectedBusinessForTopProducts));
       setDirectSalesLoading(false);
-    };
-    fetchDirectSales();
+    })();
   }, [selectedBusinessForTopProducts]);
 
-  // Productos negocio seleccionado
   useEffect(() => {
-    const fetchProductsForBusiness = async () => {
-      if (!selectedBusinessForTopProducts) {
-        setDbProducts([]);
-        return;
-      }
+    if (!selectedBusinessForTopProducts) {
+      setDbProducts([]);
+      return;
+    }
+    (async () => {
       setDbProductsLoading(true);
-      const productsData = await loadProducts(selectedBusinessForTopProducts);
-      setDbProducts(productsData);
+      setDbProducts(await loadProducts(selectedBusinessForTopProducts));
       setDbProductsLoading(false);
-    };
-    fetchProductsForBusiness();
+    })();
   }, [selectedBusinessForTopProducts]);
 
-  /* ======= TOP PRODUCTOS (con stock + limit) ======= */
+  /* ---------- TOP PRODUCTOS ---------- */
   const topProducts = useMemo(() => {
     const now = new Date();
-    const filteredSales = directSales.filter((sale) => {
-      const saleDate = new Date(sale.timestamp);
-      const diffDays =
-        (now.getTime() - saleDate.getTime()) / (1000 * 3600 * 24);
-      return diffDays <= daysFilter;
-    });
+    const recentSales = directSales.filter(
+      (s) =>
+        (now.getTime() - new Date(s.timestamp).getTime()) / (1000 * 3600 * 24) <=
+        daysFilter
+    );
 
-    const productMap = new Map<
+    const map = new Map<
       string,
       {
         productName: string;
         businessId: string;
         stock: number | null;
-        purchasePrice: number;
-        sellingPrice: number;
         totalQuantity: number;
         totalRevenue: number;
       }
     >();
 
-    for (const sale of filteredSales) {
-      if (!sale.sale_items) continue;
-      for (const item of sale.sale_items) {
+    recentSales.forEach((sale) => {
+      sale.sale_items?.forEach((item: any) => {
         const prod = dbProducts.find((p) => p.id === item.product_id);
-        if (!prod) continue;
+        if (!prod) return;
         const key = `${item.product_id}-${prod.business_id}`;
-        if (!productMap.has(key)) {
-          productMap.set(key, {
+        if (!map.has(key)) {
+          map.set(key, {
             productName: item.products?.name || "Producto desconocido",
             businessId: prod.business_id,
-            stock:
-              prod.stock ??
-              prod.current_stock ??
-              prod.quantity ??
-              null, // Soporte campo stock variable
-            purchasePrice: prod.purchasePrice,
-            sellingPrice: prod.sellingPrice,
+            stock: prod.stock ?? prod.current_stock ?? prod.quantity ?? null,
             totalQuantity: 0,
             totalRevenue: 0,
           });
         }
-        const data = productMap.get(key)!;
-        data.totalQuantity += item.quantity;
-        data.totalRevenue += item.total;
-      }
-    }
+        const entry = map.get(key)!;
+        entry.totalQuantity += item.quantity;
+        entry.totalRevenue += item.total;
+      });
+    });
 
-    let arr = Array.from(productMap.values());
+    let arr = Array.from(map.values());
 
-    if (selectedCategories.length > 0) {
-      arr = arr.filter((item) => {
-        const { category } = extractCategory(item.productName);
+    if (selectedCategories.length) {
+      arr = arr.filter((p) => {
+        const { category } = extractCategory(p.productName);
         return category
           ? selectedCategories.includes(category)
           : selectedCategories.includes("SIN CATEGORIA");
@@ -387,173 +325,106 @@ export default function AdminDashboard() {
     }
 
     arr.sort((a, b) => {
-      if (sortColumn === "salesCount") {
-        return sortDirection === "asc"
+      const diff =
+        sortColumn === "salesCount"
           ? a.totalQuantity - b.totalQuantity
-          : b.totalQuantity - a.totalQuantity;
-      } else {
-        return sortDirection === "asc"
-          ? a.totalRevenue - b.totalRevenue
-          : b.totalRevenue - a.totalRevenue;
-      }
+          : a.totalRevenue - b.totalRevenue;
+      return sortDirection === "asc" ? diff : -diff;
     });
 
     return arr.slice(0, itemsLimit);
   }, [
     directSales,
     dbProducts,
-    sortColumn,
-    sortDirection,
     daysFilter,
     selectedCategories,
+    sortColumn,
+    sortDirection,
     itemsLimit,
   ]);
 
-  /* ======= DATOS MENSUALES NEGOCIOS ======= */
-  const calculateBusinessMonthlyData = () => {
-    const businessDataMap = new Map<
+  /* ---------- MÉTRICAS MENSUALES NEGOCIOS ---------- */
+  const businessesWithMonthlyData = useMemo(() => {
+    const map = new Map<
       string,
       {
-        transactions: number;
-        totalAmount: number;
-        totalExpense: number;
-        profit: number;
-        paymentMethods: {
-          cash: number;
-          card: number;
-          transfer: number;
-          mercadopago: number;
-          rappi: number;
-        };
+        tx: number;
+        amount: number;
+        expense: number;
+        payments: Record<
+          "cash" | "card" | "transfer" | "mercadopago" | "rappi",
+          number
+        >;
       }
     >();
-
-    businesses.forEach((business) => {
-      businessDataMap.set(business.id, {
-        transactions: 0,
-        totalAmount: 0,
-        totalExpense: 0,
-        profit: 0,
-        paymentMethods: {
-          cash: 0,
-          card: 0,
-          transfer: 0,
-          mercadopago: 0,
-          rappi: 0,
-        },
-      });
-    });
+    businesses.forEach((b) =>
+      map.set(b.id, {
+        tx: 0,
+        amount: 0,
+        expense: 0,
+        payments: { cash: 0, card: 0, transfer: 0, mercadopago: 0, rappi: 0 },
+      })
+    );
 
     const today = new Date();
-    const currentMonth = today.getMonth();
-    const currentYear = today.getFullYear();
+    const m = today.getMonth();
+    const y = today.getFullYear();
 
-    sales.forEach((sale) => {
-      const saleDate = new Date(sale.timestamp);
-      if (
-        saleDate.getMonth() === currentMonth &&
-        saleDate.getFullYear() === currentYear
-      ) {
-        const businessData = businessDataMap.get(sale.business_id);
-        if (businessData) {
-          businessData.transactions += 1;
-          businessData.totalAmount += sale.total;
-          if (sale.payment_method in businessData.paymentMethods) {
-            businessData.paymentMethods[sale.payment_method] += sale.total;
-          }
-        }
+    sales.forEach((s) => {
+      const d = new Date(s.timestamp);
+      if (d.getMonth() === m && d.getFullYear() === y) {
+        const data = map.get(s.business_id);
+        if (!data) return;
+        data.tx++;
+        data.amount += s.total;
+        if (s.payment_method in data.payments)
+          data.payments[s.payment_method] += s.total;
       }
     });
 
-    expenses.forEach((expense) => {
-      const expenseDate = new Date(expense.date);
-      if (
-        expenseDate.getMonth() === currentMonth &&
-        expenseDate.getFullYear() === currentYear
-      ) {
-        const businessData = businessDataMap.get(expense.business_id);
-        if (businessData) {
-          businessData.totalExpense += expense.amount;
-        }
+    expenses.forEach((e) => {
+      const d = new Date(e.date);
+      if (d.getMonth() === m && d.getFullYear() === y) {
+        const data = map.get(e.business_id);
+        if (data) data.expense += e.amount;
       }
     });
 
-    return businesses.map((business) => {
-      const data = businessDataMap.get(business.id) || {
-        transactions: 0,
-        totalAmount: 0,
-        totalExpense: 0,
-        profit: 0,
-        paymentMethods: {
-          cash: 0,
-          card: 0,
-          transfer: 0,
-          mercadopago: 0,
-          rappi: 0,
-        },
-      };
-      data.profit = data.totalAmount - data.totalExpense;
+    return businesses.map((b) => {
+      const d = map.get(b.id)!;
       return {
-        ...business,
-        transactions: data.transactions,
-        totalAmount: data.totalAmount,
-        totalExpense: data.totalExpense,
-        profit: data.profit,
-        avgTicket:
-          data.transactions > 0 ? data.totalAmount / data.transactions : 0,
-        paymentMethods: data.paymentMethods,
+        ...b,
+        transactions: d.tx,
+        totalAmount: d.amount,
+        totalExpense: d.expense,
+        profit: d.amount - d.expense,
+        avgTicket: d.tx ? d.amount / d.tx : 0,
+        paymentMethods: d.payments,
       };
     });
-  };
+  }, [businesses, sales, expenses]);
 
-  const businessesWithMonthlyData = calculateBusinessMonthlyData();
-
-  /* ======= TURNOS ACTIVOS ======= */
-  const calculateShiftTotals = (shift: any) => {
-    const shiftSales = sales.filter((sale) => sale.shift_id === shift.id);
-    const paymentMethods = {
-      cash: 0,
-      card: 0,
-      transfer: 0,
-      mercadopago: 0,
-      rappi: 0,
-    };
-    shiftSales.forEach((sale) => {
-      const method = sale.payment_method;
-      if (method in paymentMethods) {
-        paymentMethods[method] += sale.total;
-      }
+  /* ---------- TURNOS & UTIL ---------- */
+  const calcShiftTotals = (shift: any) => {
+    const sSales = sales.filter((s) => s.shift_id === shift.id);
+    const payments = { cash: 0, card: 0, transfer: 0, mercadopago: 0, rappi: 0 };
+    sSales.forEach((s) => {
+      if (s.payment_method in payments) payments[s.payment_method] += s.total;
     });
-    const totalSales = Object.values(paymentMethods).reduce(
-      (sum, val) => sum + val,
-      0
-    );
-    return { paymentMethods, totalSales };
+    const total = Object.values(payments).reduce((sum, n) => sum + n, 0);
+    return { payments, total };
   };
 
-  const translatePaymentMethod = (method: string) => {
-    const translations: { [key: string]: string } = {
-      cash: "Efectivo",
-      card: "Tarjetas",
-      transfer: "Transferencia",
-      mercadopago: "Mercadopago",
-      rappi: "Rappi",
-    };
-    return translations[method] || method;
-  };
-
-  const getPaymentMethodClass = (method: string) => {
-    const classes: { [key: string]: string } = {
+  const pmClass = (m: string) =>
+    ({
       cash: "bg-green-100 dark:bg-green-900 p-2 rounded",
       card: "bg-blue-100 dark:bg-blue-900 p-2 rounded",
       transfer: "bg-purple-100 dark:bg-purple-900 p-2 rounded",
       mercadopago: "bg-sky-100 dark:bg-sky-900 p-2 rounded",
       rappi: "bg-orange-100 dark:bg-orange-900 p-2 rounded",
-    };
-    return classes[method] || "bg-gray-100 dark:bg-gray-700 p-2 rounded";
-  };
+    }[m] || "bg-gray-100 dark:bg-gray-700 p-2 rounded");
 
-  /* ======= Sortable Header ======= */
+  /* ---------- SORTABLE HEADER ---------- */
   const SortableHeader = ({
     column,
     label,
@@ -562,7 +433,7 @@ export default function AdminDashboard() {
     label: string;
   }) => (
     <th
-      className="table-header-cell cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700"
+      className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer select-none hover:bg-slate-100 dark:hover:bg-slate-700"
       onClick={() => {
         if (sortColumn === column) {
           setSortDirection(sortDirection === "asc" ? "desc" : "asc");
@@ -572,139 +443,124 @@ export default function AdminDashboard() {
         }
       }}
     >
-      <div className="flex items-center">
+      <span className="flex items-center gap-1">
         {label}
-        {sortColumn === column && (
-          <span className="ml-1">{sortDirection === "asc" ? "↑" : "↓"}</span>
-        )}
-      </div>
+        {sortColumn === column && (sortDirection === "asc" ? "↑" : "↓")}
+      </span>
     </th>
   );
 
-  /* ======= RENDER ======= */
-  if (isLoading) {
+  /* ---------- LOADING ---------- */
+  if (isLoading)
     return (
-      <div className="flex justify-center items-center h-64">
+      <div className="flex items-center justify-center h-64">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-700 mx-auto"></div>
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-700 mx-auto" />
           <p className="mt-4 text-slate-600 dark:text-slate-400">
             Cargando datos del dashboard...
           </p>
         </div>
       </div>
     );
-  }
 
-  const activeShifts = Array.isArray(shifts)
-    ? shifts
-      .filter((shift) => !shift.end_time)
-      .sort((a, b) => {
-        const totalsA = calculateShiftTotals(a).totalSales;
-        const totalsB = calculateShiftTotals(b).totalSales;
-        return totalsB - totalsA;
-      })
-    : [];
+  const activeShifts = (Array.isArray(shifts) ? shifts : [])
+    .filter((s) => !s.end_time)
+    .sort((a, b) => calcShiftTotals(b).total - calcShiftTotals(a).total);
+
+  /* ---------- RENDER ---------- */
+  const currentMonthName = new Date().toLocaleString("es-ES", { month: "long" });
+  const monthHeader =
+    "Negocios – Mes " +
+    currentMonthName.charAt(0).toUpperCase() +
+    currentMonthName.slice(1);
 
   return (
     <div className="space-y-6 p-4">
-      {/* Negocios */}
-      <div>
+      {/* ==================== NEGOCIOS ==================== */}
+      <section>
         <h1 className="text-2xl font-bold">Negocios</h1>
         <p className="text-slate-600 dark:text-slate-400">{monthHeader}</p>
-      </div>
 
-      <div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-          {businessesWithMonthlyData.map((business) => (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 mt-6">
+          {businessesWithMonthlyData.map((b) => (
             <div
-              key={business.id}
+              key={b.id}
               className="bg-white dark:bg-slate-800 p-5 rounded-lg shadow hover:shadow-lg transition-shadow"
             >
               <h3 className="text-lg font-semibold mb-4 dark:text-white">
-                {business.name}
+                {b.name}
               </h3>
+
               <div className="mb-2">
                 <p className="text-sm text-slate-400">Ventas realizadas</p>
-                <p className="dark:text-white font-medium">
-                  {formatNumberAbbreviation(business.transactions)}
+                <p className="font-medium dark:text-white">
+                  {formatNumberAbbreviation(b.transactions)}
                 </p>
               </div>
+
               <div className="mb-2">
                 <p className="text-sm text-slate-400">Venta acumulada</p>
-                <p className="dark:text-white font-medium">
-                  $ {formatPrice(business.totalAmount)}
+                <p className="font-medium dark:text-white">
+                  $ {formatPrice(b.totalAmount)}
                 </p>
               </div>
+
               <div className="mb-2">
                 <p className="text-sm text-slate-400">Gasto acumulado</p>
-                <p className="text-red-400 font-medium">
-                  $ {formatPrice(business.totalExpense)}
+                <p className="font-medium text-red-400">
+                  $ {formatPrice(b.totalExpense)}
                 </p>
               </div>
+
               <div className="mb-2">
                 <p className="text-sm text-slate-400">Profit</p>
                 <p className="font-bold text-lg text-green-600 dark:text-green-400">
-                  $ {formatPrice(business.profit)}
+                  $ {formatPrice(b.profit)}
                 </p>
               </div>
+
               <div className="mb-4">
                 <p className="text-sm text-slate-400">Ticket Promedio</p>
-                <p className="dark:text-white font-medium">
-                  $ {formatPrice(business.avgTicket)}
+                <p className="font-medium dark:text-white">
+                  $ {formatPrice(b.avgTicket)}
                 </p>
               </div>
+
               <hr className="border-slate-700 mb-3" />
+
               <p className="text-sm text-slate-400 mb-2">Métodos de Pago</p>
+
               <div className="bg-green-100 dark:bg-green-900 rounded px-2 py-1 text-[12px] mb-2">
                 <p className="text-slate-700 dark:text-slate-300">Efectivo</p>
                 <p className="font-bold text-slate-800 dark:text-slate-50">
-                  $ {business.paymentMethods.cash.toLocaleString("en-US")}
+                  $ {b.paymentMethods.cash.toLocaleString("en-US")}
                 </p>
               </div>
+
               <div className="grid grid-cols-2 gap-2">
-                <div className="bg-blue-100 dark:bg-blue-900 rounded px-2 py-1 text-[12px]">
-                  <p className="text-slate-700 dark:text-slate-300">Tarjetas</p>
-                  <p className="font-bold text-slate-800 dark:text-slate-50">
-                    $ {formatNumberAbbreviation(business.paymentMethods.card)}
-                  </p>
-                </div>
-                <div className="bg-sky-100 dark:bg-sky-900 rounded px-2 py-1 text-[12px]">
-                  <p className="text-slate-700 dark:text-slate-300">
-                    Mercadopago
-                  </p>
-                  <p className="font-bold text-slate-800 dark:text-slate-50">
-                    ${" "}
-                    {formatNumberAbbreviation(
-                      business.paymentMethods.mercadopago
-                    )}
-                  </p>
-                </div>
-                <div className="bg-orange-100 dark:bg-orange-900 rounded px-2 py-1 text-[12px]">
-                  <p className="text-slate-700 dark:text-slate-300">Rappi</p>
-                  <p className="font-bold text-slate-800 dark:text-slate-50">
-                    $ {formatNumberAbbreviation(business.paymentMethods.rappi)}
-                  </p>
-                </div>
-                <div className="bg-purple-100 dark:bg-purple-900 rounded px-2 py-1 text-[12px]">
-                  <p className="text-slate-700 dark:text-slate-300">
-                    Transferencia
-                  </p>
-                  <p className="font-bold text-slate-800 dark:text-slate-50">
-                    ${" "}
-                    {formatNumberAbbreviation(business.paymentMethods.transfer)}
-                  </p>
-                </div>
+                {(["card", "mercadopago", "rappi", "transfer"] as const).map(
+                  (m) => (
+                    <div key={m} className={pmClass(m)}>
+                      <p className="text-xs text-gray-500 dark:text-gray-400 capitalize">
+                        {m}
+                      </p>
+                      <p className="font-bold text-slate-800 dark:text-slate-50">
+                        $ {formatNumberAbbreviation(b.paymentMethods[m])}
+                      </p>
+                    </div>
+                  )
+                )}
               </div>
             </div>
           ))}
         </div>
-      </div>
+      </section>
 
-      {/* ======= TOP PRODUCTOS ======= */}
-      <div>
+      {/* ==================== TOP PRODUCTOS ==================== */}
+      <section>
         <div className="flex flex-col sm:flex-row justify-between items-center mb-4">
           <h2 className="text-2xl font-semibold mb-2 sm:mb-0">Más vendidos</h2>
-          <div className="flex gap-4 items-center">
+          <div className="flex flex-wrap gap-4 items-center">
             <select
               className="input max-w-[100px] text-xs p-2 rounded shadow-sm border"
               value={selectedBusinessForTopProducts}
@@ -714,9 +570,9 @@ export default function AdminDashboard() {
               }}
             >
               <option value="">Negocio</option>
-              {businesses.map((business) => (
-                <option key={business.id} value={business.id}>
-                  {business.name}
+              {businesses.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.name}
                 </option>
               ))}
             </select>
@@ -732,13 +588,13 @@ export default function AdminDashboard() {
               <option value={30}>Últimos 30 días</option>
             </select>
 
-
             <MultiSelectDropdown
               options={allCategoryOptions}
               selectedOptions={selectedCategories}
               onChange={setSelectedCategories}
               placeholder="Filtrar por categorías"
             />
+
             <select
               className="input max-w-[60px] text-xs p-2 rounded shadow-sm border"
               value={itemsLimit}
@@ -766,74 +622,51 @@ export default function AdminDashboard() {
                   <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
                     Stock
                   </th>
-                  <SortableHeader
-                    column="salesCount"
-                    label="Unidades Vendidas"
-                  />
-                  <SortableHeader
-                    column="totalRevenue"
-                    label="Monto Facturado"
-                  />
+                  <SortableHeader column="salesCount" label="Unidades Vendidas" />
+                  <SortableHeader column="totalRevenue" label="Monto Facturado" />
                 </tr>
               </thead>
               <tbody className="bg-white dark:bg-slate-800 divide-y divide-gray-200 dark:divide-gray-700">
                 {selectedBusinessForTopProducts === "" ? (
                   <tr>
-                    <td
-                      colSpan={5}
-                      className="px-4 py-8 text-center text-gray-500"
-                    >
-                      Por favor, selecciona un negocio para ver los productos
-                      más vendidos.
+                    <td colSpan={5} className="px-4 py-8 text-center text-gray-500">
+                      Selecciona un negocio para ver los productos más vendidos.
                     </td>
                   </tr>
                 ) : directSalesLoading || dbProductsLoading ? (
                   <tr>
-                    <td
-                      colSpan={5}
-                      className="px-4 py-8 text-center text-gray-500"
-                    >
+                    <td colSpan={5} className="px-4 py-8 text-center text-gray-500">
                       Cargando productos...
                     </td>
                   </tr>
                 ) : topProducts.length === 0 ? (
                   <tr>
-                    <td
-                      colSpan={5}
-                      className="px-4 py-8 text-center text-gray-500"
-                    >
-                      No se encontraron productos en este rango de fechas con
-                      los filtros aplicados.
+                    <td colSpan={5} className="px-4 py-8 text-center text-gray-500">
+                      Sin resultados para los filtros seleccionados.
                     </td>
                   </tr>
                 ) : (
-                  topProducts.map((item, idx) => {
-                    const business = businesses.find(
-                      (b) => b.id === item.businessId
-                    );
+                  topProducts.map((p) => {
+                    const biz = businesses.find((b) => b.id === p.businessId);
                     return (
                       <tr
-                        key={idx}
+                        key={p.productName + p.businessId}
                         className="hover:bg-slate-100 dark:hover:bg-slate-700"
                       >
                         <td className="px-4 py-2 whitespace-nowrap text-sm font-medium">
-                          {item.productName}
+                          {p.productName}
                         </td>
                         <td className="px-4 py-2 whitespace-nowrap text-sm">
-                          {business?.name || "Desconocido"}
+                          {biz?.name || "—"}
                         </td>
                         <td className="px-4 py-2 whitespace-nowrap text-sm">
-                          {item.stock ?? "—"}
+                          {p.stock ?? "—"}
                         </td>
                         <td className="px-4 py-2 whitespace-nowrap text-sm">
-                          {item.totalQuantity}
+                          {p.totalQuantity}
                         </td>
                         <td className="px-4 py-2 whitespace-nowrap text-sm">
-                          ${" "}
-                          {Number(item.totalRevenue).toLocaleString("en-US", {
-                            minimumFractionDigits: 2,
-                            maximumFractionDigits: 2,
-                          })}
+                          $ {formatPrice(p.totalRevenue)}
                         </td>
                       </tr>
                     );
@@ -843,17 +676,19 @@ export default function AdminDashboard() {
             </table>
           </div>
         </div>
-      </div>
+      </section>
 
-      {/* ======= TURNOS ACTIVOS ======= */}
-      <div>
+      {/* ==================== TURNOS ACTIVOS ==================== */}
+      <section>
         <h2 className="text-2xl font-semibold mb-4">Turnos Activos</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {activeShifts.map((shift) => {
-            const shiftTotals = calculateShiftTotals(shift);
-            const employee = employees.find(
-              (emp) => emp.id === shift.employee_id
-            );
+            const { payments, total } = calcShiftTotals(shift);
+            const emp = employees.find((e) => e.id === shift.employee_id);
+            const hours =
+              (Date.now() - new Date(shift.start_time).getTime()) / 36e5;
+            const avgHour = hours > 0 ? total / hours : 0;
+
             return (
               <div
                 key={shift.id}
@@ -861,9 +696,7 @@ export default function AdminDashboard() {
               >
                 <div className="flex justify-between items-start mb-4">
                   <div>
-                    <h3 className="text-xl font-semibold">
-                      {employee ? employee.name : shift.employee_id}
-                    </h3>
+                    <h3 className="text-xl font-semibold">{emp?.name || shift.employee_id}</h3>
                     <p className="text-sm text-gray-500 dark:text-gray-400">
                       {shift.business_name}
                     </p>
@@ -872,74 +705,58 @@ export default function AdminDashboard() {
                     Activo
                   </span>
                 </div>
-                <div className="mb-4">
-                  <p className="text-sm text-gray-500 dark:text-gray-400">
-                    Iniciado:{" "}
-                    <span className="font-medium">
-                      {new Date(shift.start_time).toLocaleString()}
-                    </span>
-                  </p>
-                </div>
+
+                <p className="text-sm text-gray-500 dark:text-gray-400 mb-2">
+                  Iniciado:{" "}
+                  <span className="font-medium">
+                    {new Date(shift.start_time).toLocaleString()}
+                  </span>
+                </p>
+
                 <div className="mb-4">
                   <p className="text-sm text-gray-500 dark:text-gray-400">
                     Ventas Totales:
                   </p>
                   <p className="text-lg font-bold text-green-600 dark:text-green-400">
-                    $ {formatPrice(shiftTotals.totalSales)}
+                    $ {formatPrice(total)}
                   </p>
                 </div>
-                <div>
-                  <p className="text-sm text-gray-500 dark:text-gray-400 mb-2">
-                    Métodos de Pago
+
+                {/* Promedio por hora */}
+                <div className="mb-4">
+                  <p className="text-sm text-gray-500 dark:text-gray-400">
+                    Promedio / hora:
                   </p>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div
-                      className={`col-span-2 ${getPaymentMethodClass("cash")}`}
-                    >
-                      <p className="text-xs text-gray-500 dark:text-gray-400">
-                        Efectivo
-                      </p>
-                      <p className="font-medium">
-                        ${formatPrice(shiftTotals.paymentMethods.cash)}
-                      </p>
-                    </div>
-                    <div className={getPaymentMethodClass("card")}>
-                      <p className="text-xs text-gray-500 dark:text-gray-400">
-                        Tarjetas
-                      </p>
-                      <p className="font-medium">
-                        ${formatPrice(shiftTotals.paymentMethods.card)}
-                      </p>
-                    </div>
-                    <div className={getPaymentMethodClass("mercadopago")}>
-                      <p className="text-xs text-gray-500 dark:text-gray-400">
-                        Mercadopago
-                      </p>
-                      <p className="font-medium">
-                        ${formatPrice(shiftTotals.paymentMethods.mercadopago)}
-                      </p>
-                    </div>
-                    <div className={getPaymentMethodClass("rappi")}>
-                      <p className="text-xs text-gray-500 dark:text-gray-400">
-                        Rappi
-                      </p>
-                      <p className="font-medium">
-                        ${formatPrice(shiftTotals.paymentMethods.rappi)}
-                      </p>
-                    </div>
-                    <div className={getPaymentMethodClass("transfer")}>
-                      <p className="text-xs text-gray-500 dark:text-gray-400">
-                        Transferencia
-                      </p>
-                      <p className="font-medium">
-                        ${formatPrice(shiftTotals.paymentMethods.transfer)}
-                      </p>
-                    </div>
+                  <p className="text-lg font-bold text-indigo-600 dark:text-indigo-400">
+                    $ {formatPrice(avgHour)}
+                  </p>
+                </div>
+
+                <p className="text-sm text-gray-500 dark:text-gray-400 mb-2">
+                  Métodos de Pago
+                </p>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className={`col-span-2 ${pmClass("cash")}`}>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                      Efectivo
+                    </p>
+                    <p className="font-medium">$ {formatPrice(payments.cash)}</p>
                   </div>
+                  {(["card", "mercadopago", "rappi", "transfer"] as const).map(
+                    (m) => (
+                      <div key={m} className={pmClass(m)}>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 capitalize">
+                          {m}
+                        </p>
+                        <p className="font-medium">$ {formatPrice(payments[m])}</p>
+                      </div>
+                    )
+                  )}
                 </div>
               </div>
             );
           })}
+
           {activeShifts.length === 0 && (
             <div className="col-span-full text-center">
               <p className="text-gray-500 dark:text-gray-400">
@@ -948,7 +765,7 @@ export default function AdminDashboard() {
             </div>
           )}
         </div>
-      </div>
+      </section>
     </div>
   );
 }
