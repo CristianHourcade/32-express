@@ -59,14 +59,10 @@ function MultiSelectDropdown({
   placeholder?: string;
 }) {
   const [isOpen, setIsOpen] = useState(false);
-
   const toggleOption = (option: string) => {
-    let newSelected;
-    if (selectedOptions.includes(option)) {
-      newSelected = selectedOptions.filter((o) => o !== option);
-    } else {
-      newSelected = [...selectedOptions, option];
-    }
+    const newSelected = selectedOptions.includes(option)
+      ? selectedOptions.filter((o) => o !== option)
+      : [...selectedOptions, option];
     onChange(newSelected);
   };
 
@@ -118,12 +114,10 @@ function SingleSelectDropdown({
   placeholder?: string;
 }) {
   const [isOpen, setIsOpen] = useState(false);
-
   const handleOptionSelect = (option: string) => {
     onChange(option);
     setIsOpen(false);
   };
-
   return (
     <div className="relative">
       <button
@@ -153,12 +147,6 @@ function SingleSelectDropdown({
   );
 }
 
-// Función para calcular el margen
-function calculateMargin(purchasePrice: number, sellingPrice: number): number {
-  if (purchasePrice === 0) return 0;
-  return ((sellingPrice - purchasePrice) / purchasePrice) * 100;
-}
-
 // Helper para extraer la categoría inicial del nombre (si coincide con alguna conocida)
 function extractCategory(name: string): { category: string | null; baseName: string } {
   const parts = name.trim().split(" ");
@@ -171,7 +159,10 @@ function extractCategory(name: string): { category: string | null; baseName: str
 export default function EmployeeProductsPage() {
   // Obtenemos el usuario y negocio desde Redux
   const { user } = useSelector((state: RootState) => state.auth);
-  const { businesses, loading: businessesLoading } = useSelector((state: RootState) => state.businesses);
+  console.log(user)
+  const { businesses, loading: businessesLoading } = useSelector(
+    (state: RootState) => state.businesses
+  );
   const businessId = user?.businessId;
 
   // Estados para productos y carga
@@ -179,7 +170,6 @@ export default function EmployeeProductsPage() {
   const [isProductsLoading, setIsProductsLoading] = useState(true);
 
   // Estados para el modal de agregar/editar producto
-  // Se añade la propiedad "category" y se almacenará el nombre base sin categoría
   const [isProductModalOpen, setIsProductModalOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [productFormData, setProductFormData] = useState({
@@ -195,19 +185,21 @@ export default function EmployeeProductsPage() {
   });
   const [marginPercent, setMarginPercent] = useState(0);
 
-  // Estados para búsqueda y para agregar stock
+  // Estados para búsqueda y para agregar/quitar stock
   const [searchQuery, setSearchQuery] = useState("");
   const debouncedSearchQuery = useDebounce(searchQuery, 150);
+
   const [isAddStockModalOpen, setIsAddStockModalOpen] = useState(false);
+  const [isSubtractStockModalOpen, setIsSubtractStockModalOpen] = useState(false);
   const [currentProduct, setCurrentProduct] = useState<Product | null>(null);
   const [stockToAdd, setStockToAdd] = useState(0);
+  const [stockToSubtract, setStockToSubtract] = useState(0);
 
   // Estado para ordenamiento por stock
   const [sortField, setSortField] = useState<"stock" | null>("stock");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
 
   // Para filtrar el listado con base en la categoría
-  // Se usan las categorías conocidas más la opción "SIN CATEGORIA"
   const allFilterOptions = [...categories, "SIN CATEGORIA"];
   const [selectedFilterCategories, setSelectedFilterCategories] = useState<string[]>([]);
 
@@ -219,6 +211,7 @@ export default function EmployeeProductsPage() {
     let page = 0;
     let allProducts: any[] = [];
     let done = false;
+
     while (!done) {
       const from = page * pageSize;
       const to = from + pageSize - 1;
@@ -227,6 +220,7 @@ export default function EmployeeProductsPage() {
         .select("*")
         .eq("business_id", businessId)
         .range(from, to);
+
       if (error) {
         console.error("Error fetching products:", error);
         break;
@@ -239,6 +233,7 @@ export default function EmployeeProductsPage() {
         done = true;
       }
     }
+
     const formattedProducts: Product[] = allProducts.map((item: any) => ({
       id: item.id,
       name: item.name,
@@ -252,6 +247,7 @@ export default function EmployeeProductsPage() {
       salesCount: item.sales_count || 0,
       totalRevenue: item.total_revenue || 0,
     }));
+
     setProducts(formattedProducts);
     setIsProductsLoading(false);
   };
@@ -264,75 +260,104 @@ export default function EmployeeProductsPage() {
   }, [businessId]);
 
   // Calcular productos con bajo stock (para alerta)
-  const lowStockProducts = useMemo(() => {
-    return products.filter((product) => product.stock <= product.minStock);
-  }, [products]);
+  const lowStockProducts = useMemo(
+    () => products.filter((product) => product.stock <= product.minStock),
+    [products]
+  );
 
-  // Filtrar productos a partir del debounce de búsqueda
+  // Filtrar productos a partir del debounce de búsqueda y filtros
   const filteredProducts = useMemo(() => {
     let filtered = products;
+
     if (debouncedSearchQuery.trim()) {
-      const lowerQuery = debouncedSearchQuery.toLowerCase();
+      const q = debouncedSearchQuery.toLowerCase();
       filtered = filtered.filter(
         (p) =>
-          (p.name ?? "").toLowerCase().includes(lowerQuery) ||
-          (p.code ?? "").toLowerCase().includes(lowerQuery) ||
-          (p.description ?? "").toLowerCase().includes(lowerQuery)
+          p.name.toLowerCase().includes(q) ||
+          p.code.toLowerCase().includes(q)
       );
     }
-    // Si se han seleccionado opciones de filtro, se filtran según la categoría que aparezca al inicio
+
     if (selectedFilterCategories.length > 0) {
       filtered = filtered.filter((p) => {
         const firstWord = p.name.trim().split(" ")[0].toUpperCase();
-        const tieneCategoria = categories.includes(firstWord);
-        return (
-          (tieneCategoria && selectedFilterCategories.includes(firstWord)) ||
-          (!tieneCategoria && selectedFilterCategories.includes("SIN CATEGORIA"))
-        );
+        const hasCat = categories.includes(firstWord);
+        return hasCat
+          ? selectedFilterCategories.includes(firstWord)
+          : selectedFilterCategories.includes("SIN CATEGORIA");
       });
     }
+
     return filtered;
   }, [debouncedSearchQuery, products, selectedFilterCategories]);
 
-  // Ordenar productos (por stock en este ejemplo)
+  // Ordenar productos
   const sortedProducts = useMemo(() => {
-    const productsToSort = [...filteredProducts];
+    const arr = [...filteredProducts];
     if (sortField === "stock") {
-      productsToSort.sort((a, b) =>
+      arr.sort((a, b) =>
         sortOrder === "asc" ? a.stock - b.stock : b.stock - a.stock
       );
     }
-    return productsToSort;
+    return arr;
   }, [filteredProducts, sortField, sortOrder]);
 
-  // Manejador de búsqueda
+  // Handlers para search input
   const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setSearchQuery(e.target.value);
   };
 
-  // Funcionalidad para agregar stock
+  // Abrir modals de stock
   const openAddStockModal = (product: Product) => {
     setCurrentProduct(product);
     setStockToAdd(0);
     setIsAddStockModalOpen(true);
   };
+  const openSubtractStockModal = (product: Product) => {
+    setCurrentProduct(product);
+    setStockToSubtract(0);
+    setIsSubtractStockModalOpen(true);
+  };
 
+  // Añadir stock y log en activities
   const handleAddStock = async () => {
     if (!currentProduct || stockToAdd <= 0) return;
-    try {
-      const { error } = await supabase
-        .from("products")
-        .update({ stock: currentProduct.stock + stockToAdd })
-        .eq("id", currentProduct.id);
-      if (error) throw error;
+    const newStock = currentProduct.stock + stockToAdd;
+    const { error: prodErr } = await supabase
+      .from("products")
+      .update({ stock: newStock })
+      .eq("id", currentProduct.id);
+    if (!prodErr) {
+      await supabase.from("activities").insert({
+        business_id: businessId,
+        details: `${user?.name} - Added ${stockToAdd} to ${currentProduct.name} (new stock: ${newStock})`,
+        created_at: new Date().toISOString(),
+      });
       setIsAddStockModalOpen(false);
       fetchProducts();
-    } catch (error) {
-      console.error("Error adding stock:", error);
     }
   };
 
-  // Abrir modal para agregar nuevo producto
+  // Quitar stock y log en activities
+  const handleSubtractStock = async () => {
+    if (!currentProduct || stockToSubtract <= 1 || stockToSubtract > currentProduct.stock) return;
+    const newStock = currentProduct.stock - stockToSubtract;
+    const { error: prodErr } = await supabase
+      .from("products")
+      .update({ stock: newStock })
+      .eq("id", currentProduct.id);
+    if (!prodErr) {
+      await supabase.from("activities").insert({
+        business_id: businessId,
+        details: `${user?.name} Removed ${stockToSubtract} from ${currentProduct.name} (new stock: ${newStock})`,
+        created_at: new Date().toISOString(),
+      });
+      setIsSubtractStockModalOpen(false);
+      fetchProducts();
+    }
+  };
+
+  // Abrir modal de agregar producto
   const openAddProductModal = () => {
     setEditingProduct(null);
     setProductFormData({
@@ -346,74 +371,81 @@ export default function EmployeeProductsPage() {
       businessId: businessId || "",
       category: "",
     });
+    setMarginPercent(0);
     setIsProductModalOpen(true);
   };
 
-  // Manejador del formulario de creación/edición
+  // Cambios en el formulario
   const handleProductFormChange = (
-    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
+    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>
   ) => {
     const { name, value } = e.target;
     setProductFormData((prev) => ({
       ...prev,
       [name]:
         name === "purchasePrice" ||
-          name === "sellingPrice" ||
-          name === "minStock"
+        name === "sellingPrice" ||
+        name === "minStock"
           ? Number(value)
           : value,
     }));
   };
 
-  // Actualizar margen dinámico
+  // Calcular margen dinámico
   useEffect(() => {
     if (productFormData.purchasePrice > 0) {
-      const computedMargin =
+      const m =
         (productFormData.sellingPrice / productFormData.purchasePrice - 1) * 100;
-      setMarginPercent(Number(computedMargin.toFixed(2)));
+      setMarginPercent(Number(m.toFixed(2)));
     } else {
       setMarginPercent(0);
     }
   }, [productFormData.purchasePrice, productFormData.sellingPrice]);
 
-  // Enviar el formulario de creación/edición: se arma el nombre final anteponiendo la categoría (si existe)
+  // Enviar formulario de producto
   const handleProductFormSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    const finalName =
+      productFormData.category !== ""
+        ? `${productFormData.category} ${productFormData.name}`
+        : productFormData.name;
+    const dbData = {
+      name: finalName,
+      code: productFormData.code,
+      purchase_price: productFormData.purchasePrice,
+      selling_price: productFormData.sellingPrice,
+      stock: productFormData.stock,
+      min_stock: productFormData.minStock,
+      description: productFormData.description,
+      business_id: productFormData.businessId,
+    };
     try {
-      const finalName =
-        productFormData.category !== ""
-          ? `${productFormData.category} ${productFormData.name}`
-          : productFormData.name;
-      const dbProductData = {
-        name: finalName,
-        code: productFormData.code,
-        purchase_price: productFormData.purchasePrice,
-        selling_price: productFormData.sellingPrice,
-        stock: productFormData.stock,
-        min_stock: productFormData.minStock,
-        description: productFormData.description,
-        business_id: productFormData.businessId,
-      };
       if (editingProduct) {
         const { error } = await supabase
           .from("products")
-          .update(dbProductData)
+          .update(dbData)
           .eq("id", editingProduct.id);
         if (error) throw error;
       } else {
         const { error } = await supabase
           .from("products")
-          .insert({ ...dbProductData, created_at: new Date().toISOString() });
+          .insert({ ...dbData, created_at: new Date().toISOString() });
+
         if (error) throw error;
+        await supabase.from("activities").insert({
+          business_id: businessId,
+          details: `${user?.name} - Add product ${finalName}`,
+          created_at: new Date().toISOString(),
+        });
       }
       fetchProducts();
       setIsProductModalOpen(false);
-    } catch (error) {
-      console.error("Error updating/creating product:", error);
+    } catch (err) {
+      console.error("Error saving product:", err);
     }
   };
 
-  // Al editar producto, extraer la categoría (si ya está incluida en el nombre)
+  // Abrir modal editar
   const openEditProductModal = (product: Product) => {
     const { category, baseName } = extractCategory(product.name);
     setEditingProduct(product);
@@ -454,7 +486,10 @@ export default function EmployeeProductsPage() {
           </p>
         </div>
         <div className="flex items-center gap-4">
-          <button onClick={openAddProductModal} className="btn btn-primary flex items-center">
+          <button
+            onClick={openAddProductModal}
+            className="btn btn-primary flex items-center"
+          >
             <Plus className="w-5 h-5 mr-1" /> Agregar Producto
           </button>
           <Link href="/employee/dashboard" className="btn btn-secondary">
@@ -468,14 +503,20 @@ export default function EmployeeProductsPage() {
         <div className="bg-amber-50 dark:bg-amber-900/20 border-l-4 border-amber-500 p-4 rounded-md">
           <div className="flex">
             <div className="flex-shrink-0">
-              <AlertTriangle className="h-5 w-5 text-amber-500" aria-hidden="true" />
+              <AlertTriangle
+                className="h-5 w-5 text-amber-500"
+                aria-hidden="true"
+              />
             </div>
             <div className="ml-3">
               <h3 className="text-sm font-medium text-amber-800 dark:text-amber-300">
                 Alerta de Stock Bajo
               </h3>
               <div className="mt-2 text-sm text-amber-700 dark:text-amber-200">
-                <p>Hay {lowStockProducts.length} productos con stock por debajo del mínimo requerido.</p>
+                <p>
+                  Hay {lowStockProducts.length} productos con stock por debajo
+                  del mínimo requerido.
+                </p>
               </div>
             </div>
           </div>
@@ -502,7 +543,6 @@ export default function EmployeeProductsPage() {
               options={allFilterOptions}
               selectedOptions={selectedFilterCategories}
               onChange={setSelectedFilterCategories}
-              placeholder="Filtrar por categoría"
             />
           </div>
         </div>
@@ -535,61 +575,67 @@ export default function EmployeeProductsPage() {
               </tr>
             </thead>
             <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-              {sortedProducts.length > 0 && !isLoading ? (
-                sortedProducts.map((product) => (
-                  <tr key={product.id} className="hover:bg-gray-50 dark:hover:bg-gray-700">
-                    <td className="px-6 py-4 whitespace-normal break-words">
-                      {(() => {
-                        // Extrae la categoría y el nombre base
-                        const { category, baseName } = extractCategory(product.name);
-                        return (
-                          <>
-                            {category && (
-                              <div className="text-xs font-bold text-blue-400 dark:text-blue-300">
-                                {category}
-                              </div>
-                            )}
-                            <div className="text-sm font-medium text-gray-900 dark:text-white">
-                              {baseName}
-                            </div>
-                            <div className="text-xs text-gray-500 dark:text-gray-400">
-                              {product.code}
-                            </div>
-                          </>
-                        );
-                      })()}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
-                      ${product.sellingPrice.toFixed(2)}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span
-                        className={`px-2 py-1 text-xs font-medium rounded-full ${product.stock <= product.minStock
-                            ? "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300"
-                            : "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300"
+              {!isLoading && sortedProducts.length > 0 ? (
+                sortedProducts.map((product) => {
+                  const { category, baseName } = extractCategory(product.name);
+                  return (
+                    <tr
+                      key={product.id}
+                      className="hover:bg-gray-50 dark:hover:bg-gray-700"
+                    >
+                      <td className="px-6 py-4 whitespace-normal break-words">
+                        {category && (
+                          <div className="text-xs font-bold text-blue-400 dark:text-blue-300">
+                            {category}
+                          </div>
+                        )}
+                        <div className="text-sm font-medium text-gray-900 dark:text-white">
+                          {baseName}
+                        </div>
+                        <div className="text-xs text-gray-500 dark:text-gray-400">
+                          {product.code}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
+                        ${product.sellingPrice.toFixed(2)}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span
+                          className={`px-2 py-1 text-xs font-medium rounded-full ${
+                            product.stock <= product.minStock
+                              ? "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300"
+                              : "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300"
                           }`}
-                      >
-                        {product.stock}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                      <button
-                        onClick={() => openAddStockModal(product)}
-                        className="bg-black text-white p-3"
-                      >
-                        Agregar Stock
-                      </button>
-                    </td>
-                  </tr>
-                ))
+                        >
+                          {product.stock}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm flex space-x-2">
+                        <button
+                          onClick={() => openAddStockModal(product)}
+                          className="bg-black text-white p-2 rounded"
+                        >
+                          Agregar Stock
+                        </button>
+                        <button
+                          onClick={() => openSubtractStockModal(product)}
+                          className="bg-red-600 text-white p-2 rounded"
+                        >
+                          Quitar Stock
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })
               ) : (
                 <tr>
-                  <td colSpan={4} className="px-6 py-4 text-center text-sm text-gray-500 dark:text-gray-400">
+                  <td
+                    colSpan={4}
+                    className="px-6 py-4 text-center text-sm text-gray-500 dark:text-gray-400"
+                  >
                     {isLoading
                       ? "Cargando productos..."
-                      : searchQuery
-                        ? "No se encontraron productos que coincidan con la búsqueda."
-                        : "No hay productos para mostrar."}
+                      : "No hay productos para mostrar."}
                   </td>
                 </tr>
               )}
@@ -612,32 +658,87 @@ export default function EmployeeProductsPage() {
               </button>
             </div>
             <div className="p-6 space-y-4">
-              <div>
-                <p className="text-sm text-gray-500 dark:text-gray-400">Producto</p>
-                <p className="font-medium">{currentProduct.name}</p>
-              </div>
-              <div>
-                <p className="text-sm text-gray-500 dark:text-gray-400">Stock Actual</p>
-                <p className="font-medium">{currentProduct.stock}</p>
-              </div>
-              <div>
-                <label htmlFor="stockToAdd" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Cantidad a Agregar
-                </label>
-                <input
-                  type="number"
-                  id="stockToAdd"
-                  min="1"
-                  value={stockToAdd}
-                  onChange={(e) => setStockToAdd(Number.parseInt(e.target.value) || 0)}
-                  className="input mt-1"
-                />
-              </div>
-              <div className="pt-4 flex justify-end space-x-3">
-                <button type="button" onClick={() => setIsAddStockModalOpen(false)} className="btn btn-secondary">
+              <p>
+                Producto: <strong>{currentProduct.name}</strong>
+              </p>
+              <p>
+                Stock actual: <strong>{currentProduct.stock}</strong>
+              </p>
+              <label htmlFor="stockToAdd" className="block text-sm font-medium">
+                Cantidad a agregar
+              </label>
+              <input
+                id="stockToAdd"
+                type="number"
+                min={1}
+                value={stockToAdd}
+                onChange={(e) => setStockToAdd(Number(e.target.value) || 0)}
+                className="input w-full"
+              />
+              <div className="flex justify-end space-x-3 pt-4">
+                <button
+                  onClick={() => setIsAddStockModalOpen(false)}
+                  className="btn btn-secondary"
+                >
                   Cancelar
                 </button>
-                <button type="button" onClick={handleAddStock} disabled={stockToAdd <= 0} className="btn btn-primary">
+                <button
+                  onClick={handleAddStock}
+                  disabled={stockToAdd <= 0}
+                  className="btn btn-primary"
+                >
+                  Confirmar
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal para Quitar Stock */}
+      {isSubtractStockModalOpen && currentProduct && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg max-w-md w-full">
+            <div className="flex justify-between items-center p-6 border-b border-gray-200 dark:border-gray-700">
+              <h2 className="text-xl font-semibold">Quitar Stock</h2>
+              <button
+                onClick={() => setIsSubtractStockModalOpen(false)}
+                className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
+              >
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <p>
+                Producto: <strong>{currentProduct.name}</strong>
+              </p>
+              <p>
+                Stock actual: <strong>{currentProduct.stock}</strong>
+              </p>
+              <label htmlFor="stockToSubtract" className="block text-sm font-medium">
+                Cantidad a quitar
+              </label>
+              <input
+                id="stockToSubtract"
+                type="number"
+                min={1}
+                max={currentProduct.stock}
+                value={stockToSubtract}
+                onChange={(e) => setStockToSubtract(Number(e.target.value) || 0)}
+                className="input w-full"
+              />
+              <div className="flex justify-end space-x-3 pt-4">
+                <button
+                  onClick={() => setIsSubtractStockModalOpen(false)}
+                  className="btn btn-secondary"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={handleSubtractStock}
+                  disabled={stockToSubtract < 1 || stockToSubtract > currentProduct.stock}
+                  className="btn btn-primary"
+                >
                   Confirmar
                 </button>
               </div>
@@ -663,7 +764,6 @@ export default function EmployeeProductsPage() {
             </div>
             <form onSubmit={handleProductFormSubmit} className="p-6 space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {/* Dropdown para seleccionar categoría */}
                 <div>
                   <label className="label">Categoría</label>
                   <SingleSelectDropdown
@@ -672,16 +772,16 @@ export default function EmployeeProductsPage() {
                     onChange={(value) =>
                       setProductFormData((prev) => ({ ...prev, category: value }))
                     }
-                    placeholder="Selecciona categoría"
                   />
                 </div>
-                {/* Campo para el nombre base sin categoría */}
                 <div>
-                  <label htmlFor="name" className="label">Nombre del Producto</label>
+                  <label htmlFor="name" className="label">
+                    Nombre del Producto
+                  </label>
                   <input
-                    type="text"
                     id="name"
                     name="name"
+                    type="text"
                     value={productFormData.name}
                     onChange={handleProductFormChange}
                     required
@@ -690,11 +790,13 @@ export default function EmployeeProductsPage() {
                   />
                 </div>
                 <div>
-                  <label htmlFor="code" className="label">Código</label>
+                  <label htmlFor="code" className="label">
+                    Código
+                  </label>
                   <input
-                    type="text"
                     id="code"
                     name="code"
+                    type="text"
                     value={productFormData.code}
                     onChange={handleProductFormChange}
                     required
@@ -702,70 +804,69 @@ export default function EmployeeProductsPage() {
                   />
                 </div>
                 <div>
-                  <label htmlFor="purchasePrice" className="label">Precio de Compra</label>
+                  <label htmlFor="purchasePrice" className="label">
+                    Precio de Compra
+                  </label>
                   <input
-                    type="number"
                     id="purchasePrice"
                     name="purchasePrice"
+                    type="number"
+                    min={0}
+                    step={0.01}
                     value={productFormData.purchasePrice}
                     onChange={handleProductFormChange}
-                    min="0"
-                    step="0.01"
                     required
                     className="input"
                   />
                 </div>
                 <div>
-                  <label htmlFor="sellingPrice" className="label">Precio de Venta</label>
+                  <label htmlFor="sellingPrice" className="label">
+                    Precio de Venta
+                  </label>
                   <input
-                    type="number"
                     id="sellingPrice"
                     name="sellingPrice"
+                    type="number"
+                    min={0}
+                    step={0.01}
                     value={productFormData.sellingPrice}
                     onChange={handleProductFormChange}
-                    min="0"
-                    step="0.01"
                     required
                     className="input"
                   />
                 </div>
                 <div>
-                  <label htmlFor="stock" className="label">Stock</label>
+                  <label htmlFor="minStock" className="label">
+                    Stock Mínimo
+                  </label>
                   <input
-                    type="number"
-                    id="stock"
-                    name="stock"
-                    value={productFormData.stock}
-                    readOnly
-                    className="input bg-gray-100 dark:bg-gray-700"
-                  />
-                </div>
-                <div>
-                  <label htmlFor="minStock" className="label">Stock Mínimo</label>
-                  <input
-                    type="number"
                     id="minStock"
                     name="minStock"
+                    type="number"
+                    min={0}
                     value={productFormData.minStock}
                     onChange={handleProductFormChange}
-                    min="0"
                     required
                     className="input"
                   />
                 </div>
-                <div className="md:col-span-2">
-                  <label htmlFor="description" className="label">Descripción</label>
+                <div>
+                  <label htmlFor="description" className="label">
+                    Descripción
+                  </label>
                   <textarea
                     id="description"
                     name="description"
+                    rows={3}
                     value={productFormData.description}
                     onChange={handleProductFormChange}
-                    rows={3}
                     className="input"
-                  ></textarea>
+                  />
                 </div>
                 <div className="md:col-span-2">
-                  <label htmlFor="businessId" className="label">Negocio</label>
+                  <label htmlFor="businessId" className="label">
+                    Negocio
+                  </label>
                   <select
                     id="businessId"
                     name="businessId"
@@ -774,21 +875,32 @@ export default function EmployeeProductsPage() {
                     required
                     className="input"
                   >
-                    {businesses.map((business) => (
-                      <option key={business.id} value={business.id}>
-                        {business.name}
+                    {businesses.map((b) => (
+                      <option key={b.id} value={b.id}>
+                        {b.name}
                       </option>
                     ))}
                   </select>
                 </div>
               </div>
-              <div className="flex justify-end space-x-3 pt-4">
-                <button type="button" onClick={() => setIsProductModalOpen(false)} className="btn btn-secondary">
-                  Cancelar
-                </button>
-                <button type="submit" className="btn btn-primary">
-                  {editingProduct ? "Actualizar Producto" : "Agregar Producto"}
-                </button>
+              <div className="flex justify-between items-center">
+                <div>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">
+                    Margen: <strong>{marginPercent}%</strong>
+                  </p>
+                </div>
+                <div className="space-x-3">
+                  <button
+                    type="button"
+                    onClick={() => setIsProductModalOpen(false)}
+                    className="btn btn-secondary"
+                  >
+                    Cancelar
+                  </button>
+                  <button type="submit" className="btn btn-primary">
+                    {editingProduct ? "Actualizar Producto" : "Agregar Producto"}
+                  </button>
+                </div>
               </div>
             </form>
           </div>

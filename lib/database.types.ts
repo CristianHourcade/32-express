@@ -16,12 +16,9 @@ export interface Database {
         }
         Insert: {
           id?: string
-          user_id: string
-          business_id: string
-          action: string
+          business_id:any
           details?: string | null
           timestamp?: string
-          user_role?: string // Marcado como opcional
         }
         Update: {
           id?: string
