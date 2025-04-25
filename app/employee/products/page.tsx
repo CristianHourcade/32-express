@@ -330,7 +330,7 @@ export default function EmployeeProductsPage() {
     if (!prodErr) {
       await supabase.from("activities").insert({
         business_id: businessId,
-        details: `${user?.name} - Added ${stockToAdd} to ${currentProduct.name} (new stock: ${newStock})`,
+        details: `${user?.name} - Added ${stockToAdd} to ${currentProduct.name}`,
         created_at: new Date().toISOString(),
       });
       setIsAddStockModalOpen(false);
@@ -349,7 +349,7 @@ export default function EmployeeProductsPage() {
     if (!prodErr) {
       await supabase.from("activities").insert({
         business_id: businessId,
-        details: `${user?.name} Removed ${stockToSubtract} from ${currentProduct.name} (new stock: ${newStock})`,
+        details: `${user?.name} Removed ${stockToSubtract} from ${currentProduct.name}`,
         created_at: new Date().toISOString(),
       });
       setIsSubtractStockModalOpen(false);
@@ -434,7 +434,7 @@ export default function EmployeeProductsPage() {
         if (error) throw error;
         await supabase.from("activities").insert({
           business_id: businessId,
-          details: `${user?.name} - Add product ${finalName}`,
+          details: `${user?.name} - Created product ${finalName}`,
           created_at: new Date().toISOString(),
         });
       }
