@@ -289,6 +289,7 @@ export default function AdminDashboard() {
         businessId: string;
         stock: number | null;
         totalQuantity: number;
+        unitPrice: number;
         totalRevenue: number;
       }
     >();
@@ -297,16 +298,19 @@ export default function AdminDashboard() {
       sale.sale_items?.forEach((item: any) => {
         const prod = dbProducts.find((p) => p.id === item.product_id);
         if (!prod) return;
+
         const key = `${item.product_id}-${prod.business_id}`;
         if (!map.has(key)) {
           map.set(key, {
             productName: item.products?.name || "Producto desconocido",
             businessId: prod.business_id,
             stock: prod.stock ?? prod.current_stock ?? prod.quantity ?? null,
+            unitPrice:prod.selling_price,
             totalQuantity: 0,
             totalRevenue: 0,
           });
         }
+
         const entry = map.get(key)!;
         entry.totalQuantity += item.quantity;
         entry.totalRevenue += item.total;
@@ -416,13 +420,13 @@ export default function AdminDashboard() {
   };
 
   const pmClass = (m: string) =>
-    ({
-      cash: "bg-green-100 dark:bg-green-900 p-2 rounded",
-      card: "bg-blue-100 dark:bg-blue-900 p-2 rounded",
-      transfer: "bg-purple-100 dark:bg-purple-900 p-2 rounded",
-      mercadopago: "bg-sky-100 dark:bg-sky-900 p-2 rounded",
-      rappi: "bg-orange-100 dark:bg-orange-900 p-2 rounded",
-    }[m] || "bg-gray-100 dark:bg-gray-700 p-2 rounded");
+  ({
+    cash: "bg-green-100 dark:bg-green-900 p-2 rounded",
+    card: "bg-blue-100 dark:bg-blue-900 p-2 rounded",
+    transfer: "bg-purple-100 dark:bg-purple-900 p-2 rounded",
+    mercadopago: "bg-sky-100 dark:bg-sky-900 p-2 rounded",
+    rappi: "bg-orange-100 dark:bg-orange-900 p-2 rounded",
+  }[m] || "bg-gray-100 dark:bg-gray-700 p-2 rounded");
 
   /* ---------- SORTABLE HEADER ---------- */
   const SortableHeader = ({
@@ -617,13 +621,16 @@ export default function AdminDashboard() {
                     Producto
                   </th>
                   <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
-                    Negocio
+                    Precio
                   </th>
                   <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
                     Stock
                   </th>
                   <SortableHeader column="salesCount" label="Unidades Vendidas" />
                   <SortableHeader column="totalRevenue" label="Monto Facturado" />
+                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
+                    Negocio
+                  </th>
                 </tr>
               </thead>
               <tbody className="bg-white dark:bg-slate-800 divide-y divide-gray-200 dark:divide-gray-700">
@@ -635,13 +642,13 @@ export default function AdminDashboard() {
                   </tr>
                 ) : directSalesLoading || dbProductsLoading ? (
                   <tr>
-                    <td colSpan={5} className="px-4 py-8 text-center text-gray-500">
+                    <td colSpan={6} className="px-4 py-8 text-center text-gray-500">
                       Cargando productos...
                     </td>
                   </tr>
                 ) : topProducts.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="px-4 py-8 text-center text-gray-500">
+                    <td colSpan={6} className="px-4 py-8 text-center text-gray-500">
                       Sin resultados para los filtros seleccionados.
                     </td>
                   </tr>
@@ -656,8 +663,8 @@ export default function AdminDashboard() {
                         <td className="px-4 py-2 whitespace-nowrap text-sm font-medium">
                           {p.productName}
                         </td>
-                        <td className="px-4 py-2 whitespace-nowrap text-sm">
-                          {biz?.name || "—"}
+                        <td className="px-4 py-2 whitespace-nowrap text-sm font-medium">
+                          $ {formatPrice(p.unitPrice)}
                         </td>
                         <td className="px-4 py-2 whitespace-nowrap text-sm">
                           {p.stock ?? "—"}
@@ -666,7 +673,12 @@ export default function AdminDashboard() {
                           {p.totalQuantity}
                         </td>
                         <td className="px-4 py-2 whitespace-nowrap text-sm">
+                          <b className="text-green-700">
                           $ {formatPrice(p.totalRevenue)}
+                          </b>
+                        </td>
+                        <td className="px-4 py-2 whitespace-nowrap text-sm">
+                          {biz?.name || "—"}
                         </td>
                       </tr>
                     );
