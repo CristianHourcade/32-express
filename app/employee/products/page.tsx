@@ -340,7 +340,7 @@ export default function EmployeeProductsPage() {
 
   // Quitar stock y log en activities
   const handleSubtractStock = async () => {
-    if (!currentProduct || stockToSubtract <= 1 || stockToSubtract > currentProduct.stock) return;
+    if (!currentProduct || stockToSubtract == 0 || stockToSubtract > currentProduct.stock) return;
     const newStock = currentProduct.stock - stockToSubtract;
     const { error: prodErr } = await supabase
       .from("products")
