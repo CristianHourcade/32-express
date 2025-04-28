@@ -183,9 +183,6 @@ export default function NewSalePage() {
         setSearchQuery("");
       }
 
-      // Agrega la tecla al buffer
-      barcodeBuffer += event.key;
-
       // Reinicia el timeout para detectar la inactividad entre teclas
       clearTimeout(commitTimeout);
       commitTimeout = setTimeout(() => {
