@@ -201,34 +201,35 @@ export default function TopProductsPage() {
     return arr.sort((a, b) => b.qty - a.qty);
   }, [sales, products, daysFilter, selectedCats, selectedBiz]);
 
-  /* ----- COPIAR FALTANTES ----- */
- /* ----- COPIAR FALTANTES ----- */
-const copyList = () => {
-  if (!selectedBiz) return;
+  /* ----- COPIAR FALTANTES (WhatsApp con viñetas) ----- */
+  const copyList = () => {
+    if (!selectedBiz) return;
 
-  // Nombre del negocio y rango elegido
-  const bizName = businesses.find((b) => b.id === selectedBiz)?.name ?? "NEGOCIO";
-  const header = `${bizName.toUpperCase()} — Ventas últimos ${daysFilter} días`;
+    // Encabezado
+    const bizName = businesses.find((b) => b.id === selectedBiz)?.name ?? "NEGOCIO";
+    const header = `*${bizName.toUpperCase()} — Ventas últimos ${daysFilter} días*`;
 
-  // Agrupar por categoría
-  const grouped = new Map<string, { name: string; qty: number }[]>();
-  top.forEach((p) => {
-    if (!grouped.has(p.cat)) grouped.set(p.cat, []);
-    grouped.get(p.cat)!.push({ name: p.name.toUpperCase(), qty: p.qty });
-  });
+    // Agrupar por categoría
+    const grouped = new Map<string, { name: string; qty: number }[]>();
+    top.forEach((p) => {
+      if (!grouped.has(p.cat)) grouped.set(p.cat, []);
+      grouped.get(p.cat)!.push({ name: p.name.toUpperCase(), qty: p.qty });
+    });
 
-  // Construir texto
-  const lines: string[] = [header, ""]; // encabezado + línea en blanco
-  grouped.forEach((items, cat) => {
-    lines.push(cat); // categoría
-    items.forEach((i) => lines.push(`${i.name} - ${i.qty}`));
-    lines.push(""); // espacio entre categorías
-  });
+    // Construir texto
+    const lines: string[] = [header, ""];               // encabezado
+    grouped.forEach((items, cat) => {
+      lines.push(`*${cat}*`);                           // categoría
+      items.forEach((i) =>
+        lines.push(`• ${i.name} - *${i.qty}*`)          // viñeta + cantidad en negrita
+      );
+      lines.push("");                                   // línea en blanco entre categorías
+    });
 
-  navigator.clipboard.writeText(lines.join("\n"));
-  setCopied(true);
-  setTimeout(() => setCopied(false), 2000);
-};
+    navigator.clipboard.writeText(lines.join("\n"));
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
 
 
 
