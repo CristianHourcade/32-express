@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { Check, ClipboardCopy } from "lucide-react";
 
-/* ========= MULTI-SELECT DROPDOWN ========= */
+/* ═════════════ MULTI‑SELECT ═════════════ */
 function MultiSelectDropdown({
   options,
   selectedOptions,
@@ -32,8 +32,9 @@ function MultiSelectDropdown({
       >
         {selectedOptions.length ? selectedOptions.join(", ") : placeholder}
       </button>
+
       {isOpen && (
-        <div className="absolute z-10 mt-1 w-max min-w-[180px] rounded border bg-white dark:bg-slate-800 shadow">
+        <div className="absolute z-[9999] mt-1 w-max min-w-[180px] rounded border bg-white dark:bg-slate-800 shadow">
           <div className="max-h-60 overflow-y-auto p-1">
             {options.map((opt) => (
               <label
@@ -55,7 +56,7 @@ function MultiSelectDropdown({
   );
 }
 
-/* ========= HELPERS ========= */
+/* ═════════════ HELPERS ═════════════ */
 async function fetchAll(
   query: (from: number, to: number) => Promise<{ data: any[] | null; error: any }>
 ) {
@@ -110,7 +111,7 @@ const loadProducts = async (businessId: string) =>
     supabase.from("products").select("*").eq("business_id", businessId).range(from, to)
   );
 
-/* ========= CONSTANTES ========= */
+/* ═════════════ CONST ═════════════ */
 const CATEGORIES = [
   "ALMACEN",
   "CIGARRILLOS",
@@ -136,8 +137,9 @@ function extractCategory(name: string) {
 const formatPrice = (n: number) =>
   n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-/* ========= PÁGINA ========= */
+/* ═════════════ PAGE ═════════════ */
 export default function TopProductsPage() {
+  /* ---------- state ---------- */
   const [businesses, setBusinesses] = useState<any[]>([]);
   const [selectedBiz, setSelectedBiz] = useState("");
   const [sales, setSales] = useState<any[]>([]);
@@ -146,7 +148,10 @@ export default function TopProductsPage() {
   const [selectedCats, setSelectedCats] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [sortCol, setSortCol] = useState<"qty" | "revenue" | "stock">("qty");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 
+  /* ---------- load data ---------- */
   useEffect(() => {
     (async () => setBusinesses(await loadBusinesses()))();
   }, []);
@@ -162,13 +167,17 @@ export default function TopProductsPage() {
     })();
   }, [selectedBiz]);
 
+  /* ---------- compute top ---------- */
   const top = useMemo(() => {
     if (!selectedBiz) return [];
+
+    /* filtrar ventas recientes */
     const now = Date.now();
     const recentSales = sales.filter(
       (s) => (now - new Date(s.timestamp).getTime()) / 86400000 <= daysFilter
     );
 
+    /* mapear productos */
     const map = new Map<
       string,
       { name: string; qty: number; revenue: number; stock: number | null; cat: string }
@@ -195,35 +204,44 @@ export default function TopProductsPage() {
       })
     );
 
+    /* a array + filtros */
     let arr = Array.from(map.values());
-
     if (selectedCats.length) arr = arr.filter((p) => selectedCats.includes(p.cat));
-    return arr.sort((a, b) => b.qty - a.qty);
-  }, [sales, products, daysFilter, selectedCats, selectedBiz]);
 
-  /* ----- COPIAR FALTANTES (WhatsApp con viñetas) ----- */
+    /* ordenar */
+    arr.sort((a, b) => {
+      const diff = (a[sortCol] ?? -Infinity) - (b[sortCol] ?? -Infinity);
+      return sortDir === "asc" ? diff : -diff;
+    });
+
+    return arr;
+  }, [
+    sales,
+    products,
+    daysFilter,
+    selectedCats,
+    selectedBiz,
+    sortCol,
+    sortDir,
+  ]);
+
+  /* ---------- copy list ---------- */
   const copyList = () => {
     if (!selectedBiz) return;
-
-    // Encabezado
     const bizName = businesses.find((b) => b.id === selectedBiz)?.name ?? "NEGOCIO";
     const header = `*${bizName.toUpperCase()} — Ventas últimos ${daysFilter} días*`;
 
-    // Agrupar por categoría
     const grouped = new Map<string, { name: string; qty: number }[]>();
     top.forEach((p) => {
       if (!grouped.has(p.cat)) grouped.set(p.cat, []);
       grouped.get(p.cat)!.push({ name: p.name.toUpperCase(), qty: p.qty });
     });
 
-    // Construir texto
-    const lines: string[] = [header, ""];               // encabezado
+    const lines: string[] = [header, ""];
     grouped.forEach((items, cat) => {
-      lines.push(`*${cat}*`);                           // categoría
-      items.forEach((i) =>
-        lines.push(`• ${i.name} - *${i.qty}*`)          // viñeta + cantidad en negrita
-      );
-      lines.push("");                                   // línea en blanco entre categorías
+      lines.push(`*${cat}*`);
+      items.forEach((i) => lines.push(`• ${i.name} - *${i.qty}*`));
+      lines.push("");
     });
 
     navigator.clipboard.writeText(lines.join("\n"));
@@ -231,25 +249,27 @@ export default function TopProductsPage() {
     setTimeout(() => setCopied(false), 2000);
   };
 
-
-
+  /* ---------- UI ---------- */
   const selectedBizName = businesses.find((b) => b.id === selectedBiz)?.name ?? "";
 
   return (
-    <div className="p-6 space-y-6">
-      <h1 className="text-3xl font-bold">Productos más vendidos</h1>
+    <div className="p-6 space-y-8">
+      {/* ───────── Titular ───────── */}
+      <header className="space-y-1">
+        <h1 className="text-2xl md:text-3xl font-bold tracking-tight">
+          Productos más vendidos
+        </h1>
+        {selectedBiz && (
+          <p className="text-lg font-semibold text-sky-600 dark:text-sky-400">
+            {selectedBizName}
+          </p>
+        )}
+      </header>
 
-      {/* Nombre de negocio */}
-      {selectedBiz && (
-        <p className="text-xl font-semibold text-indigo-600 dark:text-indigo-400">
-          {selectedBizName}
-        </p>
-      )}
-
-      {/* CONTROLES */}
-      <div className="flex flex-wrap gap-4 items-center">
+      {/* ───────── Controles ───────── */}
+      <div className="flex flex-wrap gap-3 items-center">
         <select
-          className="input w-[160px] text-xs p-2 rounded border shadow-sm"
+          className="appearance-none bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-full px-3 py-1.5 text-xs shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 w-[160px]"
           value={selectedBiz}
           onChange={(e) => {
             setSelectedBiz(e.target.value);
@@ -266,27 +286,27 @@ export default function TopProductsPage() {
         </select>
 
         <select
-          className="input w-[140px] text-xs p-2 rounded border shadow-sm"
+          className="appearance-none bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-full px-3 py-1.5 text-xs shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 w-[140px]"
           value={daysFilter}
           onChange={(e) => setDaysFilter(Number(e.target.value))}
         >
-          <option value={3}>Últimos 3 días</option>
-          <option value={7}>Últimos 7 días</option>
-          <option value={14}>Últimos 14 días</option>
-          <option value={30}>Últimos 30 días</option>
+          {[3, 7, 14, 30].map((d) => (
+            <option key={d} value={d}>
+              Últimos {d} días
+            </option>
+          ))}
         </select>
 
         <MultiSelectDropdown
           options={[...CATEGORIES, "SIN CATEGORIA"]}
           selectedOptions={selectedCats}
           onChange={setSelectedCats}
-          placeholder="Filtrar categorías"
         />
 
         <button
           disabled={!top.length}
           onClick={copyList}
-          className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white text-xs font-medium rounded px-3 py-2 transition"
+          className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-medium rounded-full px-4 py-2 transition focus:outline-none focus:ring-2 focus:ring-indigo-500"
         >
           {copied ? (
             <>
@@ -300,50 +320,93 @@ export default function TopProductsPage() {
         </button>
       </div>
 
-      {/* TABLA */}
-      <div className="card bg-white dark:bg-slate-800 p-4 rounded-lg shadow-md">
-        <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700 text-sm">
-            <thead className="bg-gray-50 dark:bg-slate-700 text-xs">
-              <tr>
-                <th className="px-3 py-2 text-left font-medium">Categoría</th>
-                <th className="px-3 py-2 text-left font-medium">Producto</th>
-                <th className="px-3 py-2 text-left font-medium">Qty</th>
-                <th className="px-3 py-2 text-left font-medium">Facturado</th>
-                <th className="px-3 py-2 text-left font-medium">Stock</th>
+      {/* ───────── Tabla ───────── */}
+      <div className="bg-white dark:bg-slate-800 rounded-xl shadow ring-1 ring-slate-200 dark:ring-slate-700">
+        <div className="overflow-x-auto rounded-xl">
+          <table className="min-w-full text-sm">
+            <thead className="bg-slate-50 dark:bg-slate-700 sticky top-0 z-10 text-[11px] uppercase tracking-wide select-none">
+              <tr className="divide-x divide-slate-200 dark:divide-slate-600">
+                <th className="px-4 py-3 text-left font-semibold">Categoría</th>
+                <th className="px-4 py-3 text-left font-semibold">Producto</th>
+
+                <th
+                  onClick={() => {
+                    if (sortCol === "qty") setSortDir(sortDir === "asc" ? "desc" : "asc");
+                    else {
+                      setSortCol("qty");
+                      setSortDir("desc");
+                    }
+                  }}
+                  className="px-4 py-3 font-semibold cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-600/30"
+                >
+                  Unidades&nbsp;
+                  {sortCol === "qty" && (sortDir === "asc" ? "↑" : "↓")}
+                </th>
+
+                <th
+                  onClick={() => {
+                    if (sortCol === "revenue") setSortDir(sortDir === "asc" ? "desc" : "asc");
+                    else {
+                      setSortCol("revenue");
+                      setSortDir("desc");
+                    }
+                  }}
+                  className="px-4 py-3 font-semibold cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-600/30"
+                >
+                  Facturado&nbsp;
+                  {sortCol === "revenue" && (sortDir === "asc" ? "↑" : "↓")}
+                </th>
+
+                <th
+                  onClick={() => {
+                    if (sortCol === "stock") setSortDir(sortDir === "asc" ? "desc" : "asc");
+                    else {
+                      setSortCol("stock");
+                      setSortDir("desc");
+                    }
+                  }}
+                  className="px-4 py-3 font-semibold cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-600/30"
+                >
+                  Stock&nbsp;
+                  {sortCol === "stock" && (sortDir === "asc" ? "↑" : "↓")}
+                </th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+
+            <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
               {!selectedBiz ? (
                 <tr>
-                  <td colSpan={5} className="px-3 py-6 text-center text-gray-500">
+                  <td colSpan={5} className="py-8 text-center text-slate-500 dark:text-slate-400">
                     Seleccioná un negocio para comenzar.
                   </td>
                 </tr>
               ) : loading ? (
                 <tr>
-                  <td colSpan={5} className="px-3 py-6 text-center text-gray-500">
-                    Cargando...
+                  <td colSpan={5} className="py-8 text-center text-slate-500 dark:text-slate-400">
+                    Cargando…
                   </td>
                 </tr>
               ) : top.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="px-3 py-6 text-center text-gray-500">
+                  <td colSpan={5} className="py-8 text-center text-slate-500 dark:text-slate-400">
                     Sin resultados para los filtros seleccionados.
                   </td>
                 </tr>
               ) : (
                 top.map((p) => (
-                  <tr key={p.name + p.cat}>
-                    <td className="px-3 py-2 whitespace-nowrap">{p.cat}</td>
-                    <td className="px-3 py-2 whitespace-nowrap font-medium">{p.name}</td>
-                    <td className="px-3 py-2 whitespace-nowrap">{p.qty}</td>
-                    <td className="px-3 py-2 whitespace-nowrap">
-                      $ {formatPrice(p.revenue)}
+                  <tr
+                    key={p.name + p.cat}
+                    className="hover:bg-slate-50 dark:hover:bg-slate-700/40 odd:bg-slate-50/40 dark:odd:bg-slate-800/30"
+                  >
+                    <td className="px-4 py-2">{p.cat}</td>
+                    <td className="px-4 py-2 font-medium">{p.name}</td>
+                    <td className="px-4 py-2">{p.qty}</td>
+                    <td className="px-4 py-2">
+                      <span className="font-semibold text-green-700">
+                        $ {formatPrice(p.revenue)}
+                      </span>
                     </td>
-                    <td className="px-3 py-2 whitespace-nowrap">
-                      {p.stock ?? "—"}
-                    </td>
+                    <td className="px-4 py-2">{p.stock ?? "—"}</td>
                   </tr>
                 ))
               )}
