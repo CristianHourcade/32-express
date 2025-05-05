@@ -2,7 +2,44 @@
 
 import { useEffect, useState, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 
+/* ========= HELPERS DE FECHA ========= */
+function monthRange(offset = 0) {
+  // hoy (hora local)
+  const today = new Date();
+
+  // inicio del mes en hora **local**
+  const start = new Date(today.getFullYear(), today.getMonth() + offset, 1, 0, 0, 0, 0);
+
+  // fin exclusivo (primer día del mes siguiente, hora local)
+  const end = new Date(start.getFullYear(), start.getMonth() + 1, 1, 0, 0, 0, 0);
+
+  return { start, end };
+}
+
+const Stat = ({
+  label,
+  value,
+  accent = "",
+}: {
+  label: string;
+  value: string | number;
+  accent?: string;
+}) => (
+  <div className="mb-2">
+    <p className="text-sm text-slate-500 dark:text-slate-400">{label}</p>
+    <p className={`font-medium ${accent} dark:text-white`}>{value}</p>
+  </div>
+);
+
+// Paleta por método de pago
+const pmStyle: Record<"cash" | "card" | "rappi" | "transfer", string> = {
+  cash: "bg-emerald-100/60 dark:bg-emerald-900/40",
+  card: "bg-indigo-100/60 dark:bg-indigo-900/40",
+  rappi: "bg-orange-100/60 dark:bg-orange-900/40",
+  transfer: "bg-yellow-100/60 dark:bg-yellow-900/40",
+};
 /* ========= COMPONENTE: MultiSelectDropdown ========= */
 function MultiSelectDropdown({
   options,
@@ -18,10 +55,10 @@ function MultiSelectDropdown({
   const [isOpen, setIsOpen] = useState(false);
 
   const toggleOption = (option: string) => {
-    const newSelected = selectedOptions.includes(option)
+    const next = selectedOptions.includes(option)
       ? selectedOptions.filter((o) => o !== option)
       : [...selectedOptions, option];
-    onChange(newSelected);
+    onChange(next);
   };
 
   return (
@@ -31,23 +68,24 @@ function MultiSelectDropdown({
         onClick={() => setIsOpen(!isOpen)}
         className="input max-w-[100px] rounded shadow-sm border bg-white text-xs"
       >
-        {selectedOptions.length > 0 ? selectedOptions.join(", ") : "Categorias"}
+        {selectedOptions.length ? selectedOptions.join(", ") : placeholder}
       </button>
+
       {isOpen && (
-        <div className="absolute z-10 mt-1 bg-white dark:bg-gray-800 shadow-lg border rounded w-full min-w-[200px]">
+        <div className="absolute z-[1990] mt-1 bg-white dark:bg-gray-800 shadow-lg border rounded w-full min-w-[200px]">
           <div className="max-h-60 overflow-y-auto">
-            {options.map((option) => (
+            {options.map((opt) => (
               <label
-                key={option}
+                key={opt}
                 className="flex items-center px-2 py-1 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700"
               >
                 <input
                   type="checkbox"
-                  checked={selectedOptions.includes(option)}
-                  onChange={() => toggleOption(option)}
+                  checked={selectedOptions.includes(opt)}
+                  onChange={() => toggleOption(opt)}
                   className="mr-2"
                 />
-                <span className="text-sm">{option}</span>
+                <span className="text-sm">{opt}</span>
               </label>
             ))}
           </div>
@@ -59,49 +97,39 @@ function MultiSelectDropdown({
 
 /* ========= FETCH HELPERS ========= */
 async function fetchAllPaginated(
-  queryFn: (
-    from: number,
-    to: number
-  ) => Promise<{ data: any[] | null; error: any }>
+  queryFn: (from: number, to: number) => Promise<{ data: any[] | null; error: any }>
 ): Promise<any[]> {
   const pageSize = 1000;
   let page = 0;
-  let allData: any[] = [];
-  let done = false;
-  while (!done) {
+  let acc: any[] = [];
+  for (; ;) {
     const from = page * pageSize;
     const to = from + pageSize - 1;
     const { data, error } = await queryFn(from, to);
     if (error) {
-      console.error("Error fetching paginated data:", error);
+      console.error(error);
       break;
     }
-    if (data) {
-      allData = allData.concat(data);
-      if (data.length < pageSize) done = true;
-      else page++;
-    } else {
-      done = true;
-    }
+    if (!data?.length) break;
+    acc = acc.concat(data);
+    if (data.length < pageSize) break;
+    page++;
   }
-  return allData;
+  return acc;
 }
 
-/* ========= FETCH FUNCTIONS ========= */
+/* ========= QUERIES ========= */
 const loadBusinesses = async () => {
-  const { data, error } = await supabase
-    .from("businesses")
-    .select("*")
-    .order("name");
+  const { data, error } = await supabase.from("businesses").select("*").order("name");
   if (error) {
-    console.error("Error loading businesses:", error);
+    console.error(error);
     return [];
   }
-  return data || [];
+  return data ?? [];
 };
 
-const loadSales = async (businessId: string) =>
-  fetchAllPaginated((from, to) =>
+const loadSales = async (businessId: string, from: Date, to: Date) =>
+  fetchAllPaginated((lo, hi) =>
     supabase
       .from("sales")
       .select(
@@ -114,43 +142,44 @@ const loadSales = async (businessId: string) =>
       `
       )
       .eq("business_id", businessId)
+      .gte("timestamp", from.toISOString())
+      .lt("timestamp", to.toISOString())
       .order("timestamp", { ascending: false })
-      .range(from, to)
+      .range(lo, hi)
   );
 
 const loadProducts = async (businessId: string) =>
-  fetchAllPaginated((from, to) =>
-    supabase.from("products").select("*").eq("business_id", businessId).range(from, to)
+  fetchAllPaginated((lo, hi) =>
+    supabase.from("products").select("*").eq("business_id", businessId).range(lo, hi)
   );
 
-const loadExpenses = async (businessId: string) =>
-  fetchAllPaginated((from, to) =>
+const loadExpenses = async (businessId: string, from: Date, to: Date) =>
+  fetchAllPaginated((lo, hi) =>
     supabase
       .from("expenses")
       .select("*")
       .eq("business_id", businessId)
+      .gte("date", from.toISOString())
+      .lt("date", to.toISOString())
       .order("date", { ascending: false })
-      .range(from, to)
+      .range(lo, hi)
   );
 
-const loadShifts = async (businessId: string) =>
-  fetchAllPaginated((from, to) =>
+const loadShifts = async (businessId: string, from: Date, to: Date) =>
+  fetchAllPaginated((lo, hi) =>
     supabase
       .from("shifts")
       .select("*")
       .eq("business_id", businessId)
+      .gte("start_time", from.toISOString())
+      .lt("start_time", to.toISOString())
       .order("start_time", { ascending: false })
-      .range(from, to)
+      .range(lo, hi)
   );
 
-/* ========= UTILIDADES ========= */
-const formatNumberAbbreviation = (num: number) => {
-  const sign = num < 0 ? "-" : "";
-  const abs = Math.abs(num);
-  if (abs >= 1e6) return sign + (abs / 1e6).toFixed(1) + "M";
-  if (abs >= 1e3) return sign + (abs / 1e3).toFixed(1) + "k";
-  return sign + abs.toFixed(0);
-};
+/* ========= OTRAS UTILIDADES ========= */
+const formatNumberAbbrev = (n: number) =>
+  n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? (n / 1e3).toFixed(1) + "k" : n.toFixed(0);
 
 const categories = [
   "ALMACEN",
@@ -167,15 +196,21 @@ const categories = [
 
 function extractCategory(name: string) {
   const parts = name.trim().split(" ");
-  if (parts.length > 1 && categories.includes(parts[0].toUpperCase())) {
+  if (parts.length > 1 && categories.includes(parts[0].toUpperCase()))
     return { category: parts[0].toUpperCase(), baseName: parts.slice(1).join(" ") };
-  }
   return { category: null, baseName: name };
 }
 
 /* ========= DASHBOARD ========= */
 export default function AdminDashboard() {
-  /* ---------- ESTADOS ---------- */
+  /* -------- MES SELECCIONADO -------- */
+  const [monthOffset, setMonthOffset] = useState(0);
+  const { start: monthStart, end: monthEnd } = useMemo(
+    () => monthRange(monthOffset),
+    [monthOffset]
+  );
+
+  /* -------- ESTADOS -------- */
   const [businesses, setBusinesses] = useState<any[]>([]);
   const [sales, setSales] = useState<any[]>([]);
   const [expenses, setExpenses] = useState<any[]>([]);
@@ -185,29 +220,23 @@ export default function AdminDashboard() {
   /* Top productos */
   const [directSales, setDirectSales] = useState<any[]>([]);
   const [directSalesLoading, setDirectSalesLoading] = useState(false);
-  const [selectedBusinessForTopProducts, setSelectedBusinessForTopProducts] =
-    useState("");
+  const [selectedBusinessForTop, setSelectedBusinessForTop] = useState("");
   const [dbProducts, setDbProducts] = useState<any[]>([]);
   const [dbProductsLoading, setDbProductsLoading] = useState(false);
   const [daysFilter, setDaysFilter] = useState(7);
   const [itemsLimit, setItemsLimit] = useState(20);
-
-  const allCategoryOptions = [...categories, "SIN CATEGORIA"];
   const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
-
-  const [sortColumn, setSortColumn] = useState<"salesCount" | "totalRevenue">(
-    "salesCount"
-  );
+  const [sortColumn, setSortColumn] = useState<"salesCount" | "totalRevenue">("salesCount");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
-
   const [isLoading, setIsLoading] = useState(true);
 
   const formatPrice = (n: number) =>
     n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-  /* ---------- CARGA INICIAL ---------- */
+  /* -------- CARGA GLOBAL DEL MES -------- */
   useEffect(() => {
     (async () => {
+      setIsLoading(true);
       try {
         const biz = await loadBusinesses();
         setBusinesses(biz);
@@ -219,9 +248,9 @@ export default function AdminDashboard() {
         await Promise.all(
           biz.map(async (b) => {
             const [s, e, sh] = await Promise.all([
-              loadSales(b.id),
-              loadExpenses(b.id),
-              loadShifts(b.id),
+              loadSales(b.id, monthStart, monthEnd),
+              loadExpenses(b.id, monthStart, monthEnd),
+              loadShifts(b.id, monthStart, monthEnd),
             ]);
             allSales = allSales.concat(s);
             allExpenses = allExpenses.concat(e);
@@ -232,54 +261,48 @@ export default function AdminDashboard() {
         setSales(allSales);
         setExpenses(allExpenses);
         setShifts(allShifts);
-      } catch (err) {
-        console.error(err);
       } finally {
         setIsLoading(false);
       }
     })();
-  }, []);
+  }, [monthStart, monthEnd]);
 
+  /* ---- EMPLEADOS (estático, no depende de mes) ---- */
   useEffect(() => {
     (async () => {
-      const { data, error } = await supabase
-        .from("employees")
-        .select("*")
-        .order("name");
+      const { data, error } = await supabase.from("employees").select("*").order("name");
       if (error) console.error(error);
-      else setEmployees(data || []);
+      else setEmployees(data ?? []);
     })();
   }, []);
 
-  /* ---------- VENTAS & PRODUCTOS (negocio seleccionado) ---------- */
+  /* -------- VENTAS & PRODUCTOS DEL NEGOCIO SELECCIONADO -------- */
   useEffect(() => {
-    if (!selectedBusinessForTopProducts) return;
+    if (!selectedBusinessForTop) return;
     (async () => {
       setDirectSalesLoading(true);
-      setDirectSales(await loadSales(selectedBusinessForTopProducts));
+      setDirectSales(await loadSales(selectedBusinessForTop, monthStart, monthEnd));
       setDirectSalesLoading(false);
     })();
-  }, [selectedBusinessForTopProducts]);
+  }, [selectedBusinessForTop, monthStart, monthEnd]);
 
   useEffect(() => {
-    if (!selectedBusinessForTopProducts) {
+    if (!selectedBusinessForTop) {
       setDbProducts([]);
       return;
     }
     (async () => {
       setDbProductsLoading(true);
-      setDbProducts(await loadProducts(selectedBusinessForTopProducts));
+      setDbProducts(await loadProducts(selectedBusinessForTop));
       setDbProductsLoading(false);
     })();
-  }, [selectedBusinessForTopProducts]);
+  }, [selectedBusinessForTop]);
 
-  /* ---------- TOP PRODUCTOS ---------- */
+  /* -------- TOP PRODUCTOS (memo) -------- */
   const topProducts = useMemo(() => {
-    const now = new Date();
-    const recentSales = directSales.filter(
-      (s) =>
-        (now.getTime() - new Date(s.timestamp).getTime()) / (1000 * 3600 * 24) <=
-        daysFilter
+    const now = Date.now();
+    const recent = directSales.filter(
+      (s) => (now - new Date(s.timestamp).getTime()) / 86400000 <= daysFilter
     );
 
     const map = new Map<
@@ -294,30 +317,28 @@ export default function AdminDashboard() {
       }
     >();
 
-    recentSales.forEach((sale) => {
-      sale.sale_items?.forEach((item: any) => {
-        const prod = dbProducts.find((p) => p.id === item.product_id);
+    recent.forEach((sale) => {
+      sale.sale_items?.forEach((it: any) => {
+        const prod = dbProducts.find((p) => p.id === it.product_id);
         if (!prod) return;
-
-        const key = `${item.product_id}-${prod.business_id}`;
+        const key = `${it.product_id}-${prod.business_id}`;
         if (!map.has(key)) {
           map.set(key, {
-            productName: item.products?.name || "Producto desconocido",
+            productName: it.products?.name || "Sin nombre",
             businessId: prod.business_id,
             stock: prod.stock ?? prod.current_stock ?? prod.quantity ?? null,
-            unitPrice:prod.selling_price,
+            unitPrice: prod.selling_price,
             totalQuantity: 0,
             totalRevenue: 0,
           });
         }
-
         const entry = map.get(key)!;
-        entry.totalQuantity += item.quantity;
-        entry.totalRevenue += item.total;
+        entry.totalQuantity += it.quantity;
+        entry.totalRevenue += it.total;
       });
     });
 
-    let arr = Array.from(map.values());
+    let arr = [...map.values()];
 
     if (selectedCategories.length) {
       arr = arr.filter((p) => {
@@ -347,22 +368,19 @@ export default function AdminDashboard() {
     itemsLimit,
   ]);
 
-  /* ---------- MÉTRICAS MENSUALES NEGOCIOS ---------- */
+  /* -------- MÉTRICAS MENSUALES POR NEGOCIO -------- */
   const businessesWithMonthlyData = useMemo(() => {
-    const map = new Map<
+    const base = new Map<
       string,
       {
         tx: number;
         amount: number;
         expense: number;
-        payments: Record<
-          "cash" | "card" | "transfer" | "mercadopago" | "rappi",
-          number
-        >;
+        payments: Record<"cash" | "card" | "transfer" | "mercadopago" | "rappi", number>;
       }
     >();
     businesses.forEach((b) =>
-      map.set(b.id, {
+      base.set(b.id, {
         tx: 0,
         amount: 0,
         expense: 0,
@@ -370,32 +388,21 @@ export default function AdminDashboard() {
       })
     );
 
-    const today = new Date();
-    const m = today.getMonth();
-    const y = today.getFullYear();
-
     sales.forEach((s) => {
-      const d = new Date(s.timestamp);
-      if (d.getMonth() === m && d.getFullYear() === y) {
-        const data = map.get(s.business_id);
-        if (!data) return;
-        data.tx++;
-        data.amount += s.total;
-        if (s.payment_method in data.payments)
-          data.payments[s.payment_method] += s.total;
-      }
+      const d = base.get(s.business_id);
+      if (!d) return;
+      d.tx++;
+      d.amount += s.total;
+      if (s.payment_method in d.payments) d.payments[s.payment_method] += s.total;
     });
 
     expenses.forEach((e) => {
-      const d = new Date(e.date);
-      if (d.getMonth() === m && d.getFullYear() === y) {
-        const data = map.get(e.business_id);
-        if (data) data.expense += e.amount;
-      }
+      const d = base.get(e.business_id);
+      if (d) d.expense += e.amount;
     });
 
     return businesses.map((b) => {
-      const d = map.get(b.id)!;
+      const d = base.get(b.id)!;
       return {
         ...b,
         transactions: d.tx,
@@ -408,15 +415,15 @@ export default function AdminDashboard() {
     });
   }, [businesses, sales, expenses]);
 
-  /* ---------- TURNOS & UTIL ---------- */
-  const calcShiftTotals = (shift: any) => {
-    const sSales = sales.filter((s) => s.shift_id === shift.id);
-    const payments = { cash: 0, card: 0, transfer: 0, mercadopago: 0, rappi: 0 };
-    sSales.forEach((s) => {
-      if (s.payment_method in payments) payments[s.payment_method] += s.total;
+  /* -------- TURNOS -------- */
+  const calcShiftTotals = (sh: any) => {
+    const ss = sales.filter((s) => s.shift_id === sh.id);
+    const pm = { cash: 0, card: 0, transfer: 0, mercadopago: 0, rappi: 0 };
+    ss.forEach((s) => {
+      if (s.payment_method in pm) pm[s.payment_method] += s.total;
     });
-    const total = Object.values(payments).reduce((sum, n) => sum + n, 0);
-    return { payments, total };
+    const total = Object.values(pm).reduce((a, n) => a + n, 0);
+    return { payments: pm, total };
   };
 
   const pmClass = (m: string) =>
@@ -428,7 +435,9 @@ export default function AdminDashboard() {
     rappi: "bg-orange-100 dark:bg-orange-900 p-2 rounded",
   }[m] || "bg-gray-100 dark:bg-gray-700 p-2 rounded");
 
-  /* ---------- SORTABLE HEADER ---------- */
+  const selectBase =
+    "appearance-none bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-full px-3 py-1.5 text-xs shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 max-w-full";
+  /* -------- SORTABLE HEADER -------- */
   const SortableHeader = ({
     column,
     label,
@@ -439,9 +448,8 @@ export default function AdminDashboard() {
     <th
       className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer select-none hover:bg-slate-100 dark:hover:bg-slate-700"
       onClick={() => {
-        if (sortColumn === column) {
-          setSortDirection(sortDirection === "asc" ? "desc" : "asc");
-        } else {
+        if (sortColumn === column) setSortDirection(sortDirection === "asc" ? "desc" : "asc");
+        else {
           setSortColumn(column);
           setSortDirection("desc");
         }
@@ -454,201 +462,307 @@ export default function AdminDashboard() {
     </th>
   );
 
-  /* ---------- LOADING ---------- */
-  if (isLoading)
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-700 mx-auto" />
-          <p className="mt-4 text-slate-600 dark:text-slate-400">
-            Cargando datos del dashboard...
-          </p>
-        </div>
-      </div>
-    );
+  const activeShifts = shifts
+    .filter((sh: any) => !sh.end_time)
+    .sort((a: any, b: any) => calcShiftTotals(b).total - calcShiftTotals(a).total);
 
-  const activeShifts = (Array.isArray(shifts) ? shifts : [])
-    .filter((s) => !s.end_time)
-    .sort((a, b) => calcShiftTotals(b).total - calcShiftTotals(a).total);
-
-  /* ---------- RENDER ---------- */
-  const currentMonthName = new Date().toLocaleString("es-ES", { month: "long" });
-  const monthHeader =
-    "Negocios – Mes " +
-    currentMonthName.charAt(0).toUpperCase() +
-    currentMonthName.slice(1);
-
+  /* -------- RENDER -------- */
+  const monthLabel = monthStart.toLocaleString("es-ES", {
+    month: "long",
+    year: "numeric",
+  });
   return (
     <div className="space-y-6 p-4">
-      {/* ==================== NEGOCIOS ==================== */}
-      <section>
-        <h1 className="text-2xl font-bold">Negocios</h1>
-        <p className="text-slate-600 dark:text-slate-400">{monthHeader}</p>
+      {/* =========== NEGOCIOS =========== */}
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 mt-6">
-          {businessesWithMonthlyData.map((b) => (
-            <div
-              key={b.id}
-              className="bg-white dark:bg-slate-800 p-5 rounded-lg shadow hover:shadow-lg transition-shadow"
+      <section className="mt-8">
+        {/* —— Navegación de meses —— */}
+        <header className="flex items-center gap-4 flex-wrap">
+          <button
+            aria-label="Mes anterior"
+            className="p-2 rounded-full hover:bg-slate-200 dark:hover:bg-slate-700 disabled:opacity-40 transition-colors"
+            onClick={() => setMonthOffset((o) => o - 1)}
+            disabled={isLoading}
+          >
+            {/* Flecha IZQ en SVG puro */}
+            <svg
+              viewBox="0 0 24 24"
+              className="w-5 h-5"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
             >
-              <h3 className="text-lg font-semibold mb-4 dark:text-white">
-                {b.name}
-              </h3>
+              <polyline points="15 18 9 12 15 6" />
+            </svg>
+          </button>
 
-              <div className="mb-2">
-                <p className="text-sm text-slate-400">Ventas realizadas</p>
-                <p className="font-medium dark:text-white">
-                  {formatNumberAbbreviation(b.transactions)}
+          <h1 className="text-[clamp(1.5rem,2.5vw,2rem)] font-bold capitalize">
+            {monthLabel}
+          </h1>
+
+          <button
+            aria-label="Mes siguiente"
+            className="p-2 rounded-full hover:bg-slate-200 dark:hover:bg-slate-700 disabled:opacity-40 transition-colors"
+            onClick={() => setMonthOffset((o) => o + 1)}
+            disabled={isLoading}
+          >
+            {/* Flecha DER en SVG puro */}
+            <svg
+              viewBox="0 0 24 24"
+              className="w-5 h-5"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <polyline points="9 18 15 12 9 6" />
+            </svg>
+          </button>
+        </header>
+
+        {/* —— Grid de negocios —— */}
+        {isLoading ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 mt-8">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <div
+                key={i}
+                className="h-48 rounded-2xl bg-slate-200/60 dark:bg-slate-700/30 animate-pulse"
+              />
+            ))}
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 mt-8">
+            {businessesWithMonthlyData.map((b) => (
+              <div
+                key={b.id}
+                className="rounded-2xl bg-white/70 dark:bg-slate-800/60 backdrop-blur p-6 border border-slate-200 dark:border-slate-700
+                         transform-gpu transition-all duration-200 hover:-translate-y-1 hover:shadow-xl"
+              >
+                {/* ——— Header negocio ——— */}
+                <h3 className="text-lg font-semibold mb-4 flex items-center gap-2 dark:text-white">
+                  {/* Edificio simple en SVG */}
+                  <svg
+                    viewBox="0 0 24 24"
+                    className="w-5 h-5 text-indigo-500"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+                    <path d="M9 22v-4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v4" />
+                    <line x1="8" y1="10" x2="16" y2="10" />
+                    <line x1="8" y1="14" x2="16" y2="14" />
+                    <line x1="8" y1="6" x2="16" y2="6" />
+                  </svg>
+                  <span className="truncate">{b.name}</span>
+                </h3>
+
+                {/* ——— Métricas ——— */}
+                <Stat label="Ventas realizadas" value={formatNumberAbbrev(b.transactions)} />
+                <Stat label="Venta acumulada" value={`$ ${formatPrice(b.totalAmount)}`} />
+                <Stat
+                  label="Gasto acumulado"
+                  value={`$ ${formatPrice(b.totalExpense)}`}
+                  accent="text-red-500"
+                />
+                <Stat
+                  label="Profit"
+                  value={`$ ${formatPrice(b.profit)}`}
+                  accent="text-green-600 dark:text-green-400 font-bold text-lg"
+                />
+                <Stat label="Ticket Promedio" value={`$ ${formatPrice(b.avgTicket)}`} />
+
+                <hr className="border-slate-300 dark:border-slate-600 my-4" />
+
+                {/* ——— Métodos de pago ——— */}
+                <p className="text-sm text-slate-500 dark:text-slate-400 mb-2">
+                  Métodos de Pago
                 </p>
-              </div>
 
-              <div className="mb-2">
-                <p className="text-sm text-slate-400">Venta acumulada</p>
-                <p className="font-medium dark:text-white">
-                  $ {formatPrice(b.totalAmount)}
-                </p>
-              </div>
+                {(() => {
+                  // ► nuevo total transferencia = transferencia + mercadopago
+                  const transferTotal =
+                    (b.paymentMethods.mercadopago ?? 0) + (b.paymentMethods.transfer ?? 0);
 
-              <div className="mb-2">
-                <p className="text-sm text-slate-400">Gasto acumulado</p>
-                <p className="font-medium text-red-400">
-                  $ {formatPrice(b.totalExpense)}
-                </p>
-              </div>
-
-              <div className="mb-2">
-                <p className="text-sm text-slate-400">Profit</p>
-                <p className="font-bold text-lg text-green-600 dark:text-green-400">
-                  $ {formatPrice(b.profit)}
-                </p>
-              </div>
-
-              <div className="mb-4">
-                <p className="text-sm text-slate-400">Ticket Promedio</p>
-                <p className="font-medium dark:text-white">
-                  $ {formatPrice(b.avgTicket)}
-                </p>
-              </div>
-
-              <hr className="border-slate-700 mb-3" />
-
-              <p className="text-sm text-slate-400 mb-2">Métodos de Pago</p>
-
-              <div className="bg-green-100 dark:bg-green-900 rounded px-2 py-1 text-[12px] mb-2">
-                <p className="text-slate-700 dark:text-slate-300">Efectivo</p>
-                <p className="font-bold text-slate-800 dark:text-slate-50">
-                  $ {b.paymentMethods.cash.toLocaleString("en-US")}
-                </p>
-              </div>
-
-              <div className="grid grid-cols-2 gap-2">
-                {(["card", "mercadopago", "rappi", "transfer"] as const).map(
-                  (m) => (
-                    <div key={m} className={pmClass(m)}>
-                      <p className="text-xs text-gray-500 dark:text-gray-400 capitalize">
-                        {m}
-                      </p>
-                      <p className="font-bold text-slate-800 dark:text-slate-50">
-                        $ {formatNumberAbbreviation(b.paymentMethods[m])}
-                      </p>
+                  return (
+                    <div className="grid grid-cols-2 gap-2">
+                      {(
+                        ["cash", "card", "rappi", "transfer"] as const // sin mercadopago
+                      ).map((m) => (
+                        <div
+                          key={m}
+                          className={`${pmStyle[m]} rounded-lg p-2 flex flex-col`}
+                        >
+                          <span className="text-xs capitalize text-slate-700 dark:text-slate-300">
+                            {m === "transfer" ? "transferencia" : m}
+                          </span>
+                          <span className="font-semibold text-slate-800 dark:text-slate-50">
+                            {m === "cash"
+                              ? `$ ${b.paymentMethods.cash.toLocaleString("en-US")}`
+                              : m === "transfer"
+                                ? `$ ${formatNumberAbbrev(transferTotal)}`
+                                : `$ ${formatNumberAbbrev(b.paymentMethods[m])}`}
+                          </span>
+                        </div>
+                      ))}
                     </div>
-                  )
-                )}
+                  );
+                })()}
               </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </section>
 
-      {/* ==================== TOP PRODUCTOS ==================== */}
-      <section>
-        <div className="flex flex-col sm:flex-row justify-between items-center mb-4">
-          <h2 className="text-2xl font-semibold mb-2 sm:mb-0">Más vendidos</h2>
-          <div className="flex flex-wrap gap-4 items-center">
-            <select
-              className="input max-w-[100px] text-xs p-2 rounded shadow-sm border"
-              value={selectedBusinessForTopProducts}
-              onChange={(e) => {
-                setSelectedBusinessForTopProducts(e.target.value);
-                setDirectSales([]);
-              }}
-            >
-              <option value="">Negocio</option>
-              {businesses.map((b) => (
-                <option key={b.id} value={b.id}>
-                  {b.name}
-                </option>
-              ))}
-            </select>
 
-            <select
-              className="input w-[200px] text-xs p-2 rounded shadow-sm border"
-              value={daysFilter}
-              onChange={(e) => setDaysFilter(Number(e.target.value))}
-            >
-              <option value={3}>Últimos 3 días</option>
-              <option value={7}>Últimos 7 días</option>
-              <option value={14}>Últimos 14 días</option>
-              <option value={30}>Últimos 30 días</option>
-            </select>
+      {/* =========== TOP PRODUCTOS =========== */}
+      <section className="space-y-4">
+        {/* — Header filtros — */}
+        <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+          <h2 className="text-xl sm:text-2xl font-semibold">Más vendidos</h2>
 
+          <div className="flex flex-wrap gap-3 items-center">
+            {/* — negocio — */}
+            <div className="relative">
+              <select
+                className={`${selectBase} pr-6`}
+                value={selectedBusinessForTop}
+                onChange={(e) => {
+                  setSelectedBusinessForTop(e.target.value);
+                  setDirectSales([]);
+                }}
+              >
+                <option value="">Negocio</option>
+                {businesses.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.name}
+                  </option>
+                ))}
+              </select>
+              {/* caret */}
+              <svg
+                className="w-3 h-3 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-slate-500"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <polyline points="6 9 12 15 18 9" />
+              </svg>
+            </div>
+
+            {/* — rango días — */}
+            <div className="relative">
+              <select
+                className={`${selectBase} w-[150px] pr-6`}
+                value={daysFilter}
+                onChange={(e) => setDaysFilter(Number(e.target.value))}
+              >
+                <option value={3}>Últimos 3 días</option>
+                <option value={7}>Últimos 7 días</option>
+                <option value={14}>Últimos 14 días</option>
+                <option value={30}>Últimos 30 días</option>
+              </select>
+              <svg
+                className="w-3 h-3 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-slate-500"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <polyline points="6 9 12 15 18 9" />
+              </svg>
+            </div>
+
+            {/* — categorías (tu dropdown múltiple) — */}
             <MultiSelectDropdown
-              options={allCategoryOptions}
+              options={[...categories, "SIN CATEGORIA"]}
               selectedOptions={selectedCategories}
               onChange={setSelectedCategories}
-              placeholder="Filtrar por categorías"
             />
 
-            <select
-              className="input max-w-[60px] text-xs p-2 rounded shadow-sm border"
-              value={itemsLimit}
-              onChange={(e) => setItemsLimit(Number(e.target.value))}
-            >
-              <option value={10}>10</option>
-              <option value={20}>20</option>
-              <option value={40}>40</option>
-              <option value={100}>100</option>
-            </select>
+            {/* — límite items — */}
+            <div className="relative">
+              <select
+                className={`${selectBase} w-[70px] pr-6`}
+                value={itemsLimit}
+                onChange={(e) => setItemsLimit(Number(e.target.value))}
+              >
+                {[10, 20, 40, 100].map((n) => (
+                  <option key={n} value={n}>
+                    {n}
+                  </option>
+                ))}
+              </select>
+              <svg
+                className="w-3 h-3 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-slate-500"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <polyline points="6 9 12 15 18 9" />
+              </svg>
+            </div>
           </div>
-        </div>
+        </header>
 
-        <div className="card bg-white dark:bg-slate-800 p-4 rounded-lg shadow-md">
-          <div className="table-container overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-              <thead className="bg-gray-50 dark:bg-slate-700">
-                <tr>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
+        {/* — Tabla — */}
+        <div className="bg-white dark:bg-slate-800 rounded-xl shadow ring-1 ring-slate-200 dark:ring-slate-700">
+          <div className="overflow-x-auto rounded-xl">
+            <table className="min-w-full text-sm">
+              {/* cabeza sticky */}
+              <thead className="bg-slate-50 dark:bg-slate-700 sticky top-0 z-10">
+                <tr className="divide-x divide-slate-200 dark:divide-slate-600">
+                  <th className="px-4 py-3 text-left font-semibold text-slate-600 dark:text-slate-300">
                     Producto
                   </th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
+                  <th className="px-4 py-3 text-left font-semibold text-slate-600 dark:text-slate-300">
                     Precio
                   </th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
-                    Stock
-                  </th>
-                  <SortableHeader column="salesCount" label="Unidades Vendidas" />
-                  <SortableHeader column="totalRevenue" label="Monto Facturado" />
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
-                    Negocio
-                  </th>
+                  <th className="px-4 py-3 text-left font-semibold">Stock</th>
+                  <SortableHeader column="salesCount" label="Unidades" />
+                  <SortableHeader column="totalRevenue" label="Facturado" />
+                  <th className="px-4 py-3 text-left font-semibold">Negocio</th>
                 </tr>
               </thead>
-              <tbody className="bg-white dark:bg-slate-800 divide-y divide-gray-200 dark:divide-gray-700">
-                {selectedBusinessForTopProducts === "" ? (
+
+              <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
+                {selectedBusinessForTop === "" ? (
                   <tr>
-                    <td colSpan={5} className="px-4 py-8 text-center text-gray-500">
-                      Selecciona un negocio para ver los productos más vendidos.
+                    <td
+                      colSpan={6}
+                      className="py-10 text-center text-slate-500 dark:text-slate-400"
+                    >
+                      Seleccioná un negocio para ver los productos más vendidos.
                     </td>
                   </tr>
                 ) : directSalesLoading || dbProductsLoading ? (
                   <tr>
-                    <td colSpan={6} className="px-4 py-8 text-center text-gray-500">
-                      Cargando productos...
+                    <td
+                      colSpan={6}
+                      className="py-10 text-center text-slate-500 dark:text-slate-400"
+                    >
+                      Cargando productos…
                     </td>
                   </tr>
                 ) : topProducts.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="px-4 py-8 text-center text-gray-500">
+                    <td
+                      colSpan={6}
+                      className="py-10 text-center text-slate-500 dark:text-slate-400"
+                    >
                       Sin resultados para los filtros seleccionados.
                     </td>
                   </tr>
@@ -658,28 +772,18 @@ export default function AdminDashboard() {
                     return (
                       <tr
                         key={p.productName + p.businessId}
-                        className="hover:bg-slate-100 dark:hover:bg-slate-700"
+                        className="hover:bg-slate-50 dark:hover:bg-slate-700/40 odd:bg-slate-50/40 dark:odd:bg-slate-800/40"
                       >
-                        <td className="px-4 py-2 whitespace-nowrap text-sm font-medium">
-                          {p.productName}
+                        <td className="px-4 py-2 font-medium">{p.productName}</td>
+                        <td className="px-4 py-2">$ {formatPrice(p.unitPrice)}</td>
+                        <td className="px-4 py-2">{p.stock ?? "—"}</td>
+                        <td className="px-4 py-2">{p.totalQuantity}</td>
+                        <td className="px-4 py-2">
+                          <span className="font-semibold text-green-700">
+                            $ {formatPrice(p.totalRevenue)}
+                          </span>
                         </td>
-                        <td className="px-4 py-2 whitespace-nowrap text-sm font-medium">
-                          $ {formatPrice(p.unitPrice)}
-                        </td>
-                        <td className="px-4 py-2 whitespace-nowrap text-sm">
-                          {p.stock ?? "—"}
-                        </td>
-                        <td className="px-4 py-2 whitespace-nowrap text-sm">
-                          {p.totalQuantity}
-                        </td>
-                        <td className="px-4 py-2 whitespace-nowrap text-sm">
-                          <b className="text-green-700">
-                          $ {formatPrice(p.totalRevenue)}
-                          </b>
-                        </td>
-                        <td className="px-4 py-2 whitespace-nowrap text-sm">
-                          {biz?.name || "—"}
-                        </td>
+                        <td className="px-4 py-2">{biz?.name ?? "—"}</td>
                       </tr>
                     );
                   })
@@ -690,94 +794,116 @@ export default function AdminDashboard() {
         </div>
       </section>
 
-      {/* ==================== TURNOS ACTIVOS ==================== */}
-      <section>
-        <h2 className="text-2xl font-semibold mb-4">Turnos Activos</h2>
+      {/* =========== TURNOS ACTIVOS =========== */}
+      <section className="space-y-4">
+        <h2 className="text-xl sm:text-2xl font-semibold">Turnos activos</h2>
+
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {activeShifts.map((shift) => {
-            const { payments, total } = calcShiftTotals(shift);
-            const emp = employees.find((e) => e.id === shift.employee_id);
-            const hours =
-              (Date.now() - new Date(shift.start_time).getTime()) / 36e5;
-            const avgHour = hours > 0 ? total / hours : 0;
+          {activeShifts.map((sh) => {
+            const { payments, total } = calcShiftTotals(sh);
+            const emp = employees.find((e) => e.id === sh.employee_id);
+            const hours = (Date.now() - new Date(sh.start_time).getTime()) / 36e5;
+            const avgHr = hours > 0 ? total / hours : 0;
+
+            // ► transfer + mercadopago
+            const transferTotal =
+              (payments.transfer ?? 0) + (payments.mercadopago ?? 0);
 
             return (
               <div
-                key={shift.id}
-                className="card bg-white dark:bg-slate-800 p-6 rounded-lg shadow-md hover:shadow-xl transition-shadow"
+                key={sh.id}
+                className="rounded-2xl bg-white/70 dark:bg-slate-800/60 backdrop-blur p-6 border border-slate-200 dark:border-slate-700
+                     transform-gpu transition-all duration-200 hover:-translate-y-1 hover:shadow-xl"
               >
+                {/* — Header — */}
                 <div className="flex justify-between items-start mb-4">
                   <div>
-                    <h3 className="text-xl font-semibold">{emp?.name || shift.employee_id}</h3>
-                    <p className="text-sm text-gray-500 dark:text-gray-400">
-                      {shift.business_name}
+                    <h3 className="text-lg font-semibold truncate">
+                      {emp?.name || sh.employee_id}
+                    </h3>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      {sh.business_name}
                     </p>
                   </div>
-                  <span className="bg-green-100 text-green-800 text-xs font-medium px-2 py-1 rounded dark:bg-green-900 dark:text-green-300">
+                  <span className="bg-emerald-100 text-emerald-800 text-[11px] font-medium px-2 py-1 rounded-full
+                             dark:bg-emerald-900 dark:text-emerald-300">
                     Activo
                   </span>
                 </div>
 
-                <p className="text-sm text-gray-500 dark:text-gray-400 mb-2">
+                {/* — Métricas — */}
+                <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">
                   Iniciado:{" "}
                   <span className="font-medium">
-                    {new Date(shift.start_time).toLocaleString()}
+                    {new Date(sh.start_time).toLocaleString()}
                   </span>
                 </p>
 
-                <div className="mb-4">
-                  <p className="text-sm text-gray-500 dark:text-gray-400">
-                    Ventas Totales:
+                <div className="mb-3">
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    Ventas totales
                   </p>
                   <p className="text-lg font-bold text-green-600 dark:text-green-400">
                     $ {formatPrice(total)}
                   </p>
                 </div>
 
-                {/* Promedio por hora */}
                 <div className="mb-4">
-                  <p className="text-sm text-gray-500 dark:text-gray-400">
-                    Promedio / hora:
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    Promedio / hora
                   </p>
                   <p className="text-lg font-bold text-indigo-600 dark:text-indigo-400">
-                    $ {formatPrice(avgHour)}
+                    $ {formatPrice(avgHr)}
                   </p>
                 </div>
 
-                <p className="text-sm text-gray-500 dark:text-gray-400 mb-2">
-                  Métodos de Pago
+                {/* — Métodos de pago — */}
+                <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">
+                  Métodos de pago
                 </p>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className={`col-span-2 ${pmClass("cash")}`}>
-                    <p className="text-xs text-gray-500 dark:text-gray-400">
+
+                <div className="grid grid-cols-2 gap-3">
+                  {/* efectivo */}
+                  <div className={` ${pmClass("cash")}`}>
+                    <p className="text-[11px] text-slate-600 dark:text-slate-400">
                       Efectivo
                     </p>
                     <p className="font-medium">$ {formatPrice(payments.cash)}</p>
                   </div>
-                  {(["card", "mercadopago", "rappi", "transfer"] as const).map(
-                    (m) => (
-                      <div key={m} className={pmClass(m)}>
-                        <p className="text-xs text-gray-500 dark:text-gray-400 capitalize">
-                          {m}
-                        </p>
-                        <p className="font-medium">$ {formatPrice(payments[m])}</p>
-                      </div>
-                    )
-                  )}
+
+                  {/* card y rappi */}
+                  {(["card", "rappi"] as const).map((m) => (
+                    <div key={m} className={pmClass(m)}>
+                      <p className="text-[11px] text-slate-600 dark:text-slate-400 capitalize">
+                        {m}
+                      </p>
+                      <p className="font-medium">$ {formatPrice(payments[m])}</p>
+                    </div>
+                  ))}
+
+                  {/* transferencia (transfer + mercadopago) */}
+                  <div className={pmClass("transfer")}>
+                    <p className="text-[11px] text-slate-600 dark:text-slate-400">
+                      Transferencia
+                    </p>
+                    <p className="font-medium">$ {formatPrice(transferTotal)}</p>
+                  </div>
                 </div>
               </div>
             );
           })}
 
-          {activeShifts.length === 0 && (
-            <div className="col-span-full text-center">
-              <p className="text-gray-500 dark:text-gray-400">
-                No hay turnos activos en este momento.
+          {!activeShifts.length && (
+            <div className="col-span-full text-center py-10 rounded-xl bg-slate-100/50 dark:bg-slate-800/40">
+              <p className="text-slate-500 dark:text-slate-400">
+                No hay turnos activos.
               </p>
             </div>
           )}
         </div>
       </section>
+
+
     </div>
   );
 }
