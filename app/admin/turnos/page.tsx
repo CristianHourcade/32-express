@@ -11,6 +11,14 @@ import { getSales } from "@/lib/redux/slices/salesSlice"
 import { FileText, Search } from "lucide-react"
 
 export default function ShiftsPage() {
+  function monthRange(offset = 0) {
+    const today = new Date();
+    const start = new Date(today.getFullYear(), today.getMonth() + offset, 1, 0, 0, 0);
+    const end   = new Date(start.getFullYear(), start.getMonth() + 1, 1, 0, 0, 0);
+    return { start, end };
+  }
+  const [monthOffset, setMonthOffset] = useState(0);
+const { start: monthStart, end: monthEnd } = monthRange(monthOffset);
   const dispatch = useDispatch<AppDispatch>()
   const { shifts, loading: shiftsLoading } = useSelector((state: RootState) => state.shifts)
   const { employees, loading: employeesLoading } = useSelector((state: RootState) => state.employees)
@@ -110,99 +118,117 @@ export default function ShiftsPage() {
     }, {} as Record<string, number>)
   }
 
+  /* ═════════ START RETURN UI ═════════ */
   return (
-    <div className="space-y-6">
-      <h1 className="text-2xl font-bold">Turnos</h1>
+    <div className="space-y-8">
+      <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+        <div>
+          <h1 className="text-2xl md:text-3xl font-bold tracking-tight">Turnos</h1>
+          <p className="text-slate-600 dark:text-slate-400">
+            Control de turnos y ventas por empleado
+          </p>
+        </div>
 
-      <div className="card">
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-6 gap-4">
-          <div className="flex items-center">
-            <label htmlFor="businessFilter" className="mr-2 text-sm font-medium">
-              Filtrar por Negocio:
-            </label>
-            <select
-              id="businessFilter"
-              value={selectedBusinessId}
-              onChange={handleBusinessChange}
-              className="input max-w-xs"
-            >
-              <option value="all">Todos los Negocios</option>
-              {businesses.map((business) => (
-                <option key={business.id} value={business.id}>
-                  {business.name}
-                </option>
-              ))}
-            </select>
-          </div>
+        <div className="flex gap-3">
+          <select
+            value={selectedBusinessId}
+            onChange={handleBusinessChange}
+            className="appearance-none bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-full px-3 py-1.5 text-xs shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          >
+            <option value="all">Todos los negocios</option>
+            {businesses.map((b) => (
+              <option key={b.id} value={b.id}>
+                {b.name}
+              </option>
+            ))}
+          </select>
 
-          <div className="relative max-w-xs">
-            <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
-              <Search className="w-4 h-4 text-gray-500 dark:text-gray-400" />
-            </div>
+          {/* search aún sin lógica */}
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 h-4 w-4" />
             <input
-              type="text"
-              className="input pl-10"
-              placeholder="Buscar turnos..."
+              disabled
+              placeholder="Buscar…"
+              className="bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-full pl-9 pr-3 py-1.5 text-xs shadow-sm cursor-not-allowed"
             />
           </div>
         </div>
+      </header>
 
-        <div className="table-container">
-          <table className="table">
-            <thead className="table-header">
+      {/* ───────── Tabla ───────── */}
+      <div className="bg-white dark:bg-slate-800 rounded-xl shadow ring-1 ring-slate-200 dark:ring-slate-700 overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="min-w-full text-sm">
+            <thead className="bg-slate-100 dark:bg-slate-700/70 backdrop-blur sticky top-0 z-10 text-[11px] uppercase tracking-wide">
               <tr>
-                <th className="table-header-cell">Empleado</th>
-                <th className="table-header-cell">Negocio</th>
-                <th className="table-header-cell">Hora de Inicio</th>
-                <th className="table-header-cell">Hora de Fin</th>
-                <th className="table-header-cell">Estado</th>
-                <th className="table-header-cell">Ventas</th>
-                <th className="table-header-cell">Total</th>
-                <th className="table-header-cell">Acciones</th>
+                {[
+                  "Empleado",
+                  "Negocio",
+                  "Inicio",
+                  "Fin",
+                  "Estado",
+                  "Ventas",
+                  "Total",
+                  " ",
+                ].map((h) => (
+                  <th key={h} className="px-4 py-3 text-left font-semibold">
+                    {h}
+                  </th>
+                ))}
               </tr>
             </thead>
-            <tbody className="table-body">
-              {sortedShifts.map((shift) => {
-                const shiftSales = getShiftSales(shift.id)
-                const totalAmount = shiftSales.reduce((sum, sale) => sum + sale.total, 0)
-                return (
-                  <tr key={shift.id} className="table-row">
-                    <td className="table-cell font-medium">{shift.employeeName}</td>
-                    <td className="table-cell">{shift.businessName}</td>
-                    <td className="table-cell">{new Date(shift.startTime).toLocaleString()}</td>
-                    <td className="table-cell">
-                      {shift.endTime ? new Date(shift.endTime).toLocaleString() : "-"}
-                    </td>
-                    <td className="table-cell">
-                      <span
-                        className={`px-2 py-1 rounded text-xs font-medium ${
-                          shift.active
-                            ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300"
-                            : "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300"
-                        }`}
-                      >
-                        {shift.active ? "Activo" : "Completado"}
-                      </span>
-                    </td>
-                    <td className="table-cell">{shift.sales}</td>
-                    <td className="table-cell font-medium">
-                      ${formatPrice(totalAmount || 0)}
-                    </td>
-                    <td className="table-cell">
-                      <button
-                        onClick={() => openDetailsModal(shift)}
-                        className="p-1 text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
-                      >
-                        <FileText className="w-5 h-5" />
-                      </button>
-                    </td>
-                  </tr>
-                )
-              })}
-              {sortedShifts.length === 0 && (
+            <tbody>
+              {sortedShifts.length ? (
+                sortedShifts.map((sh) => {
+                  const shiftSales = getShiftSales(sh.id);
+                  const total = shiftSales.reduce((s, v) => s + v.total, 0);
+                  return (
+                    <tr
+                      key={sh.id}
+                      className="border-l-4 border-transparent hover:border-sky-500 even:bg-slate-50/60 dark:even:bg-slate-800/30"
+                    >
+                      <td className="px-4 py-2 whitespace-nowrap font-medium">
+                        {sh.employeeName}
+                      </td>
+                      <td className="px-4 py-2 whitespace-nowrap">{sh.businessName}</td>
+                      <td className="px-4 py-2 whitespace-nowrap">
+                        {new Date(sh.startTime).toLocaleString()}
+                      </td>
+                      <td className="px-4 py-2 whitespace-nowrap">
+                        {sh.endTime ? new Date(sh.endTime).toLocaleString() : "—"}
+                      </td>
+                      <td className="px-4 py-2">
+                        <span
+                          className={`inline-block px-2 py-0.5 rounded-full text-[11px] font-semibold ${sh.active
+                            ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300"
+                            : "bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300"
+                            }`}
+                        >
+                          {sh.active ? "Activo" : "Completado"}
+                        </span>
+                      </td>
+                      <td className="px-4 py-2 text-center">{sh.sales}</td>
+                      <td className="px-4 py-2 font-semibold text-emerald-600 dark:text-emerald-400">
+                        ${formatPrice(total)}
+                      </td>
+                      <td className="px-4 py-2">
+                        <button
+                          onClick={() => openDetailsModal(sh)}
+                          className="p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-700"
+                        >
+                          <FileText className="h-5 w-5 text-sky-600 dark:text-sky-400" />
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })
+              ) : (
                 <tr>
-                  <td colSpan={8} className="table-cell text-center py-8">
-                    No se encontraron turnos para el filtro seleccionado.
+                  <td
+                    colSpan={8}
+                    className="py-10 text-center text-slate-500 dark:text-slate-400"
+                  >
+                    No se encontraron turnos.
                   </td>
                 </tr>
               )}
@@ -211,170 +237,172 @@ export default function ShiftsPage() {
         </div>
       </div>
 
-      {/* Modal de Detalles del Turno */}
+      {/* ───────── Modal detalles ───────── */}
       {isDetailsModalOpen && selectedShift && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-            <div className="p-6 border-b border-gray-200 dark:border-gray-700">
-              <div className="flex justify-between items-start">
-                <div>
-                  <h2 className="text-xl font-semibold">Detalles del Turno</h2>
-                  <p className="text-sm text-gray-500 dark:text-gray-400">
-                    {selectedShift.employeeName} - {selectedShift.businessName}
-                  </p>
-                </div>
-                <button
-                  onClick={() => setIsDetailsModalOpen(false)}
-                  className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
-                >
-                  &times;
-                </button>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+          <div className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-xl bg-white/80 dark:bg-slate-800/80 shadow-xl ring-1 ring-slate-200 dark:ring-slate-700 animate-scale-in">
+            {/* Header */}
+            <header className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-700">
+              <div>
+                <h2 className="text-lg font-semibold">Detalles del turno</h2>
+                <p className="text-xs text-slate-600 dark:text-slate-400">
+                  {selectedShift.employeeName} — {selectedShift.businessName}
+                </p>
               </div>
-            </div>
-            <div className="p-6">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-                <div>
-                  <p className="text-sm text-gray-500 dark:text-gray-400">
-                    Hora de Inicio
-                  </p>
-                  <p className="font-medium">
-                    {new Date(selectedShift.startTime).toLocaleString()}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-sm text-gray-500 dark:text-gray-400">
-                    Hora de Fin
-                  </p>
-                  <p className="font-medium">
-                    {selectedShift.endTime
+              <button
+                onClick={() => setIsDetailsModalOpen(false)}
+                className="p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-700"
+              >
+                <svg viewBox="0 0 24 24" className="h-5 w-5 text-slate-500 dark:text-slate-400" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
+            </header>
+
+            {/* Body */}
+            <div className="px-6 py-6 space-y-8">
+              {/* Info grid */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                <Info label="Inicio" value={new Date(selectedShift.startTime).toLocaleString()} />
+                <Info
+                  label="Fin"
+                  value={
+                    selectedShift.endTime
                       ? new Date(selectedShift.endTime).toLocaleString()
-                      : "Aún activo"}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-sm text-gray-500 dark:text-gray-400">Estado</p>
-                  <p className="font-medium">
+                      : "Aún activo"
+                  }
+                />
+                <Info
+                  label="Estado"
+                  value={
                     <span
-                      className={`px-2 py-1 rounded text-xs font-medium ${
-                        selectedShift.active
-                          ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300"
-                          : "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300"
-                      }`}
+                      className={`inline-block px-2 py-0.5 rounded-full text-[11px] font-semibold ${selectedShift.active
+                        ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300"
+                        : "bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300"
+                        }`}
                     >
                       {selectedShift.active ? "Activo" : "Completado"}
                     </span>
-                  </p>
-                </div>
-                <div>
-                  <p className="text-sm text-gray-500 dark:text-gray-400">
-                    Total de Ventas
-                  </p>
-                  <p className="font-medium">{selectedShift.sales}</p>
-                </div>
+                  }
+                />
+                <Info label="Ventas" value={selectedShift.sales} />
               </div>
 
-              <div className="mb-6">
-                <h3 className="text-lg font-semibold mb-2">Métodos de Pago</h3>
-                <div className="grid grid-cols-5 gap-4">
-                  <div className="bg-green-100 dark:bg-green-900 p-3 rounded">
-                    <p className="text-sm text-gray-500 dark:text-gray-400">
-                      Efectivo
-                    </p>
-                    <p className="font-medium">
-                      ${formatPrice(paymentTotals["cash"] || 0)}
-                    </p>
-                  </div>
-                  <div className="bg-blue-100 dark:bg-blue-900 p-3 rounded">
-                    <p className="text-sm text-gray-500 dark:text-gray-400">
-                      Tarjeta
-                    </p>
-                    <p className="font-medium">
-                      ${formatPrice(paymentTotals["card"] || 0)}
-                    </p>
-                  </div>
-                  <div className="bg-purple-100 dark:bg-purple-900 p-3 rounded">
-                    <p className="text-sm text-gray-500 dark:text-gray-400">
-                      Transferencia
-                    </p>
-                    <p className="font-medium">
-                      ${formatPrice(paymentTotals["transfer"] || 0)}
-                    </p>
-                  </div>
-                  <div className="bg-sky-100 dark:bg-sky-900 p-3 rounded">
-                    <p className="text-sm text-gray-500 dark:text-gray-400">
-                      Mercadopago
-                    </p>
-                    <p className="font-medium">
-                      ${formatPrice(paymentTotals["mercadopago"] || 0)}
-                    </p>
-                  </div>
-                  <div className="bg-orange-100 dark:bg-orange-900 p-3 rounded">
-                    <p className="text-sm text-gray-500 dark:text-gray-400">
-                      Rappi
-                    </p>
-                    <p className="font-medium">
-                      ${formatPrice(paymentTotals["rappi"] || 0)}
-                    </p>
-                  </div>
-                </div>
-              </div>
+              {/* Métodos de pago (fusión transfer + MP) */}
+              {(() => {
+                const shiftSales = getShiftSales(selectedShift.id);
+                const totals = shiftSales.reduce(
+                  (acc, s) => {
+                    const k =
+                      s.paymentMethod === "mercadopago" ? "transfer" : s.paymentMethod;
+                    acc[k] = (acc[k] || 0) + s.total;
+                    return acc;
+                  },
+                  {} as Record<string, number>
+                );
 
-              <h3 className="text-lg font-semibold mb-3">
-                Ventas Durante Este Turno
-              </h3>
-              {getShiftSales(selectedShift.id).length > 0 ? (
-                <div className="table-container">
-                  <table className="table">
-                    <thead className="table-header">
-                      <tr>
-                        <th className="table-header-cell">Hora</th>
-                        <th className="table-header-cell">Productos</th>
-                        <th className="table-header-cell">Método de Pago</th>
-                        <th className="table-header-cell">Total</th>
-                      </tr>
-                    </thead>
-                    <tbody className="table-body">
-                      {getShiftSales(selectedShift.id).map((sale) => (
-                        <tr key={sale.id} className="table-row">
-                          <td className="table-cell">
-                            {new Date(sale.timestamp).toLocaleTimeString()}
-                          </td>
-                          <td className="table-cell">
-                            <div className="space-y-1">
-                              {sale.items.map((item, index) => (
-                                <div key={index} className="text-xs">
-                                  {item.quantity}x {item.productName} - $
-                                  {formatPrice(item.total)}
+                type Tile = { key: string; label: string; cls: string };
+                const tiles: Tile[] = [
+                  { key: "cash", label: "Efectivo", cls: "bg-emerald" },
+                  { key: "card", label: "Tarjeta", cls: "bg-indigo" },
+                  { key: "transfer", label: "Transferencia", cls: "bg-purple dark:bg-emerald" },
+                  { key: "rappi", label: "Rappi", cls: "bg-orange" },
+                ];
+
+                return (
+                  <section>
+                    <h3 className="text-sm font-semibold mb-2 uppercase tracking-wide">
+                      Métodos de pago
+                    </h3>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                      {tiles.map(({ key, label, cls }) => (
+                        <div
+                          key={key}
+                          className={`${cls}-100 dark:${cls}-900/40 rounded p-3`}
+                        >
+                          <p className="text-[11px] text-slate-600 dark:text-slate-400">
+                            {label}
+                          </p>
+                          <p className="font-medium">
+                            ${formatPrice(totals[key] || 0)}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                );
+              })()}
+
+              {/* Ventas tabla */}
+              <section>
+                <h3 className="text-sm font-semibold mb-2 uppercase tracking-wide">
+                  Ventas del turno
+                </h3>
+                {getShiftSales(selectedShift.id).length ? (
+                  <div className="overflow-x-auto rounded-lg ring-1 ring-slate-200 dark:ring-slate-700">
+                    <table className="min-w-full text-xs">
+                      <thead className="bg-slate-100 dark:bg-slate-700/70">
+                        <tr>
+                          {["Hora", "Detalle", "Método", "Total"].map((h) => (
+                            <th key={h} className="px-3 py-2 text-left font-semibold">
+                              {h}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {getShiftSales(selectedShift.id).map((s) => (
+                          <tr key={s.id} className="even:bg-slate-50/60 dark:even:bg-slate-800/30">
+                            <td className="px-3 py-1.5 whitespace-nowrap">
+                              {new Date(s.timestamp).toLocaleTimeString()}
+                            </td>
+                            <td className="px-3 py-1.5">
+                              {s.items.map((it, i) => (
+                                <div key={i}>
+                                  {it.quantity}× {it.productName} – $
+                                  {formatPrice(it.total)}
                                 </div>
                               ))}
-                            </div>
-                          </td>
-                          <td className="table-cell">
-                            <span
-                              className={`px-2 py-1 rounded text-xs font-medium ${getPaymentMethodClass(
-                                sale.paymentMethod
-                              )}`}
-                            >
-                              {translatePaymentMethod(sale.paymentMethod)}
-                            </span>
-                          </td>
-                          <td className="table-cell font-medium">
-                            ${formatPrice(sale.total)}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              ) : (
-                <p className="text-gray-500 dark:text-gray-400">
-                  No hay ventas registradas durante este turno.
-                </p>
-              )}
+                            </td>
+                            <td className="px-3 py-1.5">
+                              <span
+                                className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-medium ${getPaymentMethodClass(
+                                  s.paymentMethod === "mercadopago" ? "transfer" : s.paymentMethod
+                                )}`}
+                              >
+                                {translatePaymentMethod(
+                                  s.paymentMethod === "mercadopago" ? "transfer" : s.paymentMethod
+                                )}
+                              </span>
+                            </td>
+                            <td className="px-3 py-1.5 font-medium">
+                              ${formatPrice(s.total)}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <p className="text-slate-600 dark:text-slate-400">
+                    Sin ventas registradas.
+                  </p>
+                )}
+              </section>
             </div>
           </div>
         </div>
       )}
     </div>
-  )
+  );
+
+  /* Helper componente */
+  function Info({ label, value }: { label: string; value: React.ReactNode }) {
+    return (
+      <div>
+        <p className="text-xs text-slate-500 dark:text-slate-400">{label}</p>
+        <p className="font-medium">{value}</p>
+      </div>
+    );
+  }
+  /* ═════════ END RETURN UI ═════════ */
+
 }

@@ -152,167 +152,175 @@ export default function ExpensesPage() {
   })
 
   const totalExpenses = filteredExpenses.reduce((sum, expense) => sum + expense.amount, 0)
-
+  /* ────────── helper global ────────── */
+  const formatCurrency = (n: number) =>
+    n.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const isLoading = expensesLoading || businessesLoading
+  /* ╔═════════ LOADING  ─── igual que antes ═════════ */
+
   if (isLoading) {
     return (
-      <div className="flex justify-center items-center h-64">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-sky-600 mx-auto"></div>
-          <p className="mt-4 text-slate-600 dark:text-slate-400">Cargando datos de gastos...</p>
-        </div>
+      <div className="flex flex-col items-center justify-center h-64 gap-4">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-sky-600" />
+        <p className="text-slate-600 dark:text-slate-400 uppercase">
+          Cargando gastos…
+        </p>
       </div>
-    )
+    );
   }
 
+  /* ╔═════════ COMIENZA EL RETURN PRINCIPAL ═════════ */
   return (
-    <div className="space-y-6">
-      {/* Encabezado */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+    <div className="space-y-8">
+      {/* ───── Encabezado ───── */}
+      <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
-          <h1 className="app-title">Gastos</h1>
+          <h1 className="text-2xl md:text-3xl font-bold tracking-tight">
+            Gastos
+          </h1>
           <p className="text-slate-600 dark:text-slate-400">
             Administra los gastos de todos los negocios
           </p>
         </div>
-        <button onClick={openAddModal} className="btn btn-primary flex items-center">
-          <Plus className="w-5 h-5 mr-1" />
-          Agregar Gasto
-        </button>
-      </div>
 
-      {/* Filtros */}
-      <div className="app-card">
-        <div className="flex flex-col md:flex-row gap-4">
-          <div className="flex-1">
-            <label htmlFor="businessFilter" className="label flex items-center gap-2">
-              <Search className="h-4 w-4" /> Negocio
-            </label>
+        <button
+          onClick={openAddModal}
+          className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-full px-4 py-2 shadow focus:outline-none focus:ring-2 focus:ring-indigo-500"
+        >
+          <Plus className="h-5 w-5" />
+          Agregar gasto
+        </button>
+      </header>
+
+      {/* ───── Filtros ───── */}
+      <div className="bg-white dark:bg-slate-800 rounded-xl shadow ring-1 ring-slate-200 dark:ring-slate-700">
+        <div className="flex flex-col md:flex-row flex-wrap gap-4 p-4">
+          {/* Negocio */}
+          <div className="flex-1 min-w-[180px]">
+            <label className="block text-xs font-medium mb-1">Negocio</label>
             <select
-              id="businessFilter"
               value={selectedBusinessId}
               onChange={(e) => setSelectedBusinessId(e.target.value)}
-              className="input"
+              className="appearance-none bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-full px-3 py-1.5 text-xs shadow-sm w-full focus:outline-none focus:ring-2 focus:ring-indigo-500"
             >
-              <option value="all">Todos los Negocios</option>
-              {businesses.map((business) => (
-                <option key={business.id} value={business.id}>
-                  {business.name}
+              <option value="all">Todos los negocios</option>
+              {businesses.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.name}
                 </option>
               ))}
             </select>
           </div>
-          <div className="flex-1">
-            <label htmlFor="categoryFilter" className="label flex items-center gap-2">
-              <Search className="h-4 w-4" /> Categoría
-            </label>
+
+          {/* Categoría */}
+          <div className="flex-1 min-w-[180px]">
+            <label className="block text-xs font-medium mb-1">Categoría</label>
             <select
-              id="categoryFilter"
               value={selectedCategory}
               onChange={(e) => setSelectedCategory(e.target.value)}
-              className="input"
+              className="appearance-none bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-full px-3 py-1.5 text-xs shadow-sm w-full focus:outline-none focus:ring-2 focus:ring-indigo-500"
             >
-              <option value="all">Todas las Categorías</option>
-              {allCategories.map((category) => (
-                <option key={category} value={category}>
-                  {category}
+              <option value="all">Todas</option>
+              {allCategories.map((c) => (
+                <option key={c} value={c}>
+                  {c}
                 </option>
               ))}
             </select>
           </div>
-          <div className="flex-1">
-            <label className="label flex items-center gap-2">
-              <Calendar className="h-4 w-4" /> Rango de Fechas
-            </label>
+
+          {/* Rango fechas */}
+          <div className="flex-1 min-w-[220px]">
+            <label className="block text-xs font-medium mb-1">Rango de fechas</label>
             <div className="flex gap-2">
               <input
                 type="date"
                 value={dateRange.start}
                 onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })}
-                className="input"
+                className="flex-1 appearance-none bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-full px-3 py-1.5 text-xs shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
               />
               <input
                 type="date"
                 value={dateRange.end}
                 onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })}
-                className="input"
+                className="flex-1 appearance-none bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-full px-3 py-1.5 text-xs shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
               />
             </div>
           </div>
         </div>
-        <div className="mt-4 pt-4 border-t border-slate-200 dark:border-slate-700">
-          <div className="flex justify-between items-center">
-            <p className="text-slate-600 dark:text-slate-400">
-              Mostrando {filteredExpenses.length} gastos
-            </p>
-            <p className="font-semibold">
-              Total:{" "}
-              <span className="text-red-600 dark:text-red-400">
-                ${totalExpenses.toFixed(2)}
-              </span>
-            </p>
-          </div>
+
+        {/* Resumen */}
+        <div className="border-t border-slate-200 dark:border-slate-700 px-4 py-3 flex justify-between">
+          <p className="text-slate-600 dark:text-slate-400 text-sm">
+            Mostrando {filteredExpenses.length} gastos
+          </p>
+          <p className="text-sm font-semibold">
+            Total:{" "}
+            <span className="text-red-600 dark:text-red-400">
+              ${formatCurrency(totalExpenses)}
+            </span>
+          </p>
         </div>
       </div>
 
-      {/* Tabla de Gastos */}
-      <div className="app-card p-0 overflow-hidden">
-        <div className="table-container">
-          <table className="table">
-            <thead className="table-header">
+      {/* ───── Tabla Gastos ───── */}
+      <div className="bg-white dark:bg-slate-800 rounded-xl shadow ring-1 ring-slate-200 dark:ring-slate-700 overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="min-w-full text-sm">
+            <thead className="bg-slate-100 dark:bg-slate-700/70 backdrop-blur sticky top-0 z-10 text-[11px] uppercase tracking-wide">
               <tr>
-                <th className="table-header-cell">Fecha</th>
-                <th className="table-header-cell">Negocio</th>
-                <th className="table-header-cell">Categoría</th>
-                <th className="table-header-cell">Descripción</th>
-                <th className="table-header-cell">Monto</th>
-                <th className="table-header-cell">Acciones</th>
+                {["Fecha", "Negocio", "Categoría", "Descripción", "Monto", "Acciones"].map((h) => (
+                  <th key={h} className="px-4 py-3 text-left font-semibold">
+                    {h}
+                  </th>
+                ))}
               </tr>
             </thead>
-            <tbody className="table-body">
-              {filteredExpenses.map((expense) => {
-                // Dividimos la parte de fecha de la parte de hora
-                // Supongamos que la BD almacena "YYYY-MM-DDTHH:mm:ss"
-                const datePart = expense.date.split("T")[0] // => "YYYY-MM-DD"
-                // Forzamos T12 para mostrarlo correctamente
-                const displayDate = new Date(datePart + "T12:00:00").toLocaleDateString()
 
+            <tbody>
+              {filteredExpenses.map((ex) => {
+                const displayDate = new Date(ex.date.split("T")[0] + "T12:00:00").toLocaleDateString();
                 return (
-                  <tr key={expense.id} className="table-row">
-                    <td className="table-cell">{displayDate}</td>
-                    <td className="table-cell">{expense.businessName}</td>
-                    <td className="table-cell">
-                      <span className="badge badge-info">{expense.category}</span>
+                  <tr
+                    key={ex.id}
+                    className="border-l-4 border-transparent hover:border-sky-500 even:bg-slate-50/60 dark:even:bg-slate-800/30"
+                  >
+                    <td className="px-4 py-2 whitespace-nowrap">{displayDate}</td>
+                    <td className="px-4 py-2 whitespace-nowrap">{ex.businessName}</td>
+                    <td className="px-4 py-2">
+                      <span className="inline-block px-2 py-0.5 rounded-full bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300 text-[11px] font-semibold">
+                        {ex.category}
+                      </span>
                     </td>
-                    <td className="table-cell">{expense.description}</td>
-                    <td className="table-cell font-medium text-red-600 dark:text-red-400">
-                      ${expense.amount.toFixed(2)}
+                    <td className="px-4 py-2">{ex.description}</td>
+                    <td className="px-4 py-2 font-semibold text-red-600 dark:text-red-400">
+                      ${formatCurrency(ex.amount)}
                     </td>
-                    <td className="table-cell">
-                      <div className="flex space-x-2">
+                    <td className="px-4 py-2">
+                      <div className="flex gap-2">
                         <button
-                          onClick={() => openEditModal(expense)}
-                          className="p-1 text-sky-600 hover:text-sky-800 dark:text-sky-400 dark:hover:text-sky-300"
-                          aria-label="Editar gasto"
+                          onClick={() => openEditModal(ex)}
+                          className="p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-700"
+                          aria-label="Editar"
                         >
-                          <Edit className="w-5 h-5" />
+                          <Edit className="h-5 w-5 text-sky-600 dark:text-sky-400" />
                         </button>
                         <button
-                          onClick={() => openDeleteModal(expense)}
-                          className="p-1 text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300"
-                          aria-label="Eliminar gasto"
+                          onClick={() => openDeleteModal(ex)}
+                          className="p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-700"
+                          aria-label="Eliminar"
                         >
-                          <Trash2 className="w-5 h-5" />
+                          <Trash2 className="h-5 w-5 text-red-600 dark:text-red-400" />
                         </button>
                       </div>
                     </td>
                   </tr>
-                )
+                );
               })}
-              {filteredExpenses.length === 0 && (
+              {!filteredExpenses.length && (
                 <tr>
-                  <td colSpan={6} className="table-cell text-center py-8">
-                    No se encontraron gastos para los filtros seleccionados.
+                  <td colSpan={6} className="py-10 text-center text-slate-500 dark:text-slate-400">
+                    No se encontraron gastos.
                   </td>
                 </tr>
               )}
@@ -320,150 +328,6 @@ export default function ExpensesPage() {
           </table>
         </div>
       </div>
-
-      {/* Modal Agregar/Editar Gasto */}
-      {isModalOpen && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4 fade-in">
-          <div className="bg-white dark:bg-slate-900 rounded-lg shadow-lg max-w-md w-full scale-in">
-            <div className="flex justify-between items-center p-6 border-b border-slate-200 dark:border-slate-700">
-              <h2 className="text-xl font-semibold text-slate-900 dark:text-white">
-                {currentExpense ? "Editar Gasto" : "Agregar Nuevo Gasto"}
-              </h2>
-              <button
-                onClick={() => setIsModalOpen(false)}
-                className="text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-300 transition-colors"
-                aria-label="Cerrar modal"
-              >
-                <X className="w-6 h-6" />
-              </button>
-            </div>
-            <form onSubmit={handleSubmit} className="p-6 space-y-4">
-              <div>
-                <label htmlFor="businessId" className="label">
-                  Negocio
-                </label>
-                <select
-                  id="businessId"
-                  name="businessId"
-                  value={formData.businessId}
-                  onChange={handleInputChange}
-                  required
-                  className="input"
-                >
-                  {businesses.map((business) => (
-                    <option key={business.id} value={business.id}>
-                      {business.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label htmlFor="category" className="label">
-                  Categoría
-                </label>
-                <select
-                  id="category"
-                  name="category"
-                  value={formData.category}
-                  onChange={handleInputChange}
-                  required
-                  className="input"
-                >
-                  <option value="" disabled>
-                    Seleccione una categoría
-                  </option>
-                  <option value="Alquiler">Alquiler</option>
-                  <option value="Servicios">Servicios</option>
-                  <option value="Sueldos">Sueldos</option>
-                  <option value="Impuestos">Impuestos</option>
-                  <option value="Insumos">Insumos</option>
-                  <option value="Mantenimiento">Mantenimiento</option>
-                  <option value="Marketing">Marketing</option>
-                  <option value="Transporte">Transporte</option>
-                  <option value="Proveedores">Proveedores</option>
-                  {[...new Set(
-                    categoriesInDB.filter((cat) =>
-                      ![
-                        "Alquiler",
-                        "Servicios",
-                        "Sueldos",
-                        "Impuestos",
-                        "Insumos",
-                        "Mantenimiento",
-                        "Marketing",
-                        "Transporte",
-                        "Proveedores",
-                        "Otros",
-                      ].includes(cat)
-                    )
-                  )].map((category) => (
-                    <option key={category} value={category}>
-                      {category}
-                    </option>
-                  ))}
-                  <option value="Otros">Otros</option>
-                </select>
-              </div>
-              <div>
-                <label htmlFor="amount" className="label">
-                  Monto
-                </label>
-                <input
-                  type="number"
-                  id="amount"
-                  name="amount"
-                  value={formData.amount}
-                  onChange={handleInputChange}
-                  min="0"
-                  step="0.01"
-                  required
-                  className="input"
-                />
-              </div>
-              <div>
-                <label htmlFor="date" className="label">
-                  Fecha
-                </label>
-                <input
-                  type="date"
-                  id="date"
-                  name="date"
-                  value={formData.date}
-                  onChange={handleInputChange}
-                  required
-                  className="input"
-                />
-              </div>
-              <div>
-                <label htmlFor="description" className="label">
-                  Descripción
-                </label>
-                <textarea
-                  id="description"
-                  name="description"
-                  value={formData.description}
-                  onChange={handleInputChange}
-                  rows={3}
-                  className="input"
-                  placeholder="Ingresa una descripción para este gasto"
-                ></textarea>
-              </div>
-              <div className="flex justify-end space-x-3 pt-4">
-                <button
-                  type="button"
-                  onClick={() => setIsModalOpen(false)}
-                  className="btn btn-secondary"
-                >
-                  Cancelar
-                </button>
-                <button type="submit" className="btn btn-primary">
-                  {currentExpense ? "Actualizar Gasto" : "Agregar Gasto"}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
 
       {/* Modal de Confirmación de Eliminación */}
       {isDeleteModalOpen && (
@@ -476,7 +340,7 @@ export default function ExpensesPage() {
               <p className="mb-6 text-slate-600 dark:text-slate-400">
                 ¿Estás seguro de que deseas eliminar el gasto de{" "}
                 <span className="font-semibold text-red-600 dark:text-red-400">
-                  ${currentExpense?.amount.toFixed(2)}
+                  ${formatCurrency(currentExpense?.amount ?? 0)}
                 </span>{" "}
                 para {currentExpense?.category}? Esta acción no se puede deshacer.
               </p>
@@ -495,6 +359,147 @@ export default function ExpensesPage() {
           </div>
         </div>
       )}
+      {/* ───── Modal Agregar / Editar ───── */}
+      {isModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-white dark:bg-slate-900 rounded-lg shadow-lg max-w-md w-full animate-scale-in">
+            {/* Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-700">
+              <h2 className="text-lg font-semibold">
+                {currentExpense ? "Editar gasto" : "Nuevo gasto"}
+              </h2>
+              <button
+                onClick={() => setIsModalOpen(false)}
+                className="p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-700"
+                aria-label="Cerrar"
+              >
+                <X className="h-5 w-5 text-slate-500 dark:text-slate-400" />
+              </button>
+            </div>
+
+            {/* Formulario */}
+            <form onSubmit={handleSubmit} className="px-6 py-5 space-y-4">
+              {/* Negocio */}
+              <div>
+                <label className="block text-xs font-medium mb-1">Negocio</label>
+                <select
+                  name="businessId"
+                  value={formData.businessId}
+                  onChange={handleInputChange}
+                  required
+                  className="appearance-none bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-full px-3 py-1.5 text-xs w-full focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                >
+                  {businesses.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Categoría */}
+              <div>
+                <label className="block text-xs font-medium mb-1">Categoría</label>
+                <select
+                  name="category"
+                  value={formData.category}
+                  onChange={handleInputChange}
+                  required
+                  className="appearance-none bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-full px-3 py-1.5 text-xs w-full focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                >
+                  {[
+                    "Alquiler",
+                    "Servicios",
+                    "Sueldos",
+                    "Impuestos",
+                    "Insumos",
+                    "Mantenimiento",
+                    "Marketing",
+                    "Transporte",
+                    "Proveedores",
+                    ...categoriesInDB.filter(
+                      (c) =>
+                        ![
+                          "Alquiler",
+                          "Servicios",
+                          "Sueldos",
+                          "Impuestos",
+                          "Insumos",
+                          "Mantenimiento",
+                          "Marketing",
+                          "Transporte",
+                          "Proveedores",
+                          "Otros",
+                        ].includes(c)
+                    ),
+                    "Otros",
+                  ].map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Monto */}
+              <div>
+                <label className="block text-xs font-medium mb-1">Monto</label>
+                <input
+                  type="number"
+                  name="amount"
+                  min="0"
+                  step="0.01"
+                  value={formData.amount}
+                  onChange={handleInputChange}
+                  required
+                  className="appearance-none bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-full px-3 py-1.5 text-xs w-full focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+
+              {/* Fecha */}
+              <div>
+                <label className="block text-xs font-medium mb-1">Fecha</label>
+                <input
+                  type="date"
+                  name="date"
+                  value={formData.date}
+                  onChange={handleInputChange}
+                  required
+                  className="appearance-none bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-full px-3 py-1.5 text-xs w-full focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+
+              {/* Descripción */}
+              <div>
+                <label className="block text-xs font-medium mb-1">Descripción</label>
+                <textarea
+                  name="description"
+                  rows={3}
+                  value={formData.description}
+                  onChange={handleInputChange}
+                  placeholder="Descripción del gasto…"
+                  className="appearance-none bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-md px-3 py-1.5 text-xs w-full focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+
+              {/* Botones */}
+              <div className="flex justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setIsModalOpen(false)}
+                  className="btn btn-secondary"
+                >
+                  Cancelar
+                </button>
+                <button type="submit" className="btn btn-primary">
+                  {currentExpense ? "Actualizar" : "Agregar"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
-  )
+  );
+
 }
