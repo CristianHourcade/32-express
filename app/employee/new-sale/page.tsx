@@ -1,800 +1,580 @@
-"use client";
+/* ----------------------------------------------------------------
+   src/app/employee/new-sale/page.tsx
+   ---------------------------------------------------------------- */
 
-import { useEffect, useState, useMemo, useRef } from "react";
-import { useRouter } from "next/navigation";
-import { useDispatch, useSelector } from "react-redux";
-import type { AppDispatch, RootState } from "@/lib/redux/store";
-import { editProduct } from "@/lib/redux/slices/productSlice";
-import { createSale } from "@/lib/redux/slices/salesSlice";
-import { getShifts } from "@/lib/redux/slices/shiftSlice";
-import {
-  Search,
-  ShoppingCart,
-  Plus,
-  Minus,
-  Trash2,
-  X,
-  Check,
-  AlertTriangle,
-} from "lucide-react";
-import Link from "next/link";
-import { supabase } from "@/lib/supabase";
+   "use client";
 
-type CartItem = {
-  productId: string;
-  productName: string;
-  price: number;
-  quantity: number;
-  total: number;
-};
-
-// LISTA DE CATEGORÍAS PARA CREAR/EDITAR PRODUCTOS
-const categories = [
-  "ALMACEN",
-  "CIGARRILLOS",
-  "GOLOSINAS",
-  "BEBIDA",
-  "CERVEZA",
-  "FIAMBRES",
-  "TABACO",
-  "HUEVOS",
-  "HIGIENE",
-  "ALCOHOL",
-];
-
-// Helper que extrae la categoría al inicio del nombre
-function extractCategory(name: string): {
-  category: string | null;
-  baseName: string;
-} {
-  const parts = name.trim().split(" ");
-  if (parts.length > 1 && categories.includes(parts[0].toUpperCase())) {
-    return {
-      category: parts[0].toUpperCase(),
-      baseName: parts.slice(1).join(" "),
-    };
-  }
-  return { category: null, baseName: name };
-}
-
-// Hook para debounce
-function useDebounce<T>(value: T, delay: number): T {
-  const [debounced, setDebounced] = useState(value);
-  useEffect(() => {
-    const timer = setTimeout(() => setDebounced(value), delay);
-    return () => clearTimeout(timer);
-  }, [value, delay]);
-  return debounced;
-}
-
-export default function NewSalePage() {
-  const router = useRouter();
-  const dispatch = useDispatch<AppDispatch>();
-  const { user } = useSelector((state: RootState) => state.auth);
-  const { shifts, loading: shiftsLoading } = useSelector(
-    (state: RootState) => state.shifts
-  );
-  const { employees } = useSelector((state: RootState) => state.employees);
-
-  // Estado para guardar productos del negocio actual
-  const [products, setProducts] = useState<any[]>([]);
-  const [productsLoading, setProductsLoading] = useState(true);
-
-  // Estado para el término de búsqueda y usamos debounce de 300ms
-  const [searchQuery, setSearchQuery] = useState("");
-  const debouncedSearchQuery = useDebounce(searchQuery, 300);
-
-  // Estados para el carrito y la venta
-  const [cart, setCart] = useState<any[]>([]);
-  const [paymentMethod, setPaymentMethod] = useState<
-    "cash" | "card" | "transfer" | "mercadopago" | "rappi"
-  >("cash");
-  const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [successMessage, setSuccessMessage] = useState("");
-
-  const businessId = user?.businessId;
-
-  // Ref para mantener siempre el foco en el input de búsqueda
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  // Función para cargar productos
-  const fetchProducts = async () => {
-    if (!businessId) return;
-    setProductsLoading(true);
-    try {
-      const pageSize = 1000;
-      let page = 0;
-      let allProducts: any[] = [];
-      let done = false;
-      while (!done) {
-        const from = page * pageSize;
-        const to = from + pageSize - 1;
-        const { data, error } = await supabase
-          .from("products")
-          .select("*")
-          .eq("business_id", businessId)
-          .range(from, to);
-        if (error) throw error;
-        if (data && data.length > 0) {
-          allProducts = allProducts.concat(data);
-          if (data.length < pageSize) {
-            done = true;
-          } else {
-            page++;
-          }
-        } else {
-          done = true;
-        }
-      }
-      const { data, error } = await supabase
-        .from("promotions")
-        .select("*")
-        .eq("businesses_id", businessId);
-
-      const listProm = data.map((promo) => {
-        return {
-          business_id: promo.businesses_id,
-          code: "Promo",
-          id: promo.id,
-          name: promo.name,
-          selling_price: promo.price,
-          products: promo.products,
-          stock: 999,
-        };
-      });
-      setProducts([...listProm, ...allProducts]);
-    } catch (error) {
-      console.error("Error al cargar productos:", error);
-      setProducts([]);
-    } finally {
-      setProductsLoading(false);
-    }
-  };
-
-  // Cargar productos al montar el componente
-  useEffect(() => {
-    if (businessId) {
-      fetchProducts();
-    }
-  }, [businessId]);
-
-  // Cargar turnos
-  useEffect(() => {
-    dispatch(getShifts());
-  }, [dispatch, user]);
-
-  // Listener global para capturar entrada desde el escáner (solo si el input NO está enfocado)
-  useEffect(() => {
-    let barcodeBuffer = "";
-    let commitTimeout: ReturnType<typeof setTimeout>;
-    // Tiempo en ms que define el fin de un escaneo al no recibir nuevas teclas
-    const interKeyDelay = 300;
-
-    const handleKeyPress = (event: KeyboardEvent) => {
-      // Si el input está enfocado, se asume que el usuario está escribiendo manualmente
-      if (document.activeElement === inputRef.current) {
-        return;
-      }
-
-      // Si ya hay un resultado de un escaneo anterior y el buffer está vacío,
-      // es el inicio de un nuevo escaneo, así que se limpia el valor previo.
-      if (!barcodeBuffer && searchQuery) {
-        setSearchQuery("");
-      }
-
-      // Reinicia el timeout para detectar la inactividad entre teclas
-      clearTimeout(commitTimeout);
-      commitTimeout = setTimeout(() => {
-        // Opcional: se puede verificar la longitud mínima para confirmar que es un código válido
-        if (barcodeBuffer.length > 3) {
-          setSearchQuery(barcodeBuffer);
-        }
-        // Reinicia el buffer para el próximo escaneo
-        barcodeBuffer = "";
-      }, interKeyDelay);
-    };
-
-    document.addEventListener("keypress", handleKeyPress);
-    return () => {
-      clearTimeout(commitTimeout);
-      document.removeEventListener("keypress", handleKeyPress);
-    };
-  }, [searchQuery]);
-
-  // Enfoque inicial en el input al montar el componente
-  useEffect(() => {
-    inputRef.current?.focus();
-  }, []);
-
-  // Obtener empleado actual
-  const currentEmployee = useMemo(() => {
-    if (!user) return null;
-    const empById = employees.find((emp) => emp.userId === user.id);
-    const empByEmail = !empById
-      ? employees.find(
-          (emp) => emp.email.toLowerCase() === user.email.toLowerCase()
-        )
-      : null;
-    return empById || empByEmail;
-  }, [employees, user]);
-
-  // Obtener turno activo
-  const activeShift = useMemo(() => {
-    if (!currentEmployee) return null;
-    return shifts.find(
-      (shift) => shift.employeeId === currentEmployee.id && shift.active
-    );
-  }, [shifts, currentEmployee]);
-
-  // Filtrado de productos usando el término debounced
-  const filteredProducts = useMemo(() => {
-    if (!debouncedSearchQuery.trim()) return [];
-    const lowerQuery = debouncedSearchQuery.toLowerCase();
-    return products.filter(
-      (p) =>
-        (p.name ?? "").toLowerCase().includes(lowerQuery) ||
-        (p.code ?? "").toLowerCase().includes(lowerQuery) ||
-        (p.description ?? "").toLowerCase().includes(lowerQuery)
-    );
-  }, [debouncedSearchQuery, products]);
-
-  // Funciones para el carrito
-  const addToCart = (product: any) => {
-    const existingItemIndex = cart.findIndex(
-      (item) => item.productId === product.id
-    );
-    if (existingItemIndex >= 0) {
-      if (cart[existingItemIndex].quantity >= product.stock) return;
-      const updatedCart = [...cart];
-      updatedCart[existingItemIndex].quantity += 1;
-      updatedCart[existingItemIndex].total =
-        updatedCart[existingItemIndex].quantity *
-        updatedCart[existingItemIndex].price;
-      setCart(updatedCart);
-    } else {
-      if (product.stock > 0) {
-        setCart([
-          ...cart,
-          {
-            productId: product.id,
-            productName: product.name,
-            price: product.selling_price || product.sellingPrice,
-            quantity: 1,
-            total: product.selling_price || product.sellingPrice,
-            listID: product.products,
-          },
-        ]);
-      }
-    }
-  };
-
-  const updateCartItemQuantity = (index: number, newQuantity: number) => {
-    if (newQuantity < 1) return;
-    const product = products.find((p) => p.id === cart[index].productId);
-    if (!product) return;
-    if (newQuantity > product.stock) newQuantity = product.stock;
-    const updatedCart = [...cart];
-    updatedCart[index].quantity = newQuantity;
-    updatedCart[index].total = newQuantity * updatedCart[index].price;
-    setCart(updatedCart);
-  };
-
-  const removeFromCart = (index: number) => {
-    setCart(cart.filter((_, i) => i !== index));
-  };
-
-  const cartTotal = useMemo(
-    () => cart.reduce((sum, item) => sum + item.total, 0),
-    [cart]
-  );
-
-  const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat("es-AR", {
-      style: "currency",
-      currency: "ARS",
-    }).format(amount);
-  };
-
-  // Completar la venta
-  const handleCompleteSale = async () => {
-    if (!activeShift || !user || cart.length === 0) return;
-    setIsProcessing(true);
-    try {
-      const saleData = {
-        businessId: businessId!,
-        businessName: activeShift.businessName,
-        employeeId: currentEmployee ? currentEmployee.id : user.id,
-        employeeName: user.name,
-        items: cart,
-        total: cartTotal,
-        paymentMethod,
-        timestamp: new Date().toISOString(),
-        shiftId: activeShift.id,
-      };
-      await dispatch(createSale(saleData));
-
-      // Actualiza stock de cada producto vendido
-      for (const item of cart) {
-        if (item.listID) {
-          item.listID.forEach(async (prom: any) => {
-            const product = products.find((p) => p.id === prom.id);
-            if (product) {
-              await dispatch(
-                editProduct({
-                  ...product,
-                  stock: product.stock - prom.qty * item.quantity,
-                })
-              );
-            }
-          });
-        } else {
-          const product = products.find((p) => p.id === item.productId);
-          if (product) {
-            await dispatch(
-              editProduct({
-                ...product,
-                stock: product.stock - item.quantity,
-              })
-            );
-          }
-        }
-      }
-
-      setSuccessMessage("Venta registrada correctamente");
-      setCart([]);
-      setPaymentMethod("cash");
-      setIsConfirmModalOpen(false);
-      // Refetchea productos para actualizar stock
-      await fetchProducts();
-      setTimeout(() => setSuccessMessage(""), 3000);
-    } catch (error) {
-      console.error("Error completing sale:", error);
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
-  const isLoading = productsLoading || shiftsLoading;
-  if (!activeShift) {
-    location.href = "/employee/dashboard";
-  }
-
-  return (
-    <div className="space-y-6">
-      {/* Cabecera */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-        <div>
-          <h1 className="text-2xl font-bold">Nueva Venta</h1>
-          <p className="text-gray-600 dark:text-gray-400">
-            Registra una nueva venta para{" "}
-            {activeShift?.businessName || "tu negocio"}
-          </p>
-        </div>
-        <Link href="/employee/dashboard" className="btn btn-secondary">
-          Volver al Dashboard
-        </Link>
-      </div>
-
-      {/* Advertencia si no hay turno activo */}
-      {!activeShift && (
-        <div className="bg-red-50 dark:bg-red-900/20 border-l-4 border-red-500 p-4 rounded-md">
-          <div className="flex">
-            <div className="flex-shrink-0">
-              <AlertTriangle
-                className="h-5 w-5 text-red-500"
-                aria-hidden="true"
-              />
-            </div>
-            <div className="ml-3">
-              <h3 className="text-sm font-medium text-red-800 dark:text-red-300">
-                No hay un turno activo
-              </h3>
-              <div className="mt-2 text-sm text-red-700 dark:text-red-200">
-                <p>
-                  Debes iniciar un turno antes de poder registrar ventas.
-                  <Link
-                    href="/employee/dashboard"
-                    className="ml-2 font-medium underline"
-                  >
-                    Ir al Dashboard
-                  </Link>
-                </p>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Mensaje de éxito */}
-      {successMessage && (
-        <div className="bg-green-50 dark:bg-green-900/20 border-l-4 border-green-500 p-4 rounded-md">
-          <div className="flex">
-            <div className="flex-shrink-0">
-              <Check className="h-5 w-5 text-green-500" aria-hidden="true" />
-            </div>
-            <div className="ml-3">
-              <p className="text-sm font-medium text-green-800 dark:text-green-300">
-                {successMessage}
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Buscador y listado de productos filtrados */}
-        <div className="lg:col-span-2 space-y-4">
-          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm p-4">
-            <div className="relative">
-              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                <Search className="h-5 w-5 text-gray-400" />
-              </div>
-              <input
-                ref={inputRef}
-                type="text"
-                className="input pl-10 w-full"
-                placeholder="Buscar productos por nombre o código..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                disabled={!activeShift}
-              />
-              <button
-                onClick={() => {
-                  setSearchQuery("");
-                  inputRef.current?.focus();
-                }}
-                className="absolute inset-y-0 right-0 pr-3 flex items-center"
-                style={{
-                  backgroundColor: "gainsboro",
-                  padding: "0px 30px",
-                  color: "black",
-                }}
-              >
-                Limpiar
-              </button>
-            </div>
-          </div>
-
-          {/* Se muestra el listado solo si hay término de búsqueda */}
-          {debouncedSearchQuery.trim() && (
-            <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm overflow-hidden">
-              <div className="p-4 border-b border-gray-200 dark:border-gray-700">
-                <h2 className="font-semibold">Resultados de la búsqueda</h2>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="min-w-full table-fixed divide-y divide-gray-200 dark:divide-gray-700">
-                  <colgroup>
-                    <col className="w-2/5" /> {/* Producto: Nombre y Código */}
-                    <col className="w-1/5" /> {/* Precio */}
-                    <col className="w-1/5" /> {/* Acciones */}
-                  </colgroup>
-                  <thead className="bg-gray-50 dark:bg-gray-700">
-                    <tr>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                        Producto
-                      </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                        Precio
-                      </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                        Acciones
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                    {filteredProducts.length > 0 && !isLoading ? (
-                      filteredProducts.map((product) => (
-                        <tr
-                          key={product.id}
-                          className="hover:bg-gray-50 dark:hover:bg-gray-700"
-                        >
-                          <td className="px-6 py-4 whitespace-normal break-words">
-                            {(() => {
-                              const { category, baseName } = extractCategory(
-                                product.name
-                              );
-                              return (
-                                <>
-                                  {category && (
-                                    <div className="text-xs font-bold text-blue-400 dark:text-blue-300">
-                                      {category}
-                                    </div>
-                                  )}
-                                  <div className="text-sm font-medium text-gray-900 dark:text-white">
-                                    {baseName.toUpperCase()}
-                                  </div>
-                                  <div
-                                    className={`text-xs mt-1 ${
-                                      product.code.toUpperCase() === "PROMO"
-                                        ? "text-red-500"
-                                        : "text-gray-500 dark:text-gray-400"
-                                    }`}
-                                  >
-                                    {product.code.toUpperCase()}!
-                                  </div>
-                                </>
-                              );
-                            })()}
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
-                            {formatCurrency(product.selling_price)}
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                            <button
-                              onClick={() => addToCart(product)}
-                              disabled={product.stock <= 0 || !activeShift}
-                              style={{
-                                backgroundColor:
-                                  product.stock <= 0 ? "red" : "green",
-                                padding: "10px 0px",
-                                width: 100,
-                                borderRadius: 5,
-                                color: product.stock <= 0 ? "black" : "white",
-                              }}
-                            >
-                              {product.stock <= 0 ? "SIN STOCK" : "AGREGAR"}
-                            </button>
-                          </td>
-                        </tr>
-                      ))
-                    ) : isLoading ? (
-                      <tr>
-                        <td
-                          colSpan={3}
-                          className="px-6 py-4 text-center text-sm text-gray-500 dark:text-gray-400"
-                        >
-                          <div className="flex justify-center items-center h-64">
-                            <div className="text-center">
-                              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-700 mx-auto"></div>
-                              <p className="mt-4 text-gray-600 dark:text-gray-400">
-                                Cargando datos...
-                              </p>
-                            </div>
-                          </div>
-                        </td>
-                      </tr>
-                    ) : (
-                      <tr>
-                        <td
-                          colSpan={3}
-                          className="px-6 py-4 text-center text-sm text-gray-500 dark:text-gray-400"
-                        >
-                          No se encontraron productos. Intenta con otra
-                          búsqueda.
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Carrito de compras */}
-        <div className="space-y-4">
-          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm p-4">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-semibold flex items-center">
-                <ShoppingCart className="h-5 w-5 mr-2" /> Carrito
-              </h2>
-              <span className="text-sm bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded-full">
-                {cart.length} {cart.length === 1 ? "producto" : "productos"}
-              </span>
-            </div>
-
-            {cart.length > 0 ? (
-              <div className="space-y-4">
-                {cart.map((item, index) => (
-                  <div
-                    key={index}
-                    className="flex justify-between items-center p-3 bg-gray-50 dark:bg-gray-700 rounded-lg"
-                  >
-                    <div className="flex-1">
-                      <p className="font-medium text-sm">{item.productName}</p>
-                      <p className="text-xs text-gray-500 dark:text-gray-400">
-                        {formatCurrency(item.price)} c/u
-                      </p>
-                    </div>
-                    <div className="flex items-center space-x-2">
-                      <button
-                        onClick={() =>
-                          updateCartItemQuantity(index, item.quantity - 1)
-                        }
-                        className="p-1 rounded-full bg-gray-200 dark:bg-gray-600 hover:bg-gray-300 dark:hover:bg-gray-500"
-                      >
-                        <Minus className="h-4 w-4" />
-                      </button>
-                      <span className="w-8 text-center">{item.quantity}</span>
-                      <button
-                        onClick={() =>
-                          updateCartItemQuantity(index, item.quantity + 1)
-                        }
-                        className="p-1 rounded-full bg-gray-200 dark:bg-gray-600 hover:bg-gray-300 dark:hover:bg-gray-500"
-                      >
-                        <Plus className="h-4 w-4" />
-                      </button>
-                      <button
-                        onClick={() => removeFromCart(index)}
-                        className="p-1 rounded-full bg-red-100 dark:bg-red-900 text-red-600 dark:text-red-400 hover:bg-red-200 dark:hover:bg-red-800 ml-2"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    </div>
-                    <div className="ml-4 text-right">
-                      <p className="font-medium">
-                        {formatCurrency(item.total)}
-                      </p>
-                    </div>
-                  </div>
-                ))}
-
-                <div className="border-t border-gray-200 dark:border-gray-700 pt-4 mt-4">
-                  <div className="flex justify-between items-center font-medium text-lg mb-4">
-                    <span>Total</span>
-                    <span>{formatCurrency(cartTotal)}</span>
-                  </div>
-
-                  <div className="space-y-3">
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                      Método de Pago
-                    </label>
-                    <div className="grid grid-cols-2 gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setPaymentMethod("cash")}
-                        className={`py-2 px-4 rounded-md text-sm font-medium ${
-                          paymentMethod === "cash"
-                            ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300 border-2 border-green-500"
-                            : "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600"
-                        }`}
-                      >
-                        Efectivo
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setPaymentMethod("card")}
-                        className={`py-2 px-4 rounded-md text-sm font-medium ${
-                          paymentMethod === "card"
-                            ? "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300 border-2 border-blue-500"
-                            : "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600"
-                        }`}
-                      >
-                        Tarjeta
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setPaymentMethod("transfer")}
-                        className={`py-2 px-4 rounded-md text-sm font-medium ${
-                          paymentMethod === "transfer"
-                            ? "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-300 border-2 border-purple-500"
-                            : "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600"
-                        }`}
-                      >
-                        Transferencia
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setPaymentMethod("mercadopago")}
-                        className={`py-2 px-4 rounded-md text-sm font-medium ${
-                          paymentMethod === "mercadopago"
-                            ? "bg-sky-100 text-sky-800 dark:bg-sky-900 dark:text-sky-300 border-2 border-sky-500"
-                            : "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600"
-                        }`}
-                      >
-                        MercadoPago
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setPaymentMethod("rappi")}
-                        className={`py-2 px-4 rounded-md text-sm font-medium ${
-                          paymentMethod === "rappi"
-                            ? "bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-300 border-2 border-orange-500"
-                            : "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600"
-                        }`}
-                      >
-                        Rappi
-                      </button>
-                    </div>
-                  </div>
-
-                  <button
-                    onClick={() => setIsConfirmModalOpen(true)}
-                    disabled={!activeShift}
-                    className="w-full mt-4 btn btn-primary"
-                  >
-                    Completar Venta
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <div className="text-center py-8">
-                <ShoppingCart className="h-12 w-12 mx-auto text-gray-400" />
-                <p className="mt-2 text-gray-500 dark:text-gray-400">
-                  El carrito está vacío
-                </p>
-                <p className="text-sm text-gray-500 dark:text-gray-400">
-                  Busca productos y agrégalos al carrito
-                </p>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* Modal de confirmación de venta */}
-      {isConfirmModalOpen && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg max-w-md w-full">
-            <div className="flex justify-between items-center p-6 border-b border-gray-200 dark:border-gray-700">
-              <h2 className="text-xl font-semibold">Confirmar Venta</h2>
-              <button
-                onClick={() => setIsConfirmModalOpen(false)}
-                className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
-              >
-                <X className="w-6 h-6" />
-              </button>
-            </div>
-            <div className="p-6 space-y-4">
-              <p className="text-gray-700 dark:text-gray-300">
-                ¿Estás seguro de que deseas completar esta venta?
-              </p>
-              <div className="bg-gray-50 dark:bg-gray-700 p-4 rounded-md">
-                <div className="flex justify-between mb-2">
-                  <span className="font-medium">Total:</span>
-                  <span className="font-medium">
-                    {formatCurrency(cartTotal)}
-                  </span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span>Método de Pago:</span>
-                  <span
-                    className={`px-2 py-1 rounded text-xs font-medium ${
-                      paymentMethod === "cash"
-                        ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300"
-                        : paymentMethod === "card"
-                        ? "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300"
-                        : paymentMethod === "transfer"
-                        ? "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-300"
-                        : paymentMethod === "mercadopago"
-                        ? "bg-sky-100 text-sky-800 dark:bg-sky-900 dark:text-sky-300"
-                        : "bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-300"
-                    }`}
-                  >
-                    {paymentMethod === "cash"
-                      ? "Efectivo"
-                      : paymentMethod === "card"
-                      ? "Tarjeta"
-                      : paymentMethod === "transfer"
-                      ? "Transferencia"
-                      : paymentMethod === "mercadopago"
-                      ? "MercadoPago"
-                      : "Rappi"}
-                  </span>
-                </div>
-              </div>
-              <div className="pt-4 flex justify-end space-x-3">
-                <button
-                  type="button"
-                  onClick={() => setIsConfirmModalOpen(false)}
-                  className="btn btn-secondary"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="button"
-                  onClick={handleCompleteSale}
-                  disabled={isProcessing}
-                  className="btn btn-primary"
-                >
-                  {isProcessing ? "Procesando..." : "Confirmar"}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
+   import { useEffect, useState, useMemo, useRef } from "react";
+   import { useRouter } from "next/navigation";
+   import Link from "next/link";
+   import { useDispatch, useSelector } from "react-redux";
+   import type { AppDispatch, RootState } from "@/lib/redux/store";
+   import { editProduct } from "@/lib/redux/slices/productSlice";
+   import { createSale } from "@/lib/redux/slices/salesSlice";
+   import { getShifts } from "@/lib/redux/slices/shiftSlice";
+   import {
+     Search,
+     ShoppingCart,
+     Plus,
+     Minus,
+     Trash2,
+     X,
+     Check,
+     AlertTriangle,
+   } from "lucide-react";
+   import { supabase } from "@/lib/supabase";
+   
+   /* ────────────────────────────────────────────────────────── */
+   /*  Constantes & helpers                                      */
+   /* ────────────────────────────────────────────────────────── */
+   
+   const CATEGORIES = [
+     "ALMACEN",
+     "CIGARRILLOS",
+     "GOLOSINAS",
+     "BEBIDA",
+     "CERVEZA",
+     "FIAMBRES",
+     "TABACO",
+     "HUEVOS",
+     "HIGIENE",
+     "ALCOHOL",
+   ];
+   
+   const extractCategory = (name: string) => {
+     const parts = name.trim().split(" ");
+     if (parts.length > 1 && CATEGORIES.includes(parts[0].toUpperCase()))
+       return { category: parts[0].toUpperCase(), baseName: parts.slice(1).join(" ") };
+     return { category: null, baseName: name };
+   };
+   
+   const formatCurrency = (n: number) =>
+     new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS" }).format(n);
+   
+   function useDebounce<T>(val: T, ms: number) {
+     const [deb, setDeb] = useState(val);
+     useEffect(() => {
+       const t = setTimeout(() => setDeb(val), ms);
+       return () => clearTimeout(t);
+     }, [val, ms]);
+     return deb;
+   }
+   
+   type CartItem = {
+     productId: string;
+     productName: string;
+     price: number;
+     quantity: number;
+     total: number;
+     stock: number;
+     listID?: any;
+   };
+   
+   /* ────────────────────────────────────────────────────────── */
+   /*  Componente                                                */
+   /* ────────────────────────────────────────────────────────── */
+   
+   export default function NewSalePage() {
+     const dispatch = useDispatch<AppDispatch>();
+     const router = useRouter();
+   
+     const { user } = useSelector((s: RootState) => s.auth);
+     const { shifts, loading: shiftsLoading } = useSelector((s: RootState) => s.shifts);
+     const { employees } = useSelector((s: RootState) => s.employees);
+   
+     const [products, setProducts] = useState<any[]>([]);
+     const [productsLoading, setProductsLoading] = useState(true);
+   
+     const [search, setSearch] = useState("");
+     const debouncedSearch = useDebounce(search, 300);
+   
+     const [cart, setCart] = useState<CartItem[]>([]);
+     const [paymentMethod, setPaymentMethod] = useState<
+       "cash" | "card" | "transfer" | "mercadopago" | "rappi"
+     >("cash");
+   
+     const [confirm, setConfirm] = useState(false);
+     const [processing, setProcessing] = useState(false);
+     const [toast, setToast] = useState("");
+   
+     const inputRef = useRef<HTMLInputElement>(null);
+   
+     const businessId = user?.businessId;
+   
+     /* ─ Fetch productos ─ */
+     useEffect(() => {
+       if (!businessId) return;
+       (async () => {
+         setProductsLoading(true);
+         try {
+           const pageSize = 1000;
+           let page = 0;
+           let acc: any[] = [];
+           let done = false;
+           while (!done) {
+             const { from, to } = { from: page * pageSize, to: page * pageSize + pageSize - 1 };
+             const { data, error } = await supabase
+               .from("products")
+               .select("*")
+               .eq("business_id", businessId)
+               .range(from, to);
+             if (error) throw error;
+             if (!data?.length || data.length < pageSize) done = true;
+             acc = acc.concat(data ?? []);
+             page++;
+           }
+           /* promos */
+           const { data: promos } = await supabase
+             .from("promotions")
+             .select("*")
+             .eq("businesses_id", businessId);
+           const promoRows =
+             promos?.map((p) => ({
+               business_id: p.businesses_id,
+               code: "PROMO",
+               id: p.id,
+               name: p.name,
+               selling_price: p.price,
+               products: p.products,
+               stock: 999,
+             })) ?? [];
+           setProducts([...promoRows, ...acc]);
+         } catch (err) {
+           console.error(err);
+           setProducts([]);
+         } finally {
+           setProductsLoading(false);
+         }
+       })();
+     }, [businessId]);
+   
+     /* ─ Shifts ─ */
+     useEffect(() => {
+       dispatch(getShifts());
+     }, [dispatch]);
+   
+     const currentEmp = useMemo(() => {
+       if (!user) return null;
+       return (
+         employees.find((e) => e.userId === user.id) ||
+         employees.find((e) => e.email.toLowerCase() === user.email.toLowerCase())
+       );
+     }, [employees, user]);
+   
+     const activeShift = useMemo(
+       () =>
+         currentEmp ? shifts.find((s) => s.employeeId === currentEmp.id && s.active) : null,
+       [shifts, currentEmp]
+     );
+   
+     /* ─ Filtro búsqueda ─ */
+     const filteredProducts = useMemo(() => {
+       if (!debouncedSearch.trim()) return [];
+       const q = debouncedSearch.toLowerCase();
+       return products.filter(
+         (p) =>
+           p.name?.toLowerCase().includes(q) ||
+           p.code?.toLowerCase().includes(q) ||
+           p.description?.toLowerCase().includes(q)
+       );
+     }, [debouncedSearch, products]);
+   
+     /* ─ Cart helpers ─ */
+     const toastSinStock = () => {
+       setToast("Sin stock disponible");
+       setTimeout(() => setToast(""), 2000);
+     };
+   
+     const addToCart = (p: any) => {
+       const idx = cart.findIndex((i) => i.productId === p.id);
+       if (idx >= 0) {
+         if (cart[idx].quantity >= p.stock) return toastSinStock();
+         updateQty(idx, cart[idx].quantity + 1);
+       } else if (p.stock > 0) {
+         setCart([
+           ...cart,
+           {
+             productId: p.id,
+             productName: p.name,
+             price: p.selling_price || p.sellingPrice,
+             quantity: 1,
+             total: p.selling_price || p.sellingPrice,
+             stock: p.stock - 1,
+             listID: p.products,
+           },
+         ]);
+       } else toastSinStock();
+     };
+   
+     const updateQty = (idx: number, newQ: number) => {
+       const prod = products.find((p) => p.id === cart[idx].productId);
+       if (!prod || newQ < 1 || newQ > prod.stock) return toastSinStock();
+       setCart((prev) => {
+         const next = [...prev];
+         next[idx] = {
+           ...next[idx],
+           quantity: newQ,
+           total: newQ * next[idx].price,
+           stock: prod.stock - newQ,
+         };
+         return next;
+       });
+     };
+   
+     const removeIdx = (idx: number) => setCart((c) => c.filter((_, i) => i !== idx));
+   
+     const cartTotal = useMemo(() => cart.reduce((s, i) => s + i.total, 0), [cart]);
+   
+     /* ─ Complete sale ─ */
+     const handleComplete = async () => {
+       if (!activeShift || !cart.length) return;
+       setProcessing(true);
+       try {
+         const saleData = {
+           businessId: businessId!,
+           businessName: activeShift.businessName,
+           employeeId: currentEmp ? currentEmp.id : user!.id,
+           employeeName: user!.name,
+           items: cart,
+           total: cartTotal,
+           paymentMethod,
+           timestamp: new Date().toISOString(),
+           shiftId: activeShift.id,
+         };
+         console.log("VENTA COMPLETA =>", saleData);
+   
+         await dispatch(createSale(saleData));
+   
+         /* update stock */
+         for (const it of cart) {
+           if (it.listID) {
+             it.listID.forEach(async (pi: any) => {
+               const prod = products.find((p) => p.id === pi.id);
+               if (prod) await dispatch(editProduct({ ...prod, stock: prod.stock - pi.qty * it.quantity }));
+             });
+           } else {
+             const prod = products.find((p) => p.id === it.productId);
+             if (prod) await dispatch(editProduct({ ...prod, stock: prod.stock - it.quantity }));
+           }
+         }
+         setToast("Venta registrada ✔︎");
+         setCart([]);
+         setConfirm(false);
+         setTimeout(() => setToast(""), 3000);
+       } finally {
+         setProcessing(false);
+       }
+     };
+   
+     /* ───────────────────────────────────── UI ───────────────────────────────────── */
+   
+     if (!activeShift && !shiftsLoading) router.replace("/employee/dashboard");
+   
+     const loading = productsLoading || shiftsLoading;
+   
+     return (
+       <div className="space-y-6">
+         {/* Header */}
+         <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+           <div>
+             <h1 className="text-2xl font-bold">Nueva Venta</h1>
+             <p className="text-slate-600 dark:text-slate-400">
+               {activeShift ? `Turno en ${activeShift.businessName}` : "Sin turno activo"}
+             </p>
+           </div>
+           <Link href="/employee/dashboard" className="btn btn-secondary">
+             Volver al Dashboard
+           </Link>
+         </header>
+   
+         {/* Toast */}
+         {toast && (
+           <div
+             className={`rounded-md px-4 py-3 text-sm font-medium ${
+               toast.includes("✔︎")
+                 ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300"
+                 : "bg-rose-100 text-rose-800 dark:bg-rose-900/40 dark:text-rose-300"
+             }`}
+           >
+             {toast}
+           </div>
+         )}
+   
+         <div className="grid lg:grid-cols-3 gap-6">
+           {/* Search & results */}
+           <section className="lg:col-span-2 space-y-4">
+             <div className="bg-white dark:bg-slate-800 rounded-lg shadow-sm p-4">
+               <div className="relative">
+                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 h-5 w-5" />
+                 <input
+                   ref={inputRef}
+                   type="text"
+                   placeholder="Buscar por nombre o código…"
+                   value={search}
+                   onChange={(e) => setSearch(e.target.value)}
+                   disabled={!activeShift}
+                   className="input pl-11 w-full"
+                 />
+               </div>
+             </div>
+   
+             {debouncedSearch && (
+               <div className="bg-white dark:bg-slate-800 rounded-lg shadow-sm overflow-hidden">
+                 <header className="border-b border-slate-200 dark:border-slate-700 px-4 py-2 font-semibold">
+                   Resultados
+                 </header>
+                 <div className="overflow-x-auto">
+                   <table className="min-w-full text-sm">
+                     <thead className="bg-slate-100 dark:bg-slate-700/70">
+                       <tr>
+                         {["Producto", "Precio", "Acción"].map((h) => (
+                           <th key={h} className="px-4 py-2 text-left font-medium text-xs uppercase">
+                             {h}
+                           </th>
+                         ))}
+                       </tr>
+                     </thead>
+                     <tbody>
+                       {loading ? (
+                         <tr>
+                           <td colSpan={3} className="py-8 text-center">
+                             Cargando…
+                           </td>
+                         </tr>
+                       ) : filteredProducts.length ? (
+                         filteredProducts.map((p) => {
+                           const { category, baseName } = extractCategory(p.name);
+                           return (
+                             <tr key={p.id} className="hover:bg-slate-50 dark:hover:bg-slate-700/50">
+                               <td className="px-4 py-2">
+                                 {category && (
+                                   <span className="block text-[10px] text-sky-500 font-bold">
+                                     {category}
+                                   </span>
+                                 )}
+                                 <span className="block">{baseName.toUpperCase()}</span>
+                                 <span
+                                   className={`block text-[10px] ${
+                                     p.code === "PROMO"
+                                       ? "text-rose-500"
+                                       : "text-slate-500 dark:text-slate-400"
+                                   }`}
+                                 >
+                                   {p.code.toUpperCase()}
+                                 </span>
+                               </td>
+                               <td className="px-4 py-2">{formatCurrency(p.selling_price)}</td>
+                               <td className="px-4 py-2">
+                                 <button
+                                   onClick={() => addToCart(p)}
+                                   disabled={!activeShift || p.stock <= 0}
+                                   className={`px-3 py-1.5 rounded-md text-xs font-medium ${
+                                     p.stock <= 0
+                                       ? "bg-rose-200 text-rose-800 cursor-not-allowed"
+                                       : "bg-emerald-600 text-white hover:bg-emerald-700"
+                                   }`}
+                                 >
+                                   {p.stock <= 0 ? "SIN STOCK" : "AGREGAR"}
+                                 </button>
+                               </td>
+                             </tr>
+                           );
+                         })
+                       ) : (
+                         <tr>
+                           <td colSpan={3} className="py-8 text-center">
+                             Sin coincidencias.
+                           </td>
+                         </tr>
+                       )}
+                     </tbody>
+                   </table>
+                 </div>
+               </div>
+             )}
+           </section>
+   
+           {/* Cart */}
+           <aside className="space-y-4">
+             <div className="bg-white dark:bg-slate-800 rounded-lg shadow-sm p-4">
+               <header className="flex justify-between items-center">
+                 <h2 className="font-semibold flex items-center gap-2">
+                   <ShoppingCart className="h-5 w-5" />
+                   Carrito
+                 </h2>
+                 <span className="text-xs bg-slate-100 dark:bg-slate-700 px-2 py-0.5 rounded-full">
+                   {cart.length}
+                 </span>
+               </header>
+   
+               {cart.length ? (
+                 <>
+                   <ul className="space-y-3 mt-4">
+                     {cart.map((it, i) => (
+                       <li key={i} className="flex items-center gap-3 bg-slate-50 dark:bg-slate-700 rounded p-2">
+                         <div className="flex-1">
+                           <p className="text-sm font-medium">{it.productName}</p>
+                           <p className="text-xs text-slate-500 dark:text-slate-400">
+                             {formatCurrency(it.price)} c/u
+                           </p>
+                         </div>
+   
+                         {/* qty controls */}
+                         <div className="flex items-center gap-1">
+                           <Circle onClick={() => updateQty(i, it.quantity - 1)}>
+                             <Minus className="h-4 w-4" />
+                           </Circle>
+                           <span className="w-6 text-center">{it.quantity}</span>
+                           <Circle onClick={() => updateQty(i, it.quantity + 1)}>
+                             <Plus className="h-4 w-4" />
+                           </Circle>
+                         </div>
+   
+                         {/* stock restante */}
+                         <span
+                           className={`px-1.5 py-0.5 text-[10px] rounded-full ${
+                             it.stock < 0
+                               ? "bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300"
+                               : "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300"
+                           }`}
+                         >
+                           {it.stock}
+                         </span>
+   
+                         {/* remove */}
+                         <Circle onClick={() => removeIdx(i)}>
+                           <Trash2 className="h-4 w-4 text-rose-500" />
+                         </Circle>
+   
+                         {/* total */}
+                         <p className="w-20 text-right font-medium">
+                           {formatCurrency(it.total)}
+                         </p>
+                       </li>
+                     ))}
+                   </ul>
+   
+                   {/* summary */}
+                   <div className="border-t border-slate-200 dark:border-slate-600 pt-4 mt-4 space-y-3">
+                     <div className="flex justify-between font-medium">
+                       <span>Total</span>
+                       <span>{formatCurrency(cartTotal)}</span>
+                     </div>
+   
+                     {/* payment buttons */}
+                     <div className="grid grid-cols-2 gap-2 text-xs">
+                       {(["cash", "card", "transfer", "rappi"] as const).map((m) => (
+                         <button
+                           key={m}
+                           onClick={() => setPaymentMethod(m)}
+                           className={`rounded py-1.5 ${
+                             paymentMethod === m
+                               ? "ring-2 ring-emerald-500 dark:ring-emerald-400"
+                               : "ring-1 ring-slate-300 dark:ring-slate-600"
+                           } ${
+                             {
+                               cash: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300",
+                               card: "bg-indigo-100 text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-300",
+                               transfer:
+                                 "bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300",
+                               rappi:
+                                 "bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-300",
+                             }[m]
+                           }`}
+                         >
+                           {
+                             {
+                               cash: "Efectivo",
+                               card: "Tarjeta",
+                               transfer: "Transferencia",
+                               rappi: "Rappi",
+                             }[m]
+                           }
+                         </button>
+                       ))}
+                     </div>
+   
+                     <button
+                       onClick={() => setConfirm(true)}
+                       className="btn btn-primary w-full"
+                       disabled={!activeShift}
+                     >
+                       Completar venta
+                     </button>
+                   </div>
+                 </>
+               ) : (
+                 <div className="text-center py-10">
+                   <ShoppingCart className="mx-auto h-12 w-12 text-slate-400" />
+                   <p className="text-slate-500 dark:text-slate-400 mt-2 text-sm">
+                     El carrito está vacío.
+                   </p>
+                 </div>
+               )}
+             </div>
+           </aside>
+         </div>
+   
+         {/* confirm modal */}
+         {confirm && (
+           <Modal title="Confirmar venta" onClose={() => setConfirm(false)}>
+             <p className="mb-4">¿Deseas confirmar esta venta?</p>
+             <div className="bg-slate-50 dark:bg-slate-700 p-3 rounded mb-4 text-sm">
+               <div className="flex justify-between mb-1">
+                 <span>Total:</span>
+                 <span className="font-semibold">{formatCurrency(cartTotal)}</span>
+               </div>
+               <div className="flex justify-between">
+                 <span>Método:</span>
+                 <span className="font-semibold capitalize">{paymentMethod}</span>
+               </div>
+             </div>
+             <div className="flex justify-end gap-3">
+               <button onClick={() => setConfirm(false)} className="btn btn-secondary">
+                 Cancelar
+               </button>
+               <button onClick={handleComplete} className="btn btn-primary" disabled={processing}>
+                 {processing ? "Procesando…" : "Confirmar"}
+               </button>
+             </div>
+           </Modal>
+         )}
+       </div>
+     );
+   }
+   
+   /* ───────────────────── small components ───────────────────── */
+   
+   const Circle = (props: React.ButtonHTMLAttributes<HTMLButtonElement>) => (
+     <button
+       {...props}
+       className={`p-1 rounded-full bg-slate-200 dark:bg-slate-600 hover:bg-slate-300 dark:hover:bg-slate-500 ${props.className ?? ""
+         }`}
+       type="button"
+     />
+   );
+   
+   function Modal({
+     title,
+     children,
+     onClose,
+   }: {
+     title: string;
+     children: React.ReactNode;
+     onClose: () => void;
+   }) {
+     return (
+       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+         <div className="w-full max-w-md rounded-lg bg-white dark:bg-slate-800 shadow-lg">
+           <header className="flex justify-between items-center border-b border-slate-200 dark:border-slate-600 px-5 py-3">
+             <h3 className="font-semibold">{title}</h3>
+             <button onClick={onClose} className="p-1 hover:bg-slate-100 dark:hover:bg-slate-600 rounded">
+               <X className="h-5 w-5 text-slate-500 dark:text-slate-400" />
+             </button>
+           </header>
+           <main className="px-5 py-4 text-sm">{children}</main>
+         </div>
+       </div>
+     );
+   }
+   

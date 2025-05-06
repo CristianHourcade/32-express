@@ -1,126 +1,140 @@
-"use client"
+"use client";
 
-import type React from "react"
-import { useEffect, useState } from "react"
-import { useDispatch, useSelector } from "react-redux"
-import type { AppDispatch, RootState } from "@/lib/redux/store"
-import { getShifts, type Shift } from "@/lib/redux/slices/shiftSlice"
-import { getEmployees } from "@/lib/redux/slices/employeeSlice"
-import { fetchBusinesses } from "@/lib/redux/slices/businessSlice"
-import { getSales } from "@/lib/redux/slices/salesSlice"
-import { FileText, Search } from "lucide-react"
+import type React from "react";
+import { useEffect, useState, useMemo } from "react";
+import { useDispatch, useSelector } from "react-redux";
+import type { AppDispatch, RootState } from "@/lib/redux/store";
+import { getShifts, type Shift } from "@/lib/redux/slices/shiftSlice";
+import { getEmployees } from "@/lib/redux/slices/employeeSlice";
+import { fetchBusinesses } from "@/lib/redux/slices/businessSlice";
+import { getSales } from "@/lib/redux/slices/salesSlice";
+import { FileText, Search } from "lucide-react";
+
+/* ───────── helpers de fecha ───────── */
+function monthRange(offset = 0) {
+  // hoy (hora local)
+  const today = new Date();
+
+  // inicio del mes en hora **local**
+  const start = new Date(today.getFullYear(), today.getMonth() + offset, 1, 0, 0, 0, 0);
+
+  // fin exclusivo (primer día del mes siguiente, hora local)
+  const end = new Date(start.getFullYear(), start.getMonth() + 1, 1, 0, 0, 0, 0);
+
+  return { start, end };
+}
+
+/* ───────── formatting ───────── */
+const formatPrice = (n: number) =>
+  n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 export default function ShiftsPage() {
-  function monthRange(offset = 0) {
-    const today = new Date();
-    const start = new Date(today.getFullYear(), today.getMonth() + offset, 1, 0, 0, 0);
-    const end   = new Date(start.getFullYear(), start.getMonth() + 1, 1, 0, 0, 0);
-    return { start, end };
-  }
-  const [monthOffset, setMonthOffset] = useState(0);
-const { start: monthStart, end: monthEnd } = monthRange(monthOffset);
-  const dispatch = useDispatch<AppDispatch>()
-  const { shifts, loading: shiftsLoading } = useSelector((state: RootState) => state.shifts)
-  const { employees, loading: employeesLoading } = useSelector((state: RootState) => state.employees)
-  const { businesses, loading: businessesLoading } = useSelector((state: RootState) => state.businesses)
-  const { sales, loading: salesLoading } = useSelector((state: RootState) => state.sales)
+  const dispatch = useDispatch<AppDispatch>();
 
-  const [selectedBusinessId, setSelectedBusinessId] = useState<string>("all")
-  const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false)
-  const [selectedShift, setSelectedShift] = useState<Shift | null>(null)
+  /* ─── redux state ─── */
+  const { shifts, loading: shiftsLoading } = useSelector((s: RootState) => s.shifts);
+  const { employees, loading: employeesLoading } = useSelector((s: RootState) => s.employees);
+  const { businesses, loading: businessesLoading } = useSelector((s: RootState) => s.businesses);
+  const { sales, loading: salesLoading } = useSelector((s: RootState) => s.sales);
+
+  /* ─── local state ─── */
+  const [selectedBusinessId, setSelectedBusinessId] = useState("all");
+  const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
+  const [selectedShift, setSelectedShift] = useState<Shift | null>(null);
+
+  /* paginación por mes */
+  const [monthOffset, setMonthOffset] = useState(0);
+  const { start: monthStart, end: monthEnd } = useMemo(() => monthRange(monthOffset), [monthOffset]);
+  const monthLabel = monthStart.toLocaleString("es-ES", { month: "long", year: "numeric" });
+
+  /* ─── fetch ─── */
+  useEffect(() => {
+    // empleados/negocios se traen una sola vez
+    if (!employees.length) dispatch(getEmployees());
+    if (!businesses.length) dispatch(fetchBusinesses());
+  }, [dispatch, employees.length, businesses.length]);
 
   useEffect(() => {
-    dispatch(getShifts())
-    dispatch(getEmployees())
-    dispatch(fetchBusinesses())
-    dispatch(getSales())
-  }, [dispatch])
+    /* cada vez que cambia el mes traemos turnos y ventas del rango */
+    dispatch(
+      getShifts({
+        from: monthStart.toISOString(),
+        to: monthEnd.toISOString(),
+      })
+    );
+    dispatch(
+      getSales({
+        from: monthStart.toISOString(),
+        to: monthEnd.toISOString(),
+      })
+    );
+  }, [dispatch, monthStart, monthEnd]);
 
-  const handleBusinessChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    setSelectedBusinessId(e.target.value)
-  }
+  /* ─── helpers ─── */
+  const handleBusinessChange = (e: React.ChangeEvent<HTMLSelectElement>) =>
+    setSelectedBusinessId(e.target.value);
 
   const openDetailsModal = (shift: Shift) => {
-    setSelectedShift(shift)
-    setIsDetailsModalOpen(true)
-  }
+    setSelectedShift(shift);
+    setIsDetailsModalOpen(true);
+  };
+
+  const translatePaymentMethod = (m: string) =>
+    ({ cash: "Efectivo", card: "Tarjeta", transfer: "Transferencia", rappi: "Rappi" } as const)[
+    m
+    ] || m;
+
+  const getPaymentMethodClass = (m: string) =>
+  ({
+    cash: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300",
+    card: "bg-indigo-100 text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-300",
+    transfer: "bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300",
+    rappi: "bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-300",
+  }[m] || "bg-slate-100 text-slate-800 dark:bg-slate-700 dark:text-slate-300");
+
+  const isLoading = shiftsLoading || employeesLoading || businessesLoading || salesLoading;
+
+  /* ─── filtros y ordenación ─── */
+  const monthShifts = useMemo(
+    () =>
+      shifts.filter(
+        (sh) =>
+          new Date(sh.startTime) >= monthStart && new Date(sh.startTime) < monthEnd
+      ),
+    [shifts, monthStart, monthEnd]
+  );
+  const monthSales = useMemo(
+    () =>
+      sales.filter(
+        (s) => new Date(s.timestamp) >= monthStart && new Date(s.timestamp) < monthEnd
+      ),
+    [sales, monthStart, monthEnd]
+  );
 
   const filteredShifts =
     selectedBusinessId === "all"
-      ? shifts
-      : shifts.filter((shift) => shift.businessId === selectedBusinessId)
+      ? monthShifts
+      : monthShifts.filter((sh) => sh.businessId === selectedBusinessId);
 
-  // Ordenar turnos por hora de inicio (más recientes primero)
   const sortedShifts = [...filteredShifts].sort(
     (a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime()
-  )
+  );
 
-  // Función para obtener las ventas de un turno específico
-  const getShiftSales = (shiftId: string) => {
-    return sales.filter((sale) => sale.shiftId === shiftId)
-  }
+  const getShiftSales = (shiftId: string) => monthSales.filter((s) => s.shiftId === shiftId);
 
-  // Función para traducir los métodos de pago
-  const translatePaymentMethod = (method: string) => {
-    const translations: Record<string, string> = {
-      cash: "Efectivo",
-      card: "Tarjeta",
-      transfer: "Transferencia",
-      mercadopago: "Mercadopago",
-      rappi: "Rappi",
-    }
-    return translations[method] || method
-  }
-
-  // Función para obtener la clase CSS del método de pago
-  const getPaymentMethodClass = (method: string) => {
-    const classes: Record<string, string> = {
-      cash: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300",
-      card: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300",
-      transfer: "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-300",
-      mercadopago: "bg-sky-100 text-sky-800 dark:bg-sky-900 dark:text-sky-300",
-      rappi: "bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-300",
-    }
-    return classes[method] || "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300"
-  }
-
-  // Función para formatear precios
-  const formatPrice = (num: number): string => {
-    return num.toLocaleString("en-US", {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    })
-  }
-
-  const isLoading = shiftsLoading || employeesLoading || businessesLoading || salesLoading
-
-  if (isLoading) {
+  /* ─── loading splash ─── */
+  if (isLoading)
     return (
-      <div className="flex justify-center items-center h-64">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-700 mx-auto"></div>
-          <p className="mt-4 text-gray-600 dark:text-gray-400">
-            Cargando datos de turnos...
-          </p>
-        </div>
+      <div className="flex flex-col items-center justify-center h-64 gap-4">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-sky-600" />
+        <p className="text-slate-600 dark:text-slate-400 uppercase">Cargando turnos…</p>
       </div>
-    )
-  }
+    );
 
-  // Dentro del modal, recalculamos los totales por método de pago para el turno seleccionado
-  let paymentTotals: Record<string, number> = {}
-  if (selectedShift) {
-    const shiftSales = getShiftSales(selectedShift.id)
-    paymentTotals = shiftSales.reduce((acc, sale) => {
-      const method = sale.paymentMethod
-      acc[method] = (acc[method] || 0) + sale.total
-      return acc
-    }, {} as Record<string, number>)
-  }
-
-  /* ═════════ START RETURN UI ═════════ */
+  /* ───────────────────────────────── RETURN ───────────────────────────────── */
   return (
     <div className="space-y-8">
+      {/* header + selector mes */}
       <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
           <h1 className="text-2xl md:text-3xl font-bold tracking-tight">Turnos</h1>
@@ -129,7 +143,8 @@ const { start: monthStart, end: monthEnd } = monthRange(monthOffset);
           </p>
         </div>
 
-        <div className="flex gap-3">
+        <div className="flex items-center gap-3">
+          {/* negocio */}
           <select
             value={selectedBusinessId}
             onChange={handleBusinessChange}
@@ -143,51 +158,53 @@ const { start: monthStart, end: monthEnd } = monthRange(monthOffset);
             ))}
           </select>
 
-          {/* search aún sin lógica */}
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 h-4 w-4" />
-            <input
-              disabled
-              placeholder="Buscar…"
-              className="bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-full pl-9 pr-3 py-1.5 text-xs shadow-sm cursor-not-allowed"
-            />
+          {/* navegación por mes */}
+          <div className="flex items-center gap-2">
+            <button
+              aria-label="Mes anterior"
+              onClick={() => setMonthOffset((o) => o - 1)}
+              className="p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-700"
+            >
+              ◀
+            </button>
+            <span className="text-sm font-semibold capitalize">{monthLabel}</span>
+            <button
+              aria-label="Mes siguiente"
+              onClick={() => setMonthOffset((o) => Math.min(o + 1, 0))}
+              disabled={monthOffset === 0}
+              className="p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-40"
+            >
+              ▶
+            </button>
           </div>
         </div>
       </header>
 
-      {/* ───────── Tabla ───────── */}
+      {/* tabla */}
       <div className="bg-white dark:bg-slate-800 rounded-xl shadow ring-1 ring-slate-200 dark:ring-slate-700 overflow-hidden">
         <div className="overflow-x-auto">
           <table className="min-w-full text-sm">
-            <thead className="bg-slate-100 dark:bg-slate-700/70 backdrop-blur sticky top-0 z-10 text-[11px] uppercase tracking-wide">
+            <thead className="bg-slate-100 dark:bg-slate-700/70 sticky top-0 z-10 text-[11px] uppercase tracking-wide">
               <tr>
-                {[
-                  "Empleado",
-                  "Negocio",
-                  "Inicio",
-                  "Fin",
-                  "Estado",
-                  "Ventas",
-                  "Total",
-                  " ",
-                ].map((h) => (
-                  <th key={h} className="px-4 py-3 text-left font-semibold">
-                    {h}
-                  </th>
-                ))}
+                {["Empleado", "Negocio", "Inicio", "Fin", "Estado", "Ventas", "Total", ""].map(
+                  (h) => (
+                    <th key={h} className="px-4 py-3 text-left font-semibold">
+                      {h}
+                    </th>
+                  )
+                )}
               </tr>
             </thead>
             <tbody>
               {sortedShifts.length ? (
                 sortedShifts.map((sh) => {
-                  const shiftSales = getShiftSales(sh.id);
-                  const total = shiftSales.reduce((s, v) => s + v.total, 0);
+                  const total = getShiftSales(sh.id).reduce((s, v) => s + v.total, 0);
                   return (
                     <tr
                       key={sh.id}
                       className="border-l-4 border-transparent hover:border-sky-500 even:bg-slate-50/60 dark:even:bg-slate-800/30"
                     >
-                      <td className="px-4 py-2 whitespace-nowrap font-medium">
+                      <td className="px-4 py-2 font-medium whitespace-nowrap">
                         {sh.employeeName}
                       </td>
                       <td className="px-4 py-2 whitespace-nowrap">{sh.businessName}</td>
@@ -200,8 +217,8 @@ const { start: monthStart, end: monthEnd } = monthRange(monthOffset);
                       <td className="px-4 py-2">
                         <span
                           className={`inline-block px-2 py-0.5 rounded-full text-[11px] font-semibold ${sh.active
-                            ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300"
-                            : "bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300"
+                              ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300"
+                              : "bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300"
                             }`}
                         >
                           {sh.active ? "Activo" : "Completado"}
@@ -228,7 +245,7 @@ const { start: monthStart, end: monthEnd } = monthRange(monthOffset);
                     colSpan={8}
                     className="py-10 text-center text-slate-500 dark:text-slate-400"
                   >
-                    No se encontraron turnos.
+                    Sin turnos para este mes.
                   </td>
                 </tr>
               )}
@@ -237,172 +254,195 @@ const { start: monthStart, end: monthEnd } = monthRange(monthOffset);
         </div>
       </div>
 
-      {/* ───────── Modal detalles ───────── */}
+      {/* modal detalles */}
       {isDetailsModalOpen && selectedShift && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
-          <div className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-xl bg-white/80 dark:bg-slate-800/80 shadow-xl ring-1 ring-slate-200 dark:ring-slate-700 animate-scale-in">
-            {/* Header */}
-            <header className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-700">
-              <div>
-                <h2 className="text-lg font-semibold">Detalles del turno</h2>
-                <p className="text-xs text-slate-600 dark:text-slate-400">
-                  {selectedShift.employeeName} — {selectedShift.businessName}
-                </p>
-              </div>
-              <button
-                onClick={() => setIsDetailsModalOpen(false)}
-                className="p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-700"
-              >
-                <svg viewBox="0 0 24 24" className="h-5 w-5 text-slate-500 dark:text-slate-400" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 18L18 6M6 6l12 12" /></svg>
-              </button>
-            </header>
-
-            {/* Body */}
-            <div className="px-6 py-6 space-y-8">
-              {/* Info grid */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                <Info label="Inicio" value={new Date(selectedShift.startTime).toLocaleString()} />
-                <Info
-                  label="Fin"
-                  value={
-                    selectedShift.endTime
-                      ? new Date(selectedShift.endTime).toLocaleString()
-                      : "Aún activo"
-                  }
-                />
-                <Info
-                  label="Estado"
-                  value={
-                    <span
-                      className={`inline-block px-2 py-0.5 rounded-full text-[11px] font-semibold ${selectedShift.active
-                        ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300"
-                        : "bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300"
-                        }`}
-                    >
-                      {selectedShift.active ? "Activo" : "Completado"}
-                    </span>
-                  }
-                />
-                <Info label="Ventas" value={selectedShift.sales} />
-              </div>
-
-              {/* Métodos de pago (fusión transfer + MP) */}
-              {(() => {
-                const shiftSales = getShiftSales(selectedShift.id);
-                const totals = shiftSales.reduce(
-                  (acc, s) => {
-                    const k =
-                      s.paymentMethod === "mercadopago" ? "transfer" : s.paymentMethod;
-                    acc[k] = (acc[k] || 0) + s.total;
-                    return acc;
-                  },
-                  {} as Record<string, number>
-                );
-
-                type Tile = { key: string; label: string; cls: string };
-                const tiles: Tile[] = [
-                  { key: "cash", label: "Efectivo", cls: "bg-emerald" },
-                  { key: "card", label: "Tarjeta", cls: "bg-indigo" },
-                  { key: "transfer", label: "Transferencia", cls: "bg-purple dark:bg-emerald" },
-                  { key: "rappi", label: "Rappi", cls: "bg-orange" },
-                ];
-
-                return (
-                  <section>
-                    <h3 className="text-sm font-semibold mb-2 uppercase tracking-wide">
-                      Métodos de pago
-                    </h3>
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                      {tiles.map(({ key, label, cls }) => (
-                        <div
-                          key={key}
-                          className={`${cls}-100 dark:${cls}-900/40 rounded p-3`}
-                        >
-                          <p className="text-[11px] text-slate-600 dark:text-slate-400">
-                            {label}
-                          </p>
-                          <p className="font-medium">
-                            ${formatPrice(totals[key] || 0)}
-                          </p>
-                        </div>
-                      ))}
-                    </div>
-                  </section>
-                );
-              })()}
-
-              {/* Ventas tabla */}
-              <section>
-                <h3 className="text-sm font-semibold mb-2 uppercase tracking-wide">
-                  Ventas del turno
-                </h3>
-                {getShiftSales(selectedShift.id).length ? (
-                  <div className="overflow-x-auto rounded-lg ring-1 ring-slate-200 dark:ring-slate-700">
-                    <table className="min-w-full text-xs">
-                      <thead className="bg-slate-100 dark:bg-slate-700/70">
-                        <tr>
-                          {["Hora", "Detalle", "Método", "Total"].map((h) => (
-                            <th key={h} className="px-3 py-2 text-left font-semibold">
-                              {h}
-                            </th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {getShiftSales(selectedShift.id).map((s) => (
-                          <tr key={s.id} className="even:bg-slate-50/60 dark:even:bg-slate-800/30">
-                            <td className="px-3 py-1.5 whitespace-nowrap">
-                              {new Date(s.timestamp).toLocaleTimeString()}
-                            </td>
-                            <td className="px-3 py-1.5">
-                              {s.items.map((it, i) => (
-                                <div key={i}>
-                                  {it.quantity}× {it.productName} – $
-                                  {formatPrice(it.total)}
-                                </div>
-                              ))}
-                            </td>
-                            <td className="px-3 py-1.5">
-                              <span
-                                className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-medium ${getPaymentMethodClass(
-                                  s.paymentMethod === "mercadopago" ? "transfer" : s.paymentMethod
-                                )}`}
-                              >
-                                {translatePaymentMethod(
-                                  s.paymentMethod === "mercadopago" ? "transfer" : s.paymentMethod
-                                )}
-                              </span>
-                            </td>
-                            <td className="px-3 py-1.5 font-medium">
-                              ${formatPrice(s.total)}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                ) : (
-                  <p className="text-slate-600 dark:text-slate-400">
-                    Sin ventas registradas.
-                  </p>
-                )}
-              </section>
-            </div>
-          </div>
-        </div>
+        <DetailsModal
+          shift={selectedShift}
+          getShiftSales={getShiftSales}
+          onClose={() => setIsDetailsModalOpen(false)}
+          translatePaymentMethod={translatePaymentMethod}
+          getPaymentMethodClass={getPaymentMethodClass}
+          formatPrice={formatPrice}
+        />
       )}
     </div>
   );
+}
 
-  /* Helper componente */
-  function Info({ label, value }: { label: string; value: React.ReactNode }) {
-    return (
-      <div>
-        <p className="text-xs text-slate-500 dark:text-slate-400">{label}</p>
-        <p className="font-medium">{value}</p>
+/* ───────── pequeño componente Info ───────── */
+function Info({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div>
+      <p className="text-xs text-slate-500 dark:text-slate-400">{label}</p>
+      <p className="font-medium">{value}</p>
+    </div>
+  );
+}
+
+/* ───────── modal extraído ───────── */
+function DetailsModal({
+  shift,
+  getShiftSales,
+  onClose,
+  translatePaymentMethod,
+  getPaymentMethodClass,
+  formatPrice,
+}: {
+  shift: Shift;
+  getShiftSales: (id: string) => any[];
+  onClose: () => void;
+  translatePaymentMethod: (m: string) => string;
+  getPaymentMethodClass: (m: string) => string;
+  formatPrice: (n: number) => string;
+}) {
+  /* fusionamos mercadopago en transfer */
+  const totals = useMemo(() => {
+    return getShiftSales(shift.id).reduce((acc, s) => {
+      const k = s.paymentMethod === "mercadopago" ? "transfer" : s.paymentMethod;
+      acc[k] = (acc[k] || 0) + s.total;
+      return acc;
+    }, {} as Record<string, number>);
+  }, [getShiftSales, shift.id]);
+
+  const tiles = [
+    { k: "cash", l: "Efectivo", cls: "bg-emerald" },
+    { k: "card", l: "Tarjeta", cls: "bg-indigo" },
+    { k: "transfer", l: "Transferencia", cls: "bg-purple" },
+    { k: "rappi", l: "Rappi", cls: "bg-orange" },
+  ];
+  console.log(getShiftSales(shift.id))
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+      <div className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-xl bg-white/80 dark:bg-slate-800/80 shadow-xl ring-1 ring-slate-200 dark:ring-slate-700 animate-scale-in">
+        {/* header */}
+        <header className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-700">
+          <div>
+            <h2 className="text-lg font-semibold">Detalles del turno</h2>
+            <p className="text-xs text-slate-600 dark:text-slate-400">
+              {shift.employeeName} — {shift.businessName}
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-700"
+          >
+            <svg
+              viewBox="0 0 24 24"
+              className="h-5 w-5 text-slate-500 dark:text-slate-400"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+            >
+              <path d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </header>
+
+        {/* body */}
+        <div className="px-6 py-6 space-y-8">
+          {/* grid básico */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            <Info label="Inicio" value={new Date(shift.startTime).toLocaleString()} />
+            <Info
+              label="Fin"
+              value={
+                shift.endTime ? new Date(shift.endTime).toLocaleString() : "Aún activo"
+              }
+            />
+            <Info
+              label="Estado"
+              value={
+                <span
+                  className={`inline-block px-2 py-0.5 rounded-full text-[11px] font-semibold ${shift.active
+                    ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300"
+                    : "bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300"
+                    }`}
+                >
+                  {shift.active ? "Activo" : "Completado"}
+                </span>
+              }
+            />
+            <Info label="Ventas" value={shift.sales} />
+          </div>
+
+          {/* totales */}
+          <section>
+            <h3 className="text-sm font-semibold mb-2 uppercase tracking-wide">
+              Métodos de pago
+            </h3>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              {tiles.map(({ k, l, cls }) => (
+                <div key={k} className={`${cls}-100 dark:${cls}-900/40 rounded p-3`}>
+                  <p className="text-[11px] text-slate-600 dark:text-slate-400">{l}</p>
+                  <p className="font-medium">${formatPrice(totals[k] || 0)}</p>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          {/* ventas */}
+          <section>
+            <h3 className="text-sm font-semibold mb-2 uppercase tracking-wide">
+              Ventas del turno
+            </h3>
+            {getShiftSales(shift.id).length ? (
+              <div className="overflow-x-auto rounded-lg ring-1 ring-slate-200 dark:ring-slate-700">
+                <table className="min-w-full text-xs">
+                  <thead className="bg-slate-100 dark:bg-slate-700/70">
+                    <tr>
+                      {["Hora", "Detalle", "Método", "Total"].map((h) => (
+                        <th key={h} className="px-3 py-2 text-left font-semibold">
+                          {h}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {getShiftSales(shift.id).map((s) => (
+                      <tr
+                        key={s.id}
+                        className="even:bg-slate-50/60 dark:even:bg-slate-800/30"
+                      >
+                        <td className="px-3 py-1.5 whitespace-nowrap">
+                          {new Date(s.timestamp).toLocaleTimeString()}
+                        </td>
+                        <td className="px-3 py-1.5">
+                          {s.items.map((it, i) => (
+                            <div key={i}>
+                              {it.quantity}× {it.productName} – $
+                              {formatPrice(it.total)} -
+                              <b>
+                                [QTY: {it?.stock == 'null' ? 'NO' : it?.stock}]
+                              </b>
+                            </div>
+                          ))}
+                        </td>
+                        <td className="px-3 py-1.5">
+                          <span
+                            className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-medium ${getPaymentMethodClass(
+                              s.paymentMethod === "mercadopago" ? "transfer" : s.paymentMethod
+                            )}`}
+                          >
+                            {translatePaymentMethod(
+                              s.paymentMethod === "mercadopago" ? "transfer" : s.paymentMethod
+                            )}
+                          </span>
+                        </td>
+                        <td className="px-3 py-1.5 font-medium">
+                          ${formatPrice(s.total)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <p className="text-slate-600 dark:text-slate-400">Sin ventas registradas.</p>
+            )}
+          </section>
+        </div>
       </div>
-    );
-  }
-  /* ═════════ END RETURN UI ═════════ */
-
+    </div>
+  );
 }

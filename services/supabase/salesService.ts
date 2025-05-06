@@ -65,6 +65,7 @@ export class SalesService extends SupabaseService<Sale> {
               quantity: item.quantity,
               price: item.price,
               total: item.total,
+              stock: item?.stock ?? 0,
             })) || []
 
           // Construir objeto de venta completo
@@ -253,6 +254,7 @@ export class SalesService extends SupabaseService<Sale> {
           quantity: item.quantity,
           price: item.price,
           total: item.quantity * item.price,
+          stock: item?.stock ?? 0,
         }
       })
 
