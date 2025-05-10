@@ -25,6 +25,7 @@ import {
   BarChart2,
   Apple,
   Award,
+  Save,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
@@ -39,6 +40,7 @@ const navItems = [
   { name: "Promos", href: "/admin/promos", icon: Apple },
   { name: "Actividad", href: "/admin/actividad", icon: Activity },
   { name: "Stock", href: "/admin/stock", icon: Award },
+  { name: "Reservas", href: "/admin/savings", icon: Save },
   // { name: "Ventas", href: "/admin/sales", icon: ShoppingCart },
   // { name: "Flujo de Caja", href: "/admin/caja", icon: CreditCard },
 ]
