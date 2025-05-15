@@ -179,6 +179,7 @@ export class ProductService extends SupabaseService<Product> {
       min_stock: product.minStock,
       description: product.description,
       business_id: product.businessId,
+      margen: product.margen
     }
 
     const { data, error } = await supabase.from(this.tableName).update(dbProduct).eq("id", product.id).select().single()

@@ -30,6 +30,7 @@ export interface Product {
   businessId: string;
   salesCount: number;
   totalRevenue: number;
+  margin: number; // nuevo campo margen %
 }
 
 /* ========= Constantes ========= */
@@ -219,6 +220,7 @@ export default function EmployeeProductsPage() {
         businessId: p.business_id,
         salesCount: p.sales_count || 0,
         totalRevenue: p.total_revenue || 0,
+        margin: p.margen ?? 0,
       }))
     );
     setIsProductsLoading(false);
@@ -226,6 +228,7 @@ export default function EmployeeProductsPage() {
 
   useEffect(() => {
     if (businessId) fetchProducts();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [businessId]);
 
   /* -- filters / search -- */
@@ -305,12 +308,9 @@ export default function EmployeeProductsPage() {
       description: p.description,
       businessId: p.businessId,
       category: category || "",
+      margin: p.margin
     });
-    setMarginPct(
-      p.purchasePrice > 0
-        ? Number(((p.sellingPrice / p.purchasePrice - 1) * 100).toFixed(2))
-        : 0
-    );
+    setMarginPct(p.margen ?? 0);
     setIsProductModal(true);
   };
 
@@ -406,6 +406,7 @@ export default function EmployeeProductsPage() {
             <colgroup>
               <col className="w-2/5" />
               <col className="w-1/5" />
+              {isSupervisor && <col className="w-1/5" />} {/* margen */}
               <col className="w-1/5" />
               <col className="w-1/5" />
             </colgroup>
@@ -417,6 +418,11 @@ export default function EmployeeProductsPage() {
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                   Precio
                 </th>
+                {isSupervisor && (
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                    Margen
+                  </th>
+                )}
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                   Stock
                 </th>
@@ -445,6 +451,11 @@ export default function EmployeeProductsPage() {
                       <td className="px-6 py-4 text-sm text-gray-500 dark:text-gray-400">
                         ${p.sellingPrice.toFixed(2)}
                       </td>
+                      {isSupervisor && (
+                        <td className="px-6 py-4 text-sm text-gray-500 dark:text-gray-400">
+                          {p.margin.toFixed(2)}%
+                        </td>
+                      )}
                       <td className="px-6 py-4">
                         <span
                           className={`px-2 py-1 text-xs font-medium rounded-full ${
@@ -492,7 +503,7 @@ export default function EmployeeProductsPage() {
               ) : (
                 <tr>
                   <td
-                    colSpan={4}
+                    colSpan={isSupervisor ? 5 : 4}
                     className="px-6 py-4 text-center text-sm text-gray-500 dark:text-gray-400"
                   >
                     {isLoading ? "Cargando productos..." : "No hay productos para mostrar."}
@@ -783,11 +794,19 @@ export default function EmployeeProductsPage() {
                     ))}
                   </select>
                 </div>
+                {/* margen (solo lectura) */}
+                {isSupervisor && (
+                  <div>
+                    <label className="label">Margen estimado (%)</label>
+                    <input
+                      type="number"
+                      readOnly
+                      className="input bg-gray-100 dark:bg-gray-700 cursor-not-allowed"
+                      value={(formData.margin ?? 0).toFixed(2)}
+                    />
+                  </div>
+                )}
               </div>
-
-              <p className="text-sm text-gray-500 dark:text-gray-400">
-                Margen: <strong>{marginPct}%</strong>
-              </p>
 
               <div className="flex justify-end gap-3">
                 <button
