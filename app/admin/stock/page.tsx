@@ -88,27 +88,37 @@ const loadBusinesses = async () => {
   return data ?? [];
 };
 
-const loadSales = async (businessId: string) =>
-  fetchAll((from, to) =>
+const loadSales = async (businessId: string, days: number) => {
+  const since = new Date(Date.now() - days * 86400000).toISOString();
+
+  return fetchAll((from, to) =>
     supabase
       .from("sales")
-      .select(
-        `
-        *,
+      .select(`
+        id,
+        timestamp,
         sale_items (
-          *,
+          quantity,
+          total,
+          product_id,
           products(name)
         )
-      `
-      )
+      `)
       .eq("business_id", businessId)
+      .gte("timestamp", since) // FILTRA EN LA DB, no en frontend
       .order("timestamp", { ascending: false })
       .range(from, to)
   );
+};
+
 
 const loadProducts = async (businessId: string) =>
   fetchAll((from, to) =>
-    supabase.from("products").select("*").eq("business_id", businessId).range(from, to)
+    supabase
+      .from("products")
+      .select("id, name, stock") // solo lo necesario
+      .eq("business_id", businessId)
+      .range(from, to)
   );
 
 /* ═════════════ CONST ═════════════ */
@@ -160,12 +170,16 @@ export default function TopProductsPage() {
     if (!selectedBiz) return;
     (async () => {
       setLoading(true);
-      const [s, p] = await Promise.all([loadSales(selectedBiz), loadProducts(selectedBiz)]);
+      const [s, p] = await Promise.all([
+        loadSales(selectedBiz, daysFilter),
+        loadProducts(selectedBiz),
+      ]);
       setSales(s);
       setProducts(p);
       setLoading(false);
     })();
-  }, [selectedBiz]);
+  }, [selectedBiz, daysFilter]); // ← importante incluir daysFilter
+
 
   /* ---------- compute top ---------- */
   const top = useMemo(() => {
