@@ -149,10 +149,13 @@ export default function EmployeeDashboard() {
   const activeShift = useMemo(() => employeeShifts.find((shift) => shift.active), [employeeShifts])
 
   // Get sales for active shift
-  const activeShiftSales = useMemo(
-    () => (activeShift ? sales.filter((sale) => sale.shiftId === activeShift.id) : []),
-    [sales, activeShift],
-  )
+  const activeShiftSales = useMemo(() => {
+    if (!activeShift) return [];
+    return sales
+      .filter((sale) => sale.shiftId === activeShift.id)
+      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+  }, [sales, activeShift]);
+
 
   // Calculate today's sales
   const today = new Date().toDateString()
@@ -394,14 +397,12 @@ export default function EmployeeDashboard() {
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
           <div className="flex items-center gap-3">
             <div
-              className={`p-3 rounded-full ${
-                activeShift ? "bg-green-100 dark:bg-green-900/30" : "bg-gray-100 dark:bg-gray-700/30"
-              }`}
+              className={`p-3 rounded-full ${activeShift ? "bg-green-100 dark:bg-green-900/30" : "bg-gray-100 dark:bg-gray-700/30"
+                }`}
             >
               <Clock
-                className={`h-6 w-6 ${
-                  activeShift ? "text-green-600 dark:text-green-400" : "text-gray-600 dark:text-gray-400"
-                }`}
+                className={`h-6 w-6 ${activeShift ? "text-green-600 dark:text-green-400" : "text-gray-600 dark:text-gray-400"
+                  }`}
               />
             </div>
             <div>
