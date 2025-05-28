@@ -133,6 +133,7 @@ export default function ShiftsPage() {
   const [monthOffset, setMonthOffset] = useState(0);
   const { start: monthStart, end: monthEnd } = useMemo(() => monthRange(monthOffset), [monthOffset]);
   const monthLabel = monthStart.toLocaleString("es-ES", { month: "long", year: "numeric" });
+  const [search, setSearch] = useState("");   // 🔍 producto buscado
 
   useEffect(() => {
     (async () => {
@@ -218,6 +219,17 @@ export default function ShiftsPage() {
   const sortedShifts = shifts
 
   const getShiftSales = (shiftId: string) => monthSales.filter((s) => s.shiftId === shiftId);
+  const filteredShifts = useMemo(() => {
+    if (!search.trim()) return sortedShifts;        // sin texto → todo igual
+    const term = search.toLowerCase().trim();
+    return sortedShifts.filter((sh) =>
+      getShiftSales(sh.id).some((sale) =>
+        sale.items.some((it: any) =>
+          (it.productName ?? "").toLowerCase().includes(term)
+        )
+      )
+    );
+  }, [sortedShifts, search, monthSales]);
 
   /* ─── loading splash ─── */
   if (isLoading)
@@ -254,6 +266,14 @@ export default function ShiftsPage() {
               </option>
             ))}
           </select>
+          <input
+            type="search"
+            placeholder="Buscar producto…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="rounded-full px-3 py-1.5 text-xs border bg-white dark:bg-slate-800
+             shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 w-[180px]"
+          />
 
           {/* navegación por mes */}
           <div className="flex items-center gap-2">
@@ -294,7 +314,7 @@ export default function ShiftsPage() {
             </thead>
             <tbody>
               {hasFetchedData && sortedShifts.length ? (
-                sortedShifts.map((sh) => {
+                filteredShifts.map((sh) => {
                   const total = getShiftSales(sh.id).reduce((s, v) => s + v.total, 0);
                   return (
                     <tr
