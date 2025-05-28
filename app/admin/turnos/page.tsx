@@ -9,7 +9,37 @@ import { getEmployees } from "@/lib/redux/slices/employeeSlice";
 import { fetchBusinesses } from "@/lib/redux/slices/businessSlice";
 import { getSales } from "@/lib/redux/slices/salesSlice";
 import { FileText, Search } from "lucide-react";
+import { supabase } from "@/lib/supabase";
+// helpers/case.ts
+export const toCamel = <T extends Record<string, any>>(row: T) =>
+  Object.fromEntries(
+    Object.entries(row).map(([k, v]) => [
+      k.replace(/_([a-z])/g, (_, c) => c.toUpperCase()),
+      v,
+    ]),
+  ) as any;
 
+async function fetchAllPaginated(
+  queryFn: (from: number, to: number) => Promise<{ data: any[] | null; error: any }>
+): Promise<any[]> {
+  const pageSize = 999;
+  let page = 0;
+  let acc: any[] = [];
+  for (; ;) {
+    const from = page * pageSize;
+    const to = from + pageSize - 1;
+    const { data, error } = await queryFn(from, to);
+    if (error) {
+      console.error(error);
+      break;
+    }
+    if (!data?.length) break;
+    acc = acc.concat(data);
+    if (data.length < pageSize) break;
+    page++;
+  }
+  return acc;
+}
 /* ───────── helpers de fecha ───────── */
 function monthRange(offset = 0) {
   // hoy (hora local)
@@ -29,50 +59,128 @@ const formatPrice = (n: number) =>
   n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 export default function ShiftsPage() {
-  const dispatch = useDispatch<AppDispatch>();
+  async function fetchShifts(from: Date, to: Date) {
+    return fetchAllPaginated((lo, hi) =>
+      supabase
+        .from("shifts")
+        .select("*")
+        .eq("business_id", selectedBusinessId)   // ← ESTA LÍNEA
+        .gte("start_time", from.toISOString())
+        .lt("start_time", to.toISOString())
+        .order("start_time", { ascending: false })
+        .range(lo, hi)
+    );
+  }
 
+  async function fetchSales(from: Date, to: Date) {
+    return fetchAllPaginated((lo, hi) =>
+      supabase
+        .from("sales")
+        .select(`
+            id,
+            timestamp,
+            total,
+            payment_method,
+            shift_id,
+            sale_items (
+              quantity,
+              total,
+              product_id,
+              products (
+                name
+              )
+            )
+          `)
+        .gte("timestamp", from.toISOString())
+        .lt("timestamp", to.toISOString())
+        .range(lo, hi)
+    );
+  }
+
+  async function fetchEmployees() {
+    const { data, error } = await supabase.from("employees").select("*").order("name");
+    if (error) {
+      console.error(error);
+      return [];
+    }
+    return data ?? [];
+  }
+
+  async function fetchBusinesses() {
+    const { data, error } = await supabase.from("businesses").select("*").order("name");
+    if (error) {
+      console.error(error);
+      return [];
+    }
+    return data ?? [];
+  }
   /* ─── redux state ─── */
-  const { shifts, loading: shiftsLoading } = useSelector((s: RootState) => s.shifts);
-  const { employees, loading: employeesLoading } = useSelector((s: RootState) => s.employees);
-  const { businesses, loading: businessesLoading } = useSelector((s: RootState) => s.businesses);
-  const { sales, loading: salesLoading } = useSelector((s: RootState) => s.sales);
+  const [shifts, setShifts] = useState<Shift[]>([]);
+  const [employees, setEmployees] = useState<any[]>([]);
+  const [businesses, setBusinesses] = useState<any[]>([]);
+  const [sales, setSales] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [hasFetchedData, setHasFetchedData] = useState(false);
 
   /* ─── local state ─── */
   const [selectedBusinessId, setSelectedBusinessId] = useState("all");
   const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
   const [selectedShift, setSelectedShift] = useState<Shift | null>(null);
+  const [hasSelectedBusiness, setHasSelectedBusiness] = useState(false);
 
   /* paginación por mes */
   const [monthOffset, setMonthOffset] = useState(0);
   const { start: monthStart, end: monthEnd } = useMemo(() => monthRange(monthOffset), [monthOffset]);
   const monthLabel = monthStart.toLocaleString("es-ES", { month: "long", year: "numeric" });
 
-  /* ─── fetch ─── */
   useEffect(() => {
-    // empleados/negocios se traen una sola vez
-    if (!employees.length) dispatch(getEmployees());
-    if (!businesses.length) dispatch(fetchBusinesses());
-  }, [dispatch, employees.length, businesses.length]);
+    (async () => {
+      setIsLoading(true);
+      const [emp, biz] = await Promise.all([fetchEmployees(), fetchBusinesses()]);
+      setEmployees(emp);
+      setBusinesses(biz);
+      setIsLoading(false);
+    })();
+  }, []);
 
   useEffect(() => {
-    /* cada vez que cambia el mes traemos turnos y ventas del rango */
-    dispatch(
-      getShifts({
-        from: monthStart.toISOString(),
-        to: monthEnd.toISOString(),
-      })
-    );
-    dispatch(
-      getSales({
-        from: monthStart.toISOString(),
-        to: monthEnd.toISOString(),
-      })
-    );
-  }, [dispatch, monthStart, monthEnd]);
+    if (!hasSelectedBusiness || selectedBusinessId === "all") return;
 
-  /* ─── helpers ─── */
-  const handleBusinessChange = (e: React.ChangeEvent<HTMLSelectElement>) =>
+    (async () => {
+      setIsLoading(true);
+      const [sh, sa] = await Promise.all([
+        fetchShifts(monthStart, monthEnd),
+        fetchSales(monthStart, monthEnd),
+      ]);
+      console.log(employees)
+      const shiftsFixed = sh.map(r => ({
+        ...r, startTime: r.start_time, endTime: r.end_time, employeeName: employees.find(e => e.id === r.employee_id)?.name ?? "—",
+        businessName: businesses.find(b => b.id === r.business_id)?.name ?? "—",
+      }));
+      const salesFixed = sa.map(r => ({
+        ...r,
+        shiftId: r.shift_id,
+        paymentMethod: r.payment_method,
+        items: r.sale_items.map(it => ({
+          quantity: it.quantity,
+          total: it.total,
+          productName: it.products?.name ?? "—",
+        })),
+      }));
+
+      // ⬇️ usa estas
+      setShifts(shiftsFixed);
+      setSales(salesFixed);
+      setIsLoading(false);
+      setHasFetchedData(true); // <--- acá
+    })();
+  }, [hasSelectedBusiness, selectedBusinessId, monthStart, monthEnd]);
+
+  const handleBusinessChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     setSelectedBusinessId(e.target.value);
+    setHasSelectedBusiness(true);
+  };
+
 
   const openDetailsModal = (shift: Shift) => {
     setSelectedShift(shift);
@@ -92,17 +200,8 @@ export default function ShiftsPage() {
     rappi: "bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-300",
   }[m] || "bg-slate-100 text-slate-800 dark:bg-slate-700 dark:text-slate-300");
 
-  const isLoading = shiftsLoading || employeesLoading || businessesLoading || salesLoading;
 
   /* ─── filtros y ordenación ─── */
-  const monthShifts = useMemo(
-    () =>
-      shifts.filter(
-        (sh) =>
-          new Date(sh.startTime) >= monthStart && new Date(sh.startTime) < monthEnd
-      ),
-    [shifts, monthStart, monthEnd]
-  );
   const monthSales = useMemo(
     () =>
       sales.filter(
@@ -111,14 +210,8 @@ export default function ShiftsPage() {
     [sales, monthStart, monthEnd]
   );
 
-  const filteredShifts =
-    selectedBusinessId === "all"
-      ? monthShifts
-      : monthShifts.filter((sh) => sh.businessId === selectedBusinessId);
 
-  const sortedShifts = [...filteredShifts].sort(
-    (a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime()
-  );
+  const sortedShifts = shifts
 
   const getShiftSales = (shiftId: string) => monthSales.filter((s) => s.shiftId === shiftId);
 
@@ -196,7 +289,7 @@ export default function ShiftsPage() {
               </tr>
             </thead>
             <tbody>
-              {sortedShifts.length ? (
+              {hasFetchedData && sortedShifts.length ? (
                 sortedShifts.map((sh) => {
                   const total = getShiftSales(sh.id).reduce((s, v) => s + v.total, 0);
                   return (
@@ -217,14 +310,16 @@ export default function ShiftsPage() {
                       <td className="px-4 py-2">
                         <span
                           className={`inline-block px-2 py-0.5 rounded-full text-[11px] font-semibold ${sh.active
-                              ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300"
-                              : "bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300"
+                            ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300"
+                            : "bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300"
                             }`}
                         >
-                          {sh.active ? "Activo" : "Completado"}
+                          {!sh.endTime ? "Activo" : "Completado"}
                         </span>
                       </td>
-                      <td className="px-4 py-2 text-center">{sh.sales}</td>
+                      <td className="px-4 py-2 text-center">
+                        {getShiftSales(sh.id).length}
+                      </td>
                       <td className="px-4 py-2 font-semibold text-emerald-600 dark:text-emerald-400">
                         ${formatPrice(total)}
                       </td>
@@ -253,6 +348,11 @@ export default function ShiftsPage() {
           </table>
         </div>
       </div>
+      {!hasFetchedData && !isLoading && (
+        <p className="text-center text-slate-500 dark:text-slate-400 mt-12">
+          Elegí un negocio para ver los turnos.
+        </p>
+      )}
 
       {/* modal detalles */}
       {isDetailsModalOpen && selectedShift && (
