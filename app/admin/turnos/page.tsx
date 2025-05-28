@@ -85,6 +85,7 @@ export default function ShiftsPage() {
             sale_items (
               quantity,
               total,
+              stock,
               product_id,
               products (
                 name
@@ -157,6 +158,8 @@ export default function ShiftsPage() {
         ...r, startTime: r.start_time, endTime: r.end_time, employeeName: employees.find(e => e.id === r.employee_id)?.name ?? "—",
         businessName: businesses.find(b => b.id === r.business_id)?.name ?? "—",
       }));
+
+      console.log(sa?.sale_items)
       const salesFixed = sa.map(r => ({
         ...r,
         shiftId: r.shift_id,
@@ -164,6 +167,7 @@ export default function ShiftsPage() {
         items: r.sale_items.map(it => ({
           quantity: it.quantity,
           total: it.total,
+          stock: it.stock,
           productName: it.products?.name ?? "—",
         })),
       }));
