@@ -77,6 +77,8 @@ type CartItem = {
 export default function NewSalePage() {
   const dispatch = useDispatch<AppDispatch>();
   const router = useRouter();
+  const [amountGiven, setAmountGiven] = useState<number | "">("");
+
 
   const { user } = useSelector((s: RootState) => s.auth);
   const { shifts, loading: shiftsLoading } = useSelector((s: RootState) => s.shifts);
@@ -305,13 +307,13 @@ export default function NewSalePage() {
       }
 
       await loadProducts();
-setSearch("")
+      setSearch("")
       // 3. Éxito
       setToast("Venta registrada ✔︎");
       setCart([]);
       setConfirm(false);
       setTimeout(() => setToast(""), 3000);
-
+      setAmountGiven('')
     } catch (err: any) {
       console.error("Error al registrar la venta o actualizar el stock:", err);
       setToast("❌ Error: " + (err.message || "algo salió mal"));
@@ -322,7 +324,10 @@ setSearch("")
   };
 
 
-
+  const change = useMemo(() => {
+    if (typeof amountGiven !== "number") return null;
+    return amountGiven - cartTotal;
+  }, [amountGiven, cartTotal]);
 
 
   /* ───────────────────────────────────── UI ───────────────────────────────────── */
@@ -515,6 +520,49 @@ setSearch("")
                     <span>Total</span>
                     <span>{formatCurrency(cartTotal)}</span>
                   </div>
+                  {paymentMethod === "cash" && (
+                    <>
+                      <div className="mt-3 space-y-2">
+                        <label
+                          htmlFor="amountGiven"
+                          className="block text-base font-semibold text-gray-900 dark:text-gray-100"
+                        >
+                          ¿Con cuánto paga el cliente?
+                        </label>
+
+                        <div className="relative">
+                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-lg text-gray-500 dark:text-gray-400">
+                            $
+                          </span>
+                          <input
+                            id="amountGiven"
+                            type="number"
+                            inputMode="decimal"
+                            step="any"
+                            min="0"
+                            className="w-full pl-7 pr-3 py-2 border border-gray-300 dark:border-gray-700 rounded-md text-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            value={amountGiven}
+                            onChange={(e) =>
+                              setAmountGiven(
+                                e.target.value === "" ? "" : Math.max(0, parseFloat(e.target.value))
+                              )
+                            }
+                          />
+                        </div>
+
+                        {typeof change === "number" && (
+                          <div className="flex justify-between items-center text-base font-semibold mt-2">
+                            <span className="text-gray-900 dark:text-gray-100">Vuelto a dar:</span>
+                            <span className={change < 0 ? "text-red-500" : "text-green-500"}>
+                              {change < 0 ? "Monto insuficiente" : formatCurrency(change)}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    </>
+                  )}
+
+
 
                   {/* payment buttons */}
                   <div className="grid grid-cols-2 gap-2 text-xs">
