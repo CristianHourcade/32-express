@@ -154,13 +154,16 @@ export default function ShiftsPage() {
         fetchShifts(monthStart, monthEnd),
         fetchSales(monthStart, monthEnd),
       ]);
-      console.log(employees)
       const shiftsFixed = sh.map(r => ({
-        ...r, startTime: r.start_time, endTime: r.end_time, employeeName: employees.find(e => e.id === r.employee_id)?.name ?? "—",
+        ...r,
+        startTime: r.start_time,
+        endTime: r.end_time,
+        startCash: r.start_cash ?? 0,
+        endCash: r.end_cash ?? null,
+        employeeName: employees.find(e => e.id === r.employee_id)?.name ?? "—",
         businessName: businesses.find(b => b.id === r.business_id)?.name ?? "—",
-      }));
+      }))
 
-      console.log(sa?.sale_items)
       const salesFixed = sa.map(r => ({
         ...r,
         shiftId: r.shift_id,
@@ -470,17 +473,15 @@ function DetailsModal({
             <Info label="Inicio" value={new Date(shift.startTime).toLocaleString()} />
             <Info
               label="Fin"
-              value={
-                shift.endTime ? new Date(shift.endTime).toLocaleString() : "Aún activo"
-              }
+              value={shift.endTime ? new Date(shift.endTime).toLocaleString() : "Aún activo"}
             />
             <Info
               label="Estado"
               value={
                 <span
                   className={`inline-block px-2 py-0.5 rounded-full text-[11px] font-semibold ${shift.active
-                    ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300"
-                    : "bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300"
+                      ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300"
+                      : "bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300"
                     }`}
                 >
                   {shift.active ? "Activo" : "Completado"}
@@ -488,7 +489,17 @@ function DetailsModal({
               }
             />
             <Info label="Ventas" value={shift.sales} />
+            <Info label="Caja Inicial" value={`$${formatPrice(shift.startCash || 0)}`} />
+            <Info
+              label="Caja Final"
+              value={
+                shift.endCash != null
+                  ? `$${formatPrice(shift.endCash)}`
+                  : "$0.00"
+              }
+            />
           </div>
+
 
           {/* totales */}
           <section>

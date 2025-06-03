@@ -98,9 +98,9 @@ export class ShiftService extends SupabaseService<Shift> {
   /**
    * Inicia un nuevo turno
    */
-  async startShift(data: { employeeId: string; businessId: string }): Promise<Shift> {
+  async startShift(data: any): Promise<Shift> {
     try {
-      const { employeeId, businessId } = data
+      const { employeeId, businessId, start_cash } = data
 
       // Verificar si ya hay un turno activo para este empleado
       const { data: existingShifts, error: checkError } = await supabase
@@ -129,6 +129,8 @@ export class ShiftService extends SupabaseService<Shift> {
             business_id: businessId,
             start_time: now,
             end_time: null,
+            end_cash: null,
+            start_cash: start_cash,
           },
         ])
         .select()
@@ -174,12 +176,13 @@ export class ShiftService extends SupabaseService<Shift> {
   /**
    * Finaliza un turno
    */
-  async endShift(shiftId: string): Promise<Shift> {
+  async endShift(shiftId: string, end_cash:any): Promise<Shift> {
     // Actualizar turno
     const { data: updatedShift, error } = await supabase
       .from(this.tableName)
       .update({
         end_time: new Date().toISOString(),
+        end_cash,
       })
       .eq("id", shiftId)
       .select(`

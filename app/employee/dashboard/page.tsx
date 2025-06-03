@@ -22,7 +22,10 @@ export default function EmployeeDashboard() {
   const { businesses, loading: businessesLoading } = useSelector((state: RootState) => state.businesses)
   const { shifts, loading: shiftsLoading } = useSelector((state: RootState) => state.shifts)
   const { employees, loading: employeesLoading } = useSelector((state: RootState) => state.employees)
-
+  const [showStartShiftModal, setShowStartShiftModal] = useState(false)
+  const [startCashInput, setStartCashInput] = useState("")
+  const [showEndShiftModal, setShowEndShiftModal] = useState(false)
+  const [endCashInput, setEndCashInput] = useState("")
   const [isStartingShift, setIsStartingShift] = useState(false)
   const [isEndingShift, setIsEndingShift] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -190,7 +193,7 @@ export default function EmployeeDashboard() {
     return breakdown
   }, [activeShiftSales, activeShift])
 
-  const handleStartShift = async () => {
+  const handleStartShift = async (startCash: number) => {
     if (!user?.id) {
       const errorMsg = "No se puede iniciar turno: usuario no identificado"
       logger.error(errorMsg)
@@ -228,7 +231,7 @@ export default function EmployeeDashboard() {
         userId: user.id,
       })
 
-      const result = await dispatch(beginShift({ employeeId: currentEmployee.id, businessId })).unwrap()
+      const result = await dispatch(beginShift({ employeeId: currentEmployee.id, businessId, start_cash: startCash })).unwrap()
 
       logger.info("Turno iniciado con éxito", {
         shiftId: result.id,
@@ -251,14 +254,14 @@ export default function EmployeeDashboard() {
     }
   }
 
-  const handleEndShift = async () => {
+  const handleEndShift = async (endCash: any) => {
     if (!activeShift) return
 
     setIsEndingShift(true)
     try {
       logger.info("Finalizando turno", { shiftId: activeShift.id })
 
-      await dispatch(finishShift(activeShift.id))
+      await dispatch(finishShift({ shiftId: activeShift.id, end_cash: endCash }))
 
       logger.info("Turno finalizado con éxito", { shiftId: activeShift.id })
 
@@ -293,6 +296,7 @@ export default function EmployeeDashboard() {
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS" }).format(amount)
   }
+
 
   // Helper function to translate payment method
   const translatePaymentMethod = (method: string) => {
@@ -421,12 +425,12 @@ export default function EmployeeDashboard() {
           </div>
           <div>
             {activeShift ? (
-              <button onClick={handleEndShift} disabled={isEndingShift} className="btn btn-danger">
+              <button onClick={() => setShowEndShiftModal(true)} disabled={isEndingShift} className="btn btn-danger">
                 {isEndingShift ? "Finalizando..." : "Finalizar Turno"}
               </button>
             ) : (
               <button
-                onClick={handleStartShift}
+                onClick={() => setShowStartShiftModal(true)}
                 disabled={isStartingShift || !businessId || !currentEmployee}
                 className={`btn ${!businessId || !currentEmployee ? "btn-disabled" : "btn-success"}`}
                 title={
@@ -636,6 +640,79 @@ export default function EmployeeDashboard() {
           </div>
         </div>
       )}
+      {showStartShiftModal && (
+        <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50 z-50">
+          <div className="bg-white dark:bg-gray-800 p-6 rounded-lg w-full max-w-md shadow-lg">
+            <h2 className="text-lg font-semibold mb-4">¿Con cuánto abrís la caja?</h2>
+            <input
+              type="number"
+              inputMode="decimal"
+              className="input w-full mb-4"
+              placeholder="$0.00"
+              value={startCashInput}
+              onChange={(e) => setStartCashInput(e.target.value)}
+            />
+            <div className="flex justify-end gap-2">
+              <button
+                className="btn"
+                onClick={() => {
+                  setShowStartShiftModal(false)
+                  setStartCashInput("")
+                }}
+              >
+                Cancelar
+              </button>
+              <button
+                className="btn btn-success"
+                onClick={() => {
+                  setShowStartShiftModal(false)
+                  handleStartShift(parseFloat(startCashInput) || 0)
+                  setStartCashInput("")
+                }}
+              >
+                Confirmar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {showEndShiftModal && (
+        <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50 z-50">
+          <div className="bg-white dark:bg-gray-800 p-6 rounded-lg w-full max-w-md shadow-lg">
+            <h2 className="text-lg font-semibold mb-4">¿Con cuánto cerrás la caja?</h2>
+            <input
+              type="number"
+              inputMode="decimal"
+              className="input w-full mb-4"
+              placeholder="$0.00"
+              value={endCashInput}
+              onChange={(e) => setEndCashInput(e.target.value)}
+            />
+            <div className="flex justify-end gap-2">
+              <button
+                className="btn"
+                onClick={() => {
+                  setShowEndShiftModal(false)
+                  setEndCashInput("")
+                }}
+              >
+                Cancelar
+              </button>
+              <button
+                className="btn btn-danger"
+                onClick={() => {
+                  setShowEndShiftModal(false)
+                  handleEndShift(parseFloat(endCashInput) || 0)
+                  setEndCashInput("")
+                }}
+              >
+                Confirmar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   )
 }

@@ -43,7 +43,7 @@ export const getActiveShifts = createAsyncThunk("shifts/getActiveShifts", async 
 
 export const beginShift = createAsyncThunk(
   "shifts/beginShift",
-  async (data: { employeeId: string; businessId: string }, { rejectWithValue }) => {
+  async (data: any, { rejectWithValue }) => {
     try {
       const response = await startShift(data)
       return response
@@ -54,8 +54,9 @@ export const beginShift = createAsyncThunk(
   },
 )
 
-export const finishShift = createAsyncThunk("shifts/finishShift", async (shiftId: string) => {
-  const response = await endShift(shiftId)
+export const finishShift = createAsyncThunk("shifts/finishShift", async (arg) => {
+  const { shiftId, end_cash } = arg as any
+  const response = await endShift(shiftId, end_cash)
   return response
 })
 

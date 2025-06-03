@@ -3,7 +3,7 @@ import { shiftService } from "../supabase/shiftService"
 import { activityService } from "../supabase/activityService"
 
 // Funciones de API para empleados
-export const startShift = async (data: { employeeId: string; businessId: string }): Promise<Shift> => {
+export const startShift = async (data: any): Promise<Shift> => {
   try {
     console.log("Llamando a shiftService.startShift con:", data)
     const newShift = await shiftService.startShift(data)
@@ -24,13 +24,12 @@ export const startShift = async (data: { employeeId: string; businessId: string 
   }
 }
 
-export const endShift = async (shiftId: string): Promise<Shift> => {
+export const endShift = async (shiftId: string, end_cash: any): Promise<Shift> => {
   const shift = await shiftService.getById(shiftId)
   if (!shift) {
     throw new Error("Shift not found")
   }
-
-  const endedShift = await shiftService.endShift(shiftId)
+  const endedShift = await shiftService.endShift(shiftId, end_cash)
 
   // Registrar actividad
   await activityService.logActivity({
