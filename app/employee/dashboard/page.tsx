@@ -531,7 +531,7 @@ export default function EmployeeDashboard() {
           </div>
 
           {/* Payment Method Breakdown */}
-          <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm">
               <p className="text-sm text-gray-500 dark:text-gray-400">Efectivo</p>
               <p className="text-xl font-bold text-green-600 dark:text-green-400">
@@ -548,12 +548,6 @@ export default function EmployeeDashboard() {
               <p className="text-sm text-gray-500 dark:text-gray-400">Transferencia</p>
               <p className="text-xl font-bold text-purple-600 dark:text-purple-400">
                 {formatCurrency(paymentMethodBreakdown.transfer)}
-              </p>
-            </div>
-            <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm">
-              <p className="text-sm text-gray-500 dark:text-gray-400">MercadoPago</p>
-              <p className="text-xl font-bold text-sky-600 dark:text-sky-400">
-                {formatCurrency(paymentMethodBreakdown.mercadopago)}
               </p>
             </div>
             <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm">

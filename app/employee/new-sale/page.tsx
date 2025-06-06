@@ -292,19 +292,28 @@ export default function NewSalePage() {
       if (!saleResult) throw new Error("No se pudo registrar la venta.");
 
       // 2. Actualizar stock
+      // 2. Agrupar cantidades a descontar por productId
+      const stockToUpdate: Record<string, number> = {};
+
       for (const it of cart) {
         if (it.listID) {
           for (const pi of it.listID) {
-            const prod = products.find((p) => p.id === pi.id);
-            if (!prod) throw new Error(`Producto no encontrado (ID: ${pi.id})`);
-            await dispatch(editProduct({ ...prod, stock: prod.stock - pi.qty * it.quantity })).unwrap();
+            const qty = pi.qty * it.quantity;
+            stockToUpdate[pi.id] = (stockToUpdate[pi.id] || 0) + qty;
           }
         } else {
-          const prod = products.find((p) => p.id === it.productId);
-          if (!prod) throw new Error(`Producto no encontrado (ID: ${it.productId})`);
-          await dispatch(editProduct({ ...prod, stock: prod.stock - it.quantity })).unwrap();
+          stockToUpdate[it.productId] = (stockToUpdate[it.productId] || 0) + it.quantity;
         }
       }
+
+      // 3. Aplicar descuentos de stock
+      for (const productId in stockToUpdate) {
+        const prod = products.find((p) => p.id === productId);
+        if (!prod) throw new Error(`Producto no encontrado (ID: ${productId})`);
+        const newStock = prod.stock - stockToUpdate[productId];
+        await dispatch(editProduct({ ...prod, stock: newStock })).unwrap();
+      }
+
 
       await loadProducts();
       setSearch("")
