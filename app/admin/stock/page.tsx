@@ -99,6 +99,7 @@ const loadSales = async (businessId: string, days: number) => {
         timestamp,
         sale_items (
           quantity,
+          promotion_id,
           total,
           product_id,
           products(name)
@@ -109,6 +110,22 @@ const loadSales = async (businessId: string, days: number) => {
       .order("timestamp", { ascending: false })
       .range(from, to)
   );
+};
+
+const loadPromotionsByIds = async (ids: string[]) => {
+  if (!ids.length) return [];
+
+  const { data, error } = await supabase
+    .from("promotions")
+    .select("id, name, price, products")
+    .in("id", ids);
+
+  if (error) {
+    console.error("Error loading promotions:", error);
+    return [];
+  }
+
+  return data ?? [];
 };
 
 
@@ -160,7 +177,8 @@ export default function TopProductsPage() {
   const [copied, setCopied] = useState(false);
   const [sortCol, setSortCol] = useState<"qty" | "revenue" | "stock">("qty");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
-
+  const [promotions, setPromotions] = useState<any[]>([]);
+  
   /* ---------- load data ---------- */
   useEffect(() => {
     (async () => setBusinesses(await loadBusinesses()))();
@@ -168,61 +186,121 @@ export default function TopProductsPage() {
 
   useEffect(() => {
     if (!selectedBiz) return;
+
     (async () => {
       setLoading(true);
+
+      // 1. Cargar ventas y productos
       const [s, p] = await Promise.all([
         loadSales(selectedBiz, daysFilter),
         loadProducts(selectedBiz),
       ]);
       setSales(s);
       setProducts(p);
+
+      // 2. Detectar promos involucradas en esas ventas
+      const promoIds = s
+        .flatMap((sale) => sale.sale_items ?? [])
+        .filter((item) => item.promotion_id)
+        .map((item) => item.promotion_id);
+
+      const uniquePromoIds = Array.from(new Set(promoIds));
+
+      // 3. Cargar promociones por id
+      const promos = await loadPromotionsByIds(uniquePromoIds);
+      setPromotions(promos);
+
       setLoading(false);
     })();
-  }, [selectedBiz, daysFilter]); // ← importante incluir daysFilter
+  }, [selectedBiz, daysFilter]);
+
 
 
   /* ---------- compute top ---------- */
   const top = useMemo(() => {
     if (!selectedBiz) return [];
 
-    /* filtrar ventas recientes */
     const now = Date.now();
+
+    // Ventas dentro del rango
     const recentSales = sales.filter(
       (s) => (now - new Date(s.timestamp).getTime()) / 86400000 <= daysFilter
     );
 
-    /* mapear productos */
+    // Acumulador de productos
     const map = new Map<
       string,
       { name: string; qty: number; revenue: number; stock: number | null; cat: string }
     >();
 
+    // 🔹 1. Ventas normales (no promo)
     recentSales.forEach((sale) =>
       sale.sale_items?.forEach((item: any) => {
-        const prod = products.find((p) => p.id === item.product_id);
-        if (!prod) return;
-        const key = item.product_id as string;
-        if (!map.has(key)) {
-          const { category, baseName } = extractCategory(item.products?.name ?? "—");
-          map.set(key, {
-            name: baseName,
-            cat: category,
-            qty: 0,
-            revenue: 0,
-            stock: prod.stock ?? prod.current_stock ?? null,
-          });
+        if (!item.promotion_id) {
+          const prod = products.find((p) => p.id === item.product_id);
+          if (!prod) return;
+
+          const key = item.product_id;
+          if (!map.has(key)) {
+            const { category, baseName } = extractCategory(item.products?.name ?? "—");
+            map.set(key, {
+              name: baseName,
+              cat: category,
+              qty: 0,
+              revenue: 0,
+              stock: prod.stock ?? prod.current_stock ?? null,
+            });
+          }
+
+          const e = map.get(key)!;
+          e.qty += item.quantity;
+          e.revenue += item.total;
         }
-        const e = map.get(key)!;
-        e.qty += item.quantity;
-        e.revenue += item.total;
       })
     );
 
-    /* a array + filtros */
+    // 🔹 2. Ventas que son promociones → sumar productos internos
+    recentSales.forEach((sale) =>
+      sale.sale_items?.forEach((item: any) => {
+        if (!item.promotion_id) return;
+
+        const promo = promotions.find((p) => p.id === item.promotion_id);
+        if (!promo?.products) return;
+
+        const totalQty = promo.products.reduce((sum, p) => sum + p.qty, 0) || 1;
+        const promoUnitValue = promo.price / totalQty;
+
+        promo.products.forEach((promoItem: any) => {
+          const prod = products.find((p) => p.id === promoItem.id);
+          if (!prod) return;
+
+          const key = promoItem.id;
+          const qty = promoItem.qty ?? 1;
+          const revenue = promoUnitValue * qty;
+
+          if (!map.has(key)) {
+            const { category, baseName } = extractCategory(prod.name ?? "—");
+            map.set(key, {
+              name: baseName,
+              cat: category,
+              qty: 0,
+              revenue: 0,
+              stock: prod.stock ?? prod.current_stock ?? null,
+            });
+          }
+
+          const e = map.get(key)!;
+          e.qty += qty;
+          e.revenue += revenue;
+        });
+      })
+    );
+
+    // 🔹 3. Filtros de categoría
     let arr = Array.from(map.values());
     if (selectedCats.length) arr = arr.filter((p) => selectedCats.includes(p.cat));
 
-    /* ordenar */
+    // 🔹 4. Orden
     arr.sort((a, b) => {
       const diff = (a[sortCol] ?? -Infinity) - (b[sortCol] ?? -Infinity);
       return sortDir === "asc" ? diff : -diff;
@@ -232,6 +310,7 @@ export default function TopProductsPage() {
   }, [
     sales,
     products,
+    promotions,
     daysFilter,
     selectedCats,
     selectedBiz,
