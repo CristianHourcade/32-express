@@ -178,7 +178,7 @@ export default function TopProductsPage() {
   const [sortCol, setSortCol] = useState<"qty" | "revenue" | "stock">("qty");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [promotions, setPromotions] = useState<any[]>([]);
-  
+
   /* ---------- load data ---------- */
   useEffect(() => {
     (async () => setBusinesses(await loadBusinesses()))();
@@ -305,8 +305,25 @@ export default function TopProductsPage() {
       const diff = (a[sortCol] ?? -Infinity) - (b[sortCol] ?? -Infinity);
       return sortDir === "asc" ? diff : -diff;
     });
+    const categorySummary = (() => {
+      const totalRevenue = arr.reduce((sum, p) => sum + p.revenue, 0);
+      const map = new Map<string, { revenue: number; percent: number }>();
 
-    return arr;
+      arr.forEach((p) => {
+        if (!map.has(p.cat)) map.set(p.cat, { revenue: 0, percent: 0 });
+        map.get(p.cat)!.revenue += p.revenue;
+      });
+
+      const result = Array.from(map.entries()).map(([cat, val]) => ({
+        category: cat,
+        revenue: val.revenue,
+        percent: totalRevenue ? (val.revenue / totalRevenue) * 100 : 0,
+      }));
+
+      return result.sort((a, b) => b.revenue - a.revenue); // ordenar por más facturación
+    })();
+
+    return { products: arr, categorySummary };
   }, [
     sales,
     products,
@@ -342,7 +359,7 @@ export default function TopProductsPage() {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  /* ---------- UI ---------- */
+  /* ───────── UI ───────── */
   const selectedBizName = businesses.find((b) => b.id === selectedBiz)?.name ?? "";
 
   return (
@@ -383,7 +400,7 @@ export default function TopProductsPage() {
           value={daysFilter}
           onChange={(e) => setDaysFilter(Number(e.target.value))}
         >
-          {[3, 7, 14, 30].map((d) => (
+          {[1, 2, 3, 7, 14, 30].map((d) => (
             <option key={d} value={d}>
               Últimos {d} días
             </option>
@@ -397,7 +414,7 @@ export default function TopProductsPage() {
         />
 
         <button
-          disabled={!top.length}
+          disabled={!top.products?.length}
           onClick={copyList}
           className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-medium rounded-full px-4 py-2 transition focus:outline-none focus:ring-2 focus:ring-indigo-500"
         >
@@ -413,100 +430,124 @@ export default function TopProductsPage() {
         </button>
       </div>
 
-      {/* ───────── Tabla ───────── */}
-      <div className="bg-white dark:bg-slate-800 rounded-xl shadow ring-1 ring-slate-200 dark:ring-slate-700">
-        <div className="overflow-x-auto rounded-xl">
-          <table className="min-w-full text-sm">
-            <thead className="bg-slate-50 dark:bg-slate-700 sticky top-0 z-10 text-[11px] uppercase tracking-wide select-none">
-              <tr className="divide-x divide-slate-200 dark:divide-slate-600">
-                <th className="px-4 py-3 text-left font-semibold">Categoría</th>
-                <th className="px-4 py-3 text-left font-semibold">Producto</th>
-
-                <th
-                  onClick={() => {
-                    if (sortCol === "qty") setSortDir(sortDir === "asc" ? "desc" : "asc");
-                    else {
-                      setSortCol("qty");
-                      setSortDir("desc");
-                    }
-                  }}
-                  className="px-4 py-3 font-semibold cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-600/30"
-                >
-                  Unidades&nbsp;
-                  {sortCol === "qty" && (sortDir === "asc" ? "↑" : "↓")}
-                </th>
-
-                <th
-                  onClick={() => {
-                    if (sortCol === "revenue") setSortDir(sortDir === "asc" ? "desc" : "asc");
-                    else {
-                      setSortCol("revenue");
-                      setSortDir("desc");
-                    }
-                  }}
-                  className="px-4 py-3 font-semibold cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-600/30"
-                >
-                  Facturado&nbsp;
-                  {sortCol === "revenue" && (sortDir === "asc" ? "↑" : "↓")}
-                </th>
-
-                <th
-                  onClick={() => {
-                    if (sortCol === "stock") setSortDir(sortDir === "asc" ? "desc" : "asc");
-                    else {
-                      setSortCol("stock");
-                      setSortDir("desc");
-                    }
-                  }}
-                  className="px-4 py-3 font-semibold cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-600/30"
-                >
-                  Stock&nbsp;
-                  {sortCol === "stock" && (sortDir === "asc" ? "↑" : "↓")}
-                </th>
-              </tr>
-            </thead>
-
-            <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
-              {!selectedBiz ? (
-                <tr>
-                  <td colSpan={5} className="py-8 text-center text-slate-500 dark:text-slate-400">
-                    Seleccioná un negocio para comenzar.
-                  </td>
-                </tr>
-              ) : loading ? (
-                <tr>
-                  <td colSpan={5} className="py-8 text-center text-slate-500 dark:text-slate-400">
-                    Cargando…
-                  </td>
-                </tr>
-              ) : top.length === 0 ? (
-                <tr>
-                  <td colSpan={5} className="py-8 text-center text-slate-500 dark:text-slate-400">
-                    Sin resultados para los filtros seleccionados.
-                  </td>
-                </tr>
-              ) : (
-                top.map((p) => (
-                  <tr
-                    key={p.name + p.cat}
-                    className="hover:bg-slate-50 dark:hover:bg-slate-700/40 odd:bg-slate-50/40 dark:odd:bg-slate-800/30"
+      {/* ───────── Tablas ───────── */}
+      <div className="flex flex-col lg:flex-row gap-6">
+        {/* Tabla productos (60%) */}
+        <div className="w-full lg:w-[60%] bg-white dark:bg-slate-800 rounded-xl shadow ring-1 ring-slate-200 dark:ring-slate-700">
+          <div className="overflow-x-auto rounded-xl">
+            <table className="min-w-full text-sm">
+              <thead className="bg-slate-50 dark:bg-slate-700 sticky top-0 z-10 text-[11px] uppercase tracking-wide select-none">
+                <tr className="divide-x divide-slate-200 dark:divide-slate-600">
+                  <th className="px-4 py-3 text-left font-semibold">Categoría</th>
+                  <th className="px-4 py-3 text-left font-semibold">Producto</th>
+                  <th
+                    onClick={() => {
+                      if (sortCol === "qty") setSortDir(sortDir === "asc" ? "desc" : "asc");
+                      else {
+                        setSortCol("qty");
+                        setSortDir("desc");
+                      }
+                    }}
+                    className="px-4 py-3 font-semibold cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-600/30"
                   >
-                    <td className="px-4 py-2">{p.cat}</td>
-                    <td className="px-4 py-2 font-medium">{p.name}</td>
-                    <td className="px-4 py-2">{p.qty}</td>
-                    <td className="px-4 py-2">
-                      <span className="font-semibold text-green-700">
-                        $ {formatPrice(p.revenue)}
-                      </span>
+                    Unidades&nbsp;
+                    {sortCol === "qty" && (sortDir === "asc" ? "↑" : "↓")}
+                  </th>
+                  <th
+                    onClick={() => {
+                      if (sortCol === "revenue") setSortDir(sortDir === "asc" ? "desc" : "asc");
+                      else {
+                        setSortCol("revenue");
+                        setSortDir("desc");
+                      }
+                    }}
+                    className="px-4 py-3 font-semibold cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-600/30"
+                  >
+                    Facturado&nbsp;
+                    {sortCol === "revenue" && (sortDir === "asc" ? "↑" : "↓")}
+                  </th>
+                  <th
+                    onClick={() => {
+                      if (sortCol === "stock") setSortDir(sortDir === "asc" ? "desc" : "asc");
+                      else {
+                        setSortCol("stock");
+                        setSortDir("desc");
+                      }
+                    }}
+                    className="px-4 py-3 font-semibold cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-600/30"
+                  >
+                    Stock&nbsp;
+                    {sortCol === "stock" && (sortDir === "asc" ? "↑" : "↓")}
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
+                {!selectedBiz ? (
+                  <tr>
+                    <td colSpan={5} className="py-8 text-center text-slate-500 dark:text-slate-400">
+                      Seleccioná un negocio para comenzar.
                     </td>
-                    <td className="px-4 py-2">{p.stock ?? "—"}</td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+                ) : loading ? (
+                  <tr>
+                    <td colSpan={5} className="py-8 text-center text-slate-500 dark:text-slate-400">
+                      Cargando…
+                    </td>
+                  </tr>
+                ) : top.products?.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="py-8 text-center text-slate-500 dark:text-slate-400">
+                      Sin resultados para los filtros seleccionados.
+                    </td>
+                  </tr>
+                ) : (
+                  top.products?.map((p) => (
+                    <tr
+                      key={p.name + p.cat}
+                      className="hover:bg-slate-50 dark:hover:bg-slate-700/40 odd:bg-slate-50/40 dark:odd:bg-slate-800/30"
+                    >
+                      <td className="px-4 py-2">{p.cat}</td>
+                      <td className="px-4 py-2 font-medium">{p.name}</td>
+                      <td className="px-4 py-2">{p.qty}</td>
+                      <td className="px-4 py-2">
+                        <span className="font-semibold text-green-700">
+                          $ {formatPrice(p.revenue)}
+                        </span>
+                      </td>
+                      <td className="px-4 py-2">{p.stock ?? "—"}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* Tabla resumen (40%) */}
+        <div className="w-full lg:w-[40%] bg-white dark:bg-slate-800 rounded-xl shadow ring-1 ring-slate-200 dark:ring-slate-700 h-[500px]">
+          <div className="overflow-x-auto rounded-xl">
+            <table className="min-w-full text-sm">
+              <thead className="bg-slate-100 dark:bg-slate-700 text-[11px] uppercase tracking-wide select-none">
+                <tr>
+                  <th className="px-4 py-3 text-left font-semibold">Categoría</th>
+                  <th className="px-4 py-3 text-right font-semibold">Facturado</th>
+                  <th className="px-4 py-3 text-right font-semibold">% del total</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
+                {top.categorySummary?.map((cat) => (
+                  <tr key={cat.category} className="hover:bg-slate-50 dark:hover:bg-slate-700/40">
+                    <td className="px-4 py-2">{cat.category}</td>
+                    <td className="px-4 py-2 text-right">$ {formatPrice(cat.revenue)}</td>
+                    <td className="px-4 py-2 text-right">{cat.percent.toFixed(1)}%</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
     </div>
   );
+
 }
