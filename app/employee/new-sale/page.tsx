@@ -23,6 +23,7 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
+import LoadingSpinner from "@/components/LoadingSpinner";
 
 /* ────────────────────────────────────────────────────────── */
 /*  Constantes & helpers                                      */
@@ -40,6 +41,23 @@ const CATEGORIES = [
   "HIGIENE",
   "ALCOHOL",
 ];
+
+function NoShiftBanner() {
+  return (
+    <div className="flex flex-col items-center justify-center py-12 px-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-300 dark:border-amber-700 rounded-lg space-y-2">
+      <AlertTriangle className="h-12 w-12 text-amber-500" />
+      <h2 className="text-xl font-semibold text-amber-700 dark:text-amber-300">
+        ¡Estás sin turno activo!
+      </h2>
+      <p className="text-sm text-amber-600 dark:text-amber-400">
+        Para poder registrar ventas, primero inicia tu turno desde el Dashboard.
+      </p>
+      <Link href="/employee/dashboard" className="mt-4 btn btn-amber">
+        Ir al Dashboard
+      </Link>
+    </div>
+  )
+}
 
 const extractCategory = (name: string) => {
   const parts = name.trim().split(" ");
@@ -69,7 +87,24 @@ type CartItem = {
   stock: number;
   listID?: any;
 };
+type Shift = {
+  id: string
+  employee_id: string
+  business_id: string
+  start_time: string
+  end_time: string | null
+  start_cash: number
+  end_cash: number | null
+  active: boolean
+  businessName: string
+}
 
+type Employee = {
+  id: string
+  userId: string
+  email: string
+  name: string
+}
 /* ────────────────────────────────────────────────────────── */
 /*  Componente                                                */
 /* ────────────────────────────────────────────────────────── */
@@ -78,12 +113,24 @@ export default function NewSalePage() {
   const dispatch = useDispatch<AppDispatch>();
   const router = useRouter();
   const [amountGiven, setAmountGiven] = useState<number | "">("");
+  const { user } = useSelector((state: RootState) => state.auth)
+  const [employees, setEmployees] = useState([]);
 
-
-  const { user } = useSelector((s: RootState) => s.auth);
-  const { shifts, loading: shiftsLoading } = useSelector((s: RootState) => s.shifts);
-  const { employees } = useSelector((s: RootState) => s.employees);
-
+  const fetchEmployees = async () => {
+    setLoadingEmployees(true);
+    const { data, error } = await supabase
+      .from("employees")
+      .select("id, user_id, email, name");
+    setLoadingEmployees(false);
+    if (error) {
+      console.error("Error al cargar empleados:", error);
+      return;
+    }
+    setEmployees(data);
+  };
+  const [loadingEmployees, setLoadingEmployees] = useState(false);
+  const [shifts, setShifts] = useState<Shift[]>([]);
+  const [loadingShifts, setLoadingShifts] = useState(true);
   const [products, setProducts] = useState<any[]>([]);
   const [productsLoading, setProductsLoading] = useState(true);
 
@@ -103,12 +150,28 @@ export default function NewSalePage() {
 
   const businessId = user?.businessId;
 
+  useEffect(() => {
+    fetchEmployees();
+  }, []);
   /* ─ Fetch productos ─ */
+  /* ─────────────── useEffect de carga inicial ─────────────── */
   useEffect(() => {
     if (!businessId) return;
     (async () => {
       setProductsLoading(true);
       try {
+        // 1. Traigo stock del negocio
+        const { data: invRows, error: invErr } = await supabase
+          .from("business_inventory")
+          .select("product_id, stock")
+          .eq("business_id", businessId);
+        if (invErr) throw invErr;
+        const stockMap: Record<string, number> = {};
+        invRows?.forEach((r: any) => {
+          stockMap[r.product_id] = r.stock;
+        });
+
+        // 2. Traigo todos los productos master en páginas de 1000
         const pageSize = 1000;
         let page = 0;
         let acc: any[] = [];
@@ -116,31 +179,36 @@ export default function NewSalePage() {
         while (!done) {
           const { from, to } = { from: page * pageSize, to: page * pageSize + pageSize - 1 };
           const { data, error } = await supabase
-            .from("products")
+            .from("products_master")
             .select("*")
-            .eq("business_id", businessId)
             .range(from, to);
           if (error) throw error;
           if (!data?.length || data.length < pageSize) done = true;
           acc = acc.concat(data ?? []);
           page++;
         }
-        /* promos */
+
+        // 3. Mapeo stock en cada producto master
+        const prodsWithStock = acc.map((p) => ({
+          ...p,
+          stock: stockMap[p.id] ?? 0,
+        }));
+
+        // 4. Traigo promociones y les asigno stock "ilimitado"
         const { data: promos } = await supabase
           .from("promotions")
           .select("*")
           .eq("businesses_id", businessId);
         const promoRows =
           promos?.map((p) => ({
-            business_id: p.businesses_id,
+            ...p,
             code: "PROMO",
-            id: p.id,
-            name: p.name,
             selling_price: p.price,
             products: p.products,
             stock: 999,
           })) ?? [];
-        setProducts([...promoRows, ...acc]);
+
+        setProducts([...promoRows, ...prodsWithStock]);
       } catch (err) {
         console.error(err);
         setProducts([]);
@@ -163,12 +231,31 @@ export default function NewSalePage() {
     );
   }, [employees, user]);
 
-  const activeShift = useMemo(
-    () =>
-      currentEmp ? shifts.find((s) => s.employeeId === currentEmp.id && s.active) : null,
-    [shifts, currentEmp]
-  );
+  const activeShift = useMemo(() => {
+    if (!currentEmp) return null;
+    return shifts.find((s) => s.end_time === null);
+  }, [shifts, currentEmp]);
 
+  // 2. Función para traer shifts desde Supabase
+  const fetchShifts = async () => {
+    if (!currentEmp) return;
+    setLoadingShifts(true);
+    const { data, error } = await supabase
+      .from("shifts")
+      .select("*")
+      .eq("employee_id", currentEmp.id)
+      .order("start_time", { ascending: false });
+    setLoadingShifts(false);
+    if (error) {
+      console.error("Error al cargar shifts:", error);
+      return;
+    }
+    setShifts(data);
+  };
+
+  useEffect(() => {
+    fetchShifts();
+  }, [currentEmp]);
   /* ─ Filtro búsqueda ─ */
   const filteredProducts = useMemo(() => {
     if (!debouncedSearch.trim()) return [];
@@ -188,29 +275,22 @@ export default function NewSalePage() {
   };
 
   const addToCart = (p: any) => {
-    const idx = cart.findIndex((i) => i.productId === p.id);
-    if (idx >= 0) {
-      if (cart[idx].quantity >= p.stock) return toastSinStock();
-      updateQty(idx, cart[idx].quantity + 1);
-    } else if (p.stock > 0) {
-      setCart([
-        ...cart,
-        {
-          productId: p.id,
-          productName: p.name,
-          price: p.selling_price || p.sellingPrice,
-          quantity: 1,
-          total: p.selling_price || p.sellingPrice,
-          stock: p.stock - 1,
-          listID: p.products,
-        },
-      ]);
-    } else toastSinStock();
+    setCart([
+      ...cart,
+      {
+        productId: p.id,
+        productName: p.name,
+        price: p.default_selling || p.default_selling,
+        quantity: 1,
+        total: p.default_selling || p.default_selling,
+        stock: p.stock - 1,
+        listID: p.products,
+      },
+    ]);
   };
 
   const updateQty = (idx: number, newQ: number) => {
     const prod = products.find((p) => p.id === cart[idx].productId);
-    if (!prod || newQ < 1 || newQ > prod.stock) return toastSinStock();
     setCart((prev) => {
       const next = [...prev];
       next[idx] = {
@@ -231,6 +311,15 @@ export default function NewSalePage() {
     if (!businessId) return;
     setProductsLoading(true);
     try {
+      // 1. Traigo stock
+      const { data: invRows } = await supabase
+        .from("business_inventory")
+        .select("product_id, stock")
+        .eq("business_id", businessId);
+      const stockMap: Record<string, number> = {};
+      invRows?.forEach((r: any) => (stockMap[r.product_id] = r.stock));
+
+      // 2. Traigo productos (supabase.from("products") → aquí usas tu tabla master)
       const pageSize = 1000;
       let page = 0;
       let acc: any[] = [];
@@ -238,30 +327,35 @@ export default function NewSalePage() {
       while (!done) {
         const { from, to } = { from: page * pageSize, to: page * pageSize + pageSize - 1 };
         const { data, error } = await supabase
-          .from("products")
+          .from("products_master")
           .select("*")
-          .eq("business_id", businessId)
           .range(from, to);
         if (error) throw error;
         if (!data?.length || data.length < pageSize) done = true;
         acc = acc.concat(data ?? []);
         page++;
       }
+      // 3. Inyecto stock
+      const prodsWithStock = acc.map((p) => ({
+        ...p,
+        stock: stockMap[p.id] ?? 0,
+      }));
+
+      // 4. Promos
       const { data: promos } = await supabase
         .from("promotions")
         .select("*")
         .eq("businesses_id", businessId);
       const promoRows =
         promos?.map((p) => ({
-          business_id: p.businesses_id,
+          ...p,
           code: "PROMO",
-          id: p.id,
-          name: p.name,
           selling_price: p.price,
           products: p.products,
           stock: 999,
         })) ?? [];
-      setProducts([...promoRows, ...acc]);
+
+      setProducts([...promoRows, ...prodsWithStock]);
     } catch (err) {
       console.error(err);
       setProducts([]);
@@ -269,12 +363,14 @@ export default function NewSalePage() {
       setProductsLoading(false);
     }
   };
+
   /* ─ Complete sale ─ */
   const handleComplete = async () => {
     if (!activeShift || !cart.length) return;
     setProcessing(true);
 
     try {
+      // 1. Armo los datos de la venta
       const saleData = {
         businessId: businessId!,
         businessName: activeShift.businessName,
@@ -287,16 +383,27 @@ export default function NewSalePage() {
         shiftId: activeShift.id,
       };
 
-      // 1. Registrar venta
-      const saleResult = await dispatch(createSale(saleData)).unwrap(); // importante: .unwrap() lanza error si falla
+      // 2. Registro la venta en Redux / backend
+      const saleResult = await dispatch(createSale(saleData)).unwrap();
       if (!saleResult) throw new Error("No se pudo registrar la venta.");
 
-      // 2. Actualizar stock
-      // 2. Agrupar cantidades a descontar por productId
-      const stockToUpdate: Record<string, number> = {};
+      // 3. Traigo stock actual de business_inventory para calcular descuentos
+      const { data: invRows, error: invErr } = await supabase
+        .from("business_inventory")
+        .select("product_id, stock")
+        .eq("business_id", businessId);
+      if (invErr) throw invErr;
 
+      const stockMap: Record<string, number> = {};
+      invRows?.forEach((r: any) => {
+        stockMap[r.product_id] = r.stock;
+      });
+
+      // 4. Agrupo cantidades a descontar por productId
+      const stockToUpdate: Record<string, number> = {};
       for (const it of cart) {
         if (it.listID) {
+          // si es promo, it.listID = array de { id, qty }
           for (const pi of it.listID) {
             const qty = pi.qty * it.quantity;
             stockToUpdate[pi.id] = (stockToUpdate[pi.id] || 0) + qty;
@@ -306,31 +413,39 @@ export default function NewSalePage() {
         }
       }
 
-      // 3. Aplicar descuentos de stock
+      // 5. Actualizo stock en business_inventory
       for (const productId in stockToUpdate) {
-        const prod = products.find((p) => p.id === productId);
-        if (!prod) throw new Error(`Producto no encontrado (ID: ${productId})`);
-        const newStock = prod.stock - stockToUpdate[productId];
-        await dispatch(editProduct({ ...prod, stock: newStock })).unwrap();
+        const currentStock = stockMap[productId] ?? 0;
+        const newStock = Math.max(0, currentStock - stockToUpdate[productId]);
+
+        const { error } = await supabase
+          .from("business_inventory")
+          .update({ stock: newStock })
+          .eq("business_id", businessId)
+          .eq("product_id", productId);
+
+        if (error) throw error;
       }
 
-
+      // 6. Refresco productos (trae nuevamente stock + promos)
       await loadProducts();
-      setSearch("")
-      // 3. Éxito
+
+      // 7. Éxito: limpio carrito, cierro modal, muestro toast
       setToast("Venta registrada ✔︎");
       setCart([]);
       setConfirm(false);
+      setAmountGiven("");
+      setSearch("");
       setTimeout(() => setToast(""), 3000);
-      setAmountGiven('')
     } catch (err: any) {
-      console.error("Error al registrar la venta o actualizar el stock:", err);
+      console.error("Error al completar venta:", err);
       setToast("❌ Error: " + (err.message || "algo salió mal"));
       setTimeout(() => setToast(""), 4000);
     } finally {
       setProcessing(false);
     }
   };
+
 
 
   const change = useMemo(() => {
@@ -340,10 +455,26 @@ export default function NewSalePage() {
 
 
   /* ───────────────────────────────────── UI ───────────────────────────────────── */
+  if (loadingShifts) {
+    return (
+      <div className="flex justify-center items-center h-64">
+        <div className="text-center">
+          <LoadingSpinner />
+        </div>
+      </div>
+    )
+  }
 
-  if (!activeShift && !shiftsLoading) router.replace("/employee/dashboard");
 
-  const loading = productsLoading || shiftsLoading;
+  const loading = productsLoading || loadingShifts || loadingEmployees;
+
+  if (!activeShift) {
+    return (
+      <div className="p-6">
+        <NoShiftBanner />
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-6">
@@ -352,7 +483,7 @@ export default function NewSalePage() {
         <div>
           <h1 className="text-2xl font-bold">Nueva Venta</h1>
           <p className="text-slate-600 dark:text-slate-400">
-            {activeShift ? `Turno en ${activeShift.businessName}` : "Sin turno activo"}
+            {activeShift ? `Turno de ${currentEmp.name}` : "Sin turno activo"}
           </p>
         </div>
         <Link href="/employee/dashboard" className="btn btn-secondary">
@@ -372,9 +503,9 @@ export default function NewSalePage() {
         </div>
       )}
 
-      <div className="grid lg:grid-cols-3 gap-6">
+      <div className="grid lg:grid-cols-2 gap-6">
         {/* Search & results */}
-        <section className="lg:col-span-2 space-y-4">
+        <section className="cols-6 space-y-4">
           <div className="bg-white dark:bg-slate-800 rounded-lg shadow-sm p-4">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 h-5 w-5" />
@@ -434,17 +565,13 @@ export default function NewSalePage() {
                                 {p.code.toUpperCase()}
                               </span>
                             </td>
-                            <td className="px-4 py-2">{formatCurrency(p.selling_price)}</td>
+                            <td className="px-4 py-2">{formatCurrency(p.default_selling)}</td>
                             <td className="px-4 py-2">
                               <button
                                 onClick={() => addToCart(p)}
-                                disabled={!activeShift || p.stock <= 0}
-                                className={`px-3 py-1.5 rounded-md text-xs font-medium ${p.stock <= 0
-                                  ? "bg-rose-200 text-rose-800 cursor-not-allowed"
-                                  : "bg-emerald-600 text-white hover:bg-emerald-700"
-                                  }`}
+                                className={`px-3 py-1.5 rounded-md text-xs font-medium bg-emerald-600 text-white hover:bg-emerald-700`}
                               >
-                                {p.stock <= 0 ? "SIN STOCK" : "AGREGAR"}
+                                Agregar
                               </button>
                             </td>
                           </tr>
@@ -465,7 +592,7 @@ export default function NewSalePage() {
         </section>
 
         {/* Cart */}
-        <aside className="space-y-4">
+        <aside className="cols-6 space-y-4">
           <div className="bg-white dark:bg-slate-800 rounded-lg shadow-sm p-4">
             <header className="flex justify-between items-center">
               <h2 className="font-semibold flex items-center gap-2">

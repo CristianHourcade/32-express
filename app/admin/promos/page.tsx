@@ -86,9 +86,8 @@ const fetchProductsDictionary = async (businessId: string) => {
     const from = page * pageSize;
     const to = from + pageSize - 1;
     const { data, error } = await supabase
-      .from("products")
+      .from("products_master")
       .select("*")
-      .eq("business_id", businessId)
       .range(from, to);
     if (error) throw error;
     if (data && data.length > 0) {

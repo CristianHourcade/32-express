@@ -248,7 +248,7 @@ export class SalesService extends SupabaseService<Sale> {
         console.log(item);
         return {
           sale_id: newSale.id,
-          product_id: item.listID ? undefined : item.productId,
+          product_master_id: item.listID ? undefined : item.productId,
           promotion_id: item.listID ? item.productId : undefined,
           promo_name: item.productName,
           quantity: item.quantity,

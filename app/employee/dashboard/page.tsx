@@ -11,16 +11,68 @@ import { getEmployees } from "@/lib/redux/slices/employeeSlice"
 import { Clock, DollarSign, ShoppingCart, Package, AlertTriangle, Building } from "lucide-react"
 import Link from "next/link"
 import { createModuleLogger } from "@/lib/clientLogger"
+import { supabase } from "@/lib/supabase";
+import LoadingSpinner from "@/components/LoadingSpinner"
+export interface ShiftPayload {
+  employeeId: string;
+  businessId: string;
+  start_cash: number;
+}
 
+export interface EndShiftPayload {
+  shiftId: string;
+  end_cash: number;
+}
+interface SaleItem {
+  quantity: number
+  total: number
+  stock: number | null
+  product_id: string
+  products: { name: string }
+}
+
+interface Sale {
+  id: string
+  shift_id: string
+  timestamp: string
+  total: number
+  payment_method: string
+  sale_items: SaleItem[]
+}
+
+export async function startShift({ employeeId, businessId, start_cash }: ShiftPayload) {
+  const { data, error } = await supabase
+    .from("shifts")
+    .insert([{ employee_id: employeeId, business_id: businessId, start_cash }])
+    .select()            // para devolver el registro insertado
+    .single();
+
+  if (error) throw error;
+  return data;
+}
+
+export async function endShift({ shiftId, end_cash }: EndShiftPayload) {
+  const { data, error } = await supabase
+    .from("shifts")
+    .update({ end_cash, end_time: new Date().toISOString() })
+    .eq("id", shiftId)
+    .select()
+    .single();
+
+  if (error) throw error;
+  return data;
+}
 const logger = createModuleLogger("employeeDashboard")
 
 export default function EmployeeDashboard() {
   const dispatch = useDispatch<AppDispatch>()
   const { user } = useSelector((state: RootState) => state.auth)
   const { products, loading: productsLoading } = useSelector((state: RootState) => state.products)
-  const { sales, loading: salesLoading } = useSelector((state: RootState) => state.sales)
+  const [activeSales, setActiveSales] = useState<Sale[]>([])
+  const [loadingSales, setLoadingSales] = useState(false)
   const { businesses, loading: businessesLoading } = useSelector((state: RootState) => state.businesses)
-  const { shifts, loading: shiftsLoading } = useSelector((state: RootState) => state.shifts)
+  const [shifts, setShifts] = useState<any>([])
+  const [loadingShifts, setLoadingShifts] = useState(false)
   const { employees, loading: employeesLoading } = useSelector((state: RootState) => state.employees)
   const [showStartShiftModal, setShowStartShiftModal] = useState(false)
   const [startCashInput, setStartCashInput] = useState("")
@@ -44,40 +96,13 @@ export default function EmployeeDashboard() {
 
   useEffect(() => {
     logger.info("Iniciando carga de datos para el dashboard")
-    dispatch(getSales())
     dispatch(getProducts())
     dispatch(fetchBusinesses())
-    dispatch(getShifts())
     dispatch(getEmployees())
   }, [dispatch])
 
   // Usar directamente el businessId del usuario
   const businessId = user?.businessId
-
-  // Log de datos cargados
-  useEffect(() => {
-    if (!employeesLoading && !shiftsLoading && !businessesLoading && !productsLoading && !salesLoading) {
-      logger.info("Datos cargados para el dashboard", {
-        employeesCount: employees.length,
-        shiftsCount: shifts.length,
-        businessesCount: businesses.length,
-        businessesCount: businesses.length,
-        productsCount: products.length,
-        salesCount: sales.length,
-      })
-    }
-  }, [
-    employees,
-    shifts,
-    businesses,
-    products,
-    sales,
-    employeesLoading,
-    shiftsLoading,
-    businessesLoading,
-    productsLoading,
-    salesLoading,
-  ])
 
   // Encontrar el empleado correspondiente al usuario actual
   const currentEmployee = useMemo(() => {
@@ -121,6 +146,25 @@ export default function EmployeeDashboard() {
     return result
   }, [employees, user])
 
+  const fetchShifts = async () => {
+    if (!currentEmployee) return
+    setLoadingShifts(true)
+    const { data, error } = await supabase
+      .from("shifts")
+      .select("*")
+      .eq("employee_id", currentEmployee.id)  // filtra solo tu empleado
+      .order("start_time", { ascending: false })
+    setLoadingShifts(false)
+
+    if (error) {
+      console.error("Error al cargar shifts:", error)
+      return
+    }
+    setShifts(data)
+  }
+  useEffect(() => {
+    fetchShifts()
+  }, [currentEmployee])
   // Filter data based on the employee's business
   const businessProducts = useMemo(
     () => products.filter((product) => product.businessId === businessId),
@@ -129,8 +173,8 @@ export default function EmployeeDashboard() {
 
   const employeeSales = useMemo(() => {
     if (!currentEmployee) return []
-    return sales.filter((sale) => sale.employeeId === currentEmployee.id)
-  }, [sales, currentEmployee])
+    return activeSales.filter((sale) => sale.employeeId === currentEmployee.id)
+  }, [activeSales, currentEmployee])
 
   const employeeShifts = useMemo(() => {
     if (!currentEmployee) return []
@@ -149,17 +193,59 @@ export default function EmployeeDashboard() {
   )
 
   // Get active shift
-  const activeShift = useMemo(() => employeeShifts.find((shift) => shift.active), [employeeShifts])
+  const activeShift = shifts.find(s => !s.end_time)
 
   // Get sales for active shift
   const activeShiftSales = useMemo(() => {
     if (!activeShift) return [];
-    return sales
-      .filter((sale) => sale.shiftId === activeShift.id)
-      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
-  }, [sales, activeShift]);
+    return activeSales
+      .filter(sale => sale.shift_id === activeShift.id)          // usar shift_id
+      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+  }, [activeSales, activeShift]);
+  useEffect(() => {
+    if (!activeShift) {
+      setActiveSales([])
+      return
+    }
+
+    const fetchActiveShiftSales = async () => {
+      setLoadingSales(true)
+      const { data, error } = await supabase
+        .from("sales")
+        .select(`
+    id,
+    shift_id,
+    timestamp,
+    total,
+    payment_method,
+    sale_items (
+      quantity,
+      total,
+      stock,
+      product_master_id,
+      product_id,
+      products_master:products_master!product_master_id (
+        name
+      ),
+      products:products!product_id (
+        name
+      )
+    )
+  `)
+        .eq("shift_id", activeShift.id)
+        .order("timestamp", { ascending: false })
 
 
+      setLoadingSales(false)
+      if (error) {
+        console.error("Error cargando ventas del turno activo:", error)
+        return
+      }
+      setActiveSales(data || [])
+    }
+
+    fetchActiveShiftSales()
+  }, [activeShift])
   // Calculate today's sales
   const today = new Date().toDateString()
 
@@ -176,51 +262,17 @@ export default function EmployeeDashboard() {
 
   // Calculate payment method breakdown for active shift
   const paymentMethodBreakdown = useMemo(() => {
-    const breakdown = {
-      cash: 0,
-      card: 0,
-      transfer: 0,
-      mercadopago: 0,
-      rappi: 0,
-    }
-
-    if (activeShift) {
-      activeShiftSales.forEach((sale) => {
-        breakdown[sale.paymentMethod] += sale.total
-      })
-    }
-
-    return breakdown
-  }, [activeShiftSales, activeShift])
+    const bd: Record<string, number> = { cash: 0, card: 0, transfer: 0, mercadopago: 0, rappi: 0 }
+    activeSales.forEach(s => {
+      bd[s.payment_method] = (bd[s.payment_method] || 0) + s.total
+    })
+    return bd
+  }, [activeSales])
 
   const handleStartShift = async (startCash: number) => {
-    if (!user?.id) {
-      const errorMsg = "No se puede iniciar turno: usuario no identificado"
-      logger.error(errorMsg)
-      setError(errorMsg)
-      return
-    }
-
-    if (!businessId) {
-      const errorMsg =
-        "No se puede iniciar turno: no tienes un negocio asignado. Por favor, contacta a un administrador."
-      logger.error(errorMsg, { userId: user.id })
-      setError(errorMsg)
-      return
-    }
-
-    if (!currentEmployee) {
-      const errorMsg =
-        "No se puede iniciar turno: no se encontró tu registro de empleado. Por favor, contacta a un administrador."
-      logger.error(errorMsg, {
-        userId: user.id,
-        userEmail: user.email,
-        userRole: user.role,
-        userBusinessId: businessId,
-      })
-      setError(errorMsg)
-      return
-    }
+    if (!user?.id) return
+    if (!businessId) return
+    if (!currentEmployee) return
 
     setError(null)
     setIsStartingShift(true)
@@ -231,7 +283,11 @@ export default function EmployeeDashboard() {
         userId: user.id,
       })
 
-      const result = await dispatch(beginShift({ employeeId: currentEmployee.id, businessId, start_cash: startCash })).unwrap()
+      const result = await startShift({
+        employeeId: currentEmployee.id,
+        businessId,
+        start_cash: startCash,
+      })
 
       logger.info("Turno iniciado con éxito", {
         shiftId: result.id,
@@ -239,54 +295,48 @@ export default function EmployeeDashboard() {
         businessId,
       })
 
-      // Refresh shifts data
-      dispatch(getShifts())
+      await fetchShifts()
+
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : "Error al iniciar turno"
-      logger.error("Error al iniciar turno", {
-        error: errorMsg,
-        employeeId: currentEmployee.id,
-        businessId,
-      })
+      logger.error("Error al iniciar turno", { error: errorMsg })
       setError(errorMsg)
     } finally {
       setIsStartingShift(false)
     }
   }
 
-  const handleEndShift = async (endCash: any) => {
+  const handleEndShift = async (endCash: number) => {
     if (!activeShift) return
 
     setIsEndingShift(true)
     try {
       logger.info("Finalizando turno", { shiftId: activeShift.id })
 
-      await dispatch(finishShift({ shiftId: activeShift.id, end_cash: endCash }))
+      await endShift({
+        shiftId: activeShift.id,
+        end_cash: endCash,
+      })
 
       logger.info("Turno finalizado con éxito", { shiftId: activeShift.id })
 
-      // Refresh shifts data
-      dispatch(getShifts())
+      await fetchShifts()
+
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : "Error al finalizar turno"
-      logger.error("Error al finalizar turno", {
-        error: errorMsg,
-        shiftId: activeShift.id,
-      })
+      logger.error("Error al finalizar turno", { error: errorMsg })
       setError(errorMsg)
     } finally {
       setIsEndingShift(false)
     }
   }
-
-  const isLoading = productsLoading || salesLoading || shiftsLoading || businessesLoading || employeesLoading
+  const isLoading = productsLoading || loadingSales || loadingShifts || businessesLoading || employeesLoading
 
   if (isLoading) {
     return (
       <div className="flex justify-center items-center h-64">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-700 mx-auto"></div>
-          <p className="mt-4 text-gray-600 dark:text-gray-400">Cargando datos del dashboard...</p>
+          <LoadingSpinner />
         </div>
       </div>
     )
@@ -418,7 +468,7 @@ export default function EmployeeDashboard() {
               </p>
               {activeShift && (
                 <p className="text-sm text-gray-500 dark:text-gray-400">
-                  Iniciado: {new Date(activeShift.startTime).toLocaleString()}
+                  Iniciado: {new Date(activeShift.start_time).toLocaleString()}
                 </p>
               )}
             </div>
@@ -449,7 +499,7 @@ export default function EmployeeDashboard() {
       </div>
 
       {/* Quick Actions */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <Link
           href="/employee/products"
           className="bg-white dark:bg-gray-800 rounded-lg shadow-sm p-5 hover:shadow-md transition-shadow"
@@ -480,19 +530,6 @@ export default function EmployeeDashboard() {
           </div>
         </Link>
 
-        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm p-5">
-          <div className="flex items-center gap-3">
-            <div className="bg-purple-100 dark:bg-purple-900/30 p-3 rounded-full">
-              <DollarSign className="h-6 w-6 text-purple-600 dark:text-purple-400" />
-            </div>
-            <div>
-              <h3 className="text-lg font-semibold">Ventas de Hoy</h3>
-              <p className="text-sm text-gray-500 dark:text-gray-400">
-                {todaySalesCount} ventas - {formatCurrency(todaySalesTotal)}
-              </p>
-            </div>
-          </div>
-        </div>
       </div>
 
       {/* Low Stock Alert */}
@@ -602,9 +639,9 @@ export default function EmployeeDashboard() {
                         </td>
                         <td className="px-6 py-4 text-sm text-gray-500 dark:text-gray-400">
                           <div className="space-y-1">
-                            {sale.items.map((item, index) => (
-                              <div key={index} className="text-xs">
-                                {item.quantity}x {item.productName} - {formatCurrency(item.total)}
+                            {sale.sale_items.map((item, i) => (
+                              <div key={i} className="text-xs">
+                                {item.quantity}× {(item.products_master?.name ?? item.products.name) ?? "–"} – {formatCurrency(item.total)}
                               </div>
                             ))}
                           </div>
@@ -613,7 +650,7 @@ export default function EmployeeDashboard() {
                           <span
                             className={`px-2 py-1 rounded text-xs font-medium ${getPaymentMethodClass(sale.paymentMethod)}`}
                           >
-                            {translatePaymentMethod(sale.paymentMethod)}
+                            {translatePaymentMethod(sale.payment_method)}
                           </span>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white">
