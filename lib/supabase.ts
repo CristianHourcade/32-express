@@ -16,7 +16,7 @@ if (!supabaseUrl || !supabaseAnonKey) {
 }
 
 // Create Supabase client with fallbacks to prevent runtime errors
-export const supabase = createClient<Database>(
+export const supabase = createClient<any>(
   supabaseUrl || "https://placeholder-url.supabase.co",
   supabaseAnonKey || "placeholder-key",
 )

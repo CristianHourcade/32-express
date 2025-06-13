@@ -26,6 +26,7 @@ import {
   Apple,
   Award,
   Save,
+  Package2Icon,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
@@ -34,6 +35,7 @@ const navItems = [
   { name: "Turnos", href: "/admin/turnos", icon: Clock },
   { name: "Gastos", href: "/admin/gastos", icon: DollarSign },
   { name: "Productos", href: "/admin/productos", icon: Package },
+  { name: "Productos 2", href: "/admin/products", icon: Package2Icon },
   { name: "Estadistica", href: "/admin/estadistica", icon: BarChart2 },
   { name: "Empleados", href: "/admin/employees", icon: Users },
   { name: "Negocios", href: "/admin/business", icon: Building2 },
@@ -41,8 +43,6 @@ const navItems = [
   { name: "Actividad", href: "/admin/actividad", icon: Activity },
   { name: "Stock", href: "/admin/stock", icon: Award },
   { name: "Reservas", href: "/admin/savings", icon: Save },
-  // { name: "Ventas", href: "/admin/sales", icon: ShoppingCart },
-  // { name: "Flujo de Caja", href: "/admin/caja", icon: CreditCard },
 ]
 
 export default function AdminNavbar() {
