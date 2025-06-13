@@ -16,6 +16,7 @@ import {
   UserIcon,
   PlusCircle,
   Save,
+  Package2Icon,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 
@@ -28,6 +29,8 @@ const baseItems = [
 
 /* --- ítem Solo Supervisor --- */
 const stockItem = { name: "Stock", href: "/employee/stock", icon: Save };
+const productos = { name: "Productos 2", href: "/employee/productos", icon: Package2Icon };
+
 
 export default function EmployeeNavbar() {
   const pathname = usePathname();
@@ -52,7 +55,7 @@ export default function EmployeeNavbar() {
 
   /* ========= nav items según rol ========= */
   const navItems = useMemo(
-    () => (isSupervisor ? [...baseItems, stockItem] : baseItems),
+    () => (isSupervisor ? [...baseItems, stockItem, productos] : baseItems),
     [isSupervisor]
   );
 
