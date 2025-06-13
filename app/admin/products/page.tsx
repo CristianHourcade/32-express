@@ -46,6 +46,7 @@ export default function InventoryPage() {
     const { businesses, loading: businessesLoading } = useSelector(
         (s: RootState) => s.businesses
     );
+    const { user } = useSelector((s: RootState) => s.auth);
 
     // Estados
     const [inventory, setInventory] = useState<InventoryItem[]>([]);
@@ -180,11 +181,19 @@ export default function InventoryPage() {
     // Guardar o crear
     async function saveAll() {
         if (!drawerProduct) return;
+
+        // 1) Snapshot de stocks viejos
+        const oldStocks = { ...drawerProduct.stocks };
+
+        // 2) Construye el nombre final
         const newName =
             drawerCategory === "SIN CATEGORIA"
                 ? drawerBase
                 : `${drawerCategory} ${drawerBase}`;
+
         let prodId = drawerProduct.id;
+
+        // 3) Inserta o actualiza en products_master
         if (!prodId) {
             const { data: insData, error: insErr } = await supabase
                 .from("products_master")
@@ -197,40 +206,85 @@ export default function InventoryPage() {
                 })
                 .select("id");
             if (insErr || !insData?.[0]?.id) {
-                console.error(insErr);
+                console.error("Error al crear producto master:", insErr);
                 return;
             }
             prodId = insData[0].id;
         } else {
-            await supabase
+            const { error: updErr } = await supabase
                 .from("products_master")
                 .update({
+                    code: drawerProduct.code,
                     name: newName,
                     default_purchase: drawerProduct.default_purchase,
                     margin_percent: drawerProduct.margin_percent,
                     default_selling: salePrice,
                 })
                 .eq("id", prodId);
+            if (updErr) {
+                console.error("Error al actualizar producto master:", updErr);
+                return;
+            }
         }
+
+        // 4) Upsert en business_inventory
         const ops = Object.entries(editableStocks).map(([business_id, stock]) => ({
             product_id: prodId,
             business_id,
             stock,
         }));
-        await supabase.from("business_inventory").upsert(ops, {
-            onConflict: ["business_id", "product_id"],
-        });
-        setInventory(prev => prev.filter(it => it.id !== prodId).concat({
-            id: prodId,
-            code: drawerProduct.code,
-            name: newName,
-            default_purchase: drawerProduct.default_purchase,
-            margin_percent: drawerProduct.margin_percent,
-            default_selling: salePrice,
-            stocks: editableStocks,
-        }));
+        const { error: invErr } = await supabase
+            .from("business_inventory")
+            .upsert(ops, { onConflict: ["business_id", "product_id"] });
+        if (invErr) {
+            console.error("Error al guardar inventario:", invErr);
+            return;
+        }
+
+        // 5) Actualiza estado local
+        setInventory(prev =>
+            prev
+                .filter(it => it.id !== prodId)
+                .concat({
+                    id: prodId,
+                    code: drawerProduct.code,
+                    name: newName,
+                    default_purchase: drawerProduct.default_purchase,
+                    margin_percent: drawerProduct.margin_percent,
+                    default_selling: salePrice,
+                    stocks: editableStocks,
+                })
+        );
+
+        // 6) Log en activities por cada cambio, usando el nombre del local
+        for (const [business_id, newStock] of Object.entries(editableStocks)) {
+            const oldStock = oldStocks[business_id] ?? 0;
+            if (oldStock !== newStock) {
+                // Busca el nombre del local en el array de businesses
+                const biz = businesses.find(b => b.id === business_id);
+                const bizName = biz ? biz.name : business_id;
+
+                const details = user?.name
+                    ? `${user.name} cambió stock de ${newName} en ${bizName}: ${oldStock} → ${newStock}`
+                    : `Cambio stock de ${newName} en ${bizName}: ${oldStock} → ${newStock}`;
+
+                try {
+                    await supabase.from("activities").insert({
+                        business_id,
+                        details,
+                        created_at: new Date().toISOString(),
+                    });
+                } catch (logErr) {
+                    console.error("Error al loguear actividad:", logErr);
+                }
+            }
+        }
+
+        // 7) Cierra el drawer
         closeDrawer();
     }
+
+
 
     return (
         <div className="space-y-6 p-6">
@@ -313,6 +367,19 @@ export default function InventoryPage() {
                             <div>
                                 <label className="block text-sm">Nombre</label>
                                 <input type="text" value={drawerBase} onChange={e => setDrawerBase(e.target.value)} className="w-full border rounded-md p-2" />
+                            </div>
+                            <div>
+                                <label className="block text-sm">Código</label>
+                                <input
+                                    type="text"
+                                    value={drawerProduct.code || ""}
+                                    onChange={e =>
+                                        setDrawerProduct(pr =>
+                                            pr ? { ...pr, code: e.target.value } : pr
+                                        )
+                                    }
+                                    className="w-full border rounded-md p-2"
+                                />
                             </div>
                             <div>
                                 <label className="block text-sm">Precio Compra</label>

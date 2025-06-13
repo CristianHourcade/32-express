@@ -458,11 +458,10 @@ export default function EmployeeProductsPage() {
                       )}
                       <td className="px-6 py-4">
                         <span
-                          className={`px-2 py-1 text-xs font-medium rounded-full ${
-                            p.stock <= p.minStock
-                              ? "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300"
-                              : "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300"
-                          }`}
+                          className={`px-2 py-1 text-xs font-medium rounded-full ${p.stock <= p.minStock
+                            ? "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300"
+                            : "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300"
+                            }`}
                         >
                           {p.stock}
                         </span>

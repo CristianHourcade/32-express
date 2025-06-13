@@ -11,9 +11,8 @@ export default function EmployeeLayout({
     <ProtectedRoute requiredRole="employee">
       <div className="min-h-screen bg-gray-100 dark:bg-gray-900">
         <EmployeeNavbar />
-        <div className="md:pl-64 flex flex-col">
+        <div className="flex flex-col">
           <main className="flex-1">
-            {/* Aumentamos significativamente el padding superior */}
             <div className="pt-20 md:pt-6 px-4 md:px-8">{children}</div>
           </main>
         </div>
