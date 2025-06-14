@@ -641,7 +641,7 @@ export default function EmployeeDashboard() {
                           <div className="space-y-1">
                             {sale.sale_items.map((item, i) => (
                               <div key={i} className="text-xs">
-                                {item.quantity}× {(item.products_master?.name ?? item.products.name) ?? "–"} – {formatCurrency(item.total)}
+                                {item.quantity}× {(item.products_master?.name ?? item.products?.name) ?? "–"} – {formatCurrency(item.total)}
                               </div>
                             ))}
                           </div>

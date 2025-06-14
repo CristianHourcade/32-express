@@ -49,6 +49,7 @@ export default function InventoryPage() {
     const { user } = useSelector((s: RootState) => s.auth);
 
     // Estados
+    const [searchTerm, setSearchTerm] = useState("");
     const [inventory, setInventory] = useState<InventoryItem[]>([]);
     const [loading, setLoading] = useState(false);
     const [drawerProduct, setDrawerProduct] = useState<InventoryItem | null>(null);
@@ -153,15 +154,35 @@ export default function InventoryPage() {
 
         fetchData();
     }, [businesses]);
-
+    const [sortOrder, setSortOrder] = useState<"asc" | "desc" | null>(null);
+    function toggleSortOrder() {
+        setSortOrder(prev => {
+            if (prev === "asc") return "desc";
+            if (prev === "desc") return null;
+            return "asc";
+        });
+    }
     // Filtrado por categoría
     const filtered = useMemo(() => {
-        if (!selectedCategory) return inventory;
-        return inventory.filter(item => {
+        let list = inventory.filter(item => {
             const { category } = extractCategory(item.name);
-            return category === selectedCategory;
+            const matchesCategory = selectedCategory ? category === selectedCategory : true;
+            const matchesSearch = item.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                item.code.toLowerCase().includes(searchTerm.toLowerCase());
+            return matchesCategory && matchesSearch;
         });
-    }, [inventory, selectedCategory]);
+
+        if (sortOrder) {
+            list = [...list].sort((a, b) =>
+                sortOrder === "asc"
+                    ? a.default_selling - b.default_selling
+                    : b.default_selling - a.default_selling
+            );
+        }
+
+        return list;
+    }, [inventory, selectedCategory, searchTerm, sortOrder]);
+
 
     const isBusy = loading || businessesLoading;
 
@@ -181,6 +202,7 @@ export default function InventoryPage() {
     // Guardar o crear
     async function saveAll() {
         if (!drawerProduct) return;
+        setIsSaving(true);
 
         // 1) Snapshot de stocks viejos
         const oldStocks = { ...drawerProduct.stocks };
@@ -281,9 +303,140 @@ export default function InventoryPage() {
         }
 
         // 7) Cierra el drawer
+        setIsSaving(false);
         closeDrawer();
     }
+    const [isSaving, setIsSaving] = useState(false);
 
+    function categoryColor(cat: string): string {
+        switch (cat) {
+            case "CIGARRILLOS": return "bg-yellow-300 text-black";
+            case "GOLOSINAS": return "bg-pink-300 text-black";
+            case "BEBIDA": return "bg-blue-200 text-black";
+            case "CERVEZA": return "bg-amber-300 text-black";
+            case "FIAMBRES": return "bg-rose-300 text-black";
+            case "HUEVOS": return "bg-amber-200 text-black";
+            case "HIGIENE": return "bg-teal-200 text-black";
+            case "ALCOHOL": return "bg-indigo-300 text-white";
+            case "TABACO": return "bg-red-300 text-black";
+            case "ALMACEN": return "bg-green-200 text-black";
+            default: return "bg-slate-200 text-gray-800";
+        }
+    }
+
+    const productRows = useMemo(() => {
+        const itemsToRender = searchTerm.trim()
+            ? filtered.slice(0, 10)
+            : filtered;
+
+        return itemsToRender.map(item => {
+            return (
+                <tr key={item.id} className="border-b even:bg-slate-50/60 dark:even:bg-slate-800/30 hover:bg-slate-100 transition">
+                    {/* Producto */}
+                    <td className="px-4 py-3">
+                        <div className="flex flex-col gap-1">
+                            <div>
+                                <span
+                                    className={`text-xs font-semibold px-2 py-0.5 rounded-full ${categoryColor(extractCategory(item.name).category)}`}
+                                >
+                                    {extractCategory(item.name).category}
+                                </span>
+
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <span className="font-semibold text-base">{item.name}</span>
+                            </div>
+                            <div className="text-sm text-gray-500 truncate">{item.code}</div>
+                        </div>
+                    </td>
+
+
+                    {/* Compra */}
+                    <td className="px-4 py-3 whitespace-nowrap text-sm">
+                        {new Intl.NumberFormat("es-AR", {
+                            style: "currency",
+                            currency: "ARS",
+                        }).format(item.default_purchase)}
+                    </td>
+
+                    {/* Venta */}
+                    <td className="px-4 py-3 whitespace-nowrap text-sm">
+                        {new Intl.NumberFormat("es-AR", {
+                            style: "currency",
+                            currency: "ARS",
+                        }).format(item.default_selling)}
+                    </td>
+
+                    {/* Ver Inventario */}
+                    <td className="px-4 py-3 text-sm">
+                        <details className="group">
+                            <summary className="bg-gray-200 hover:bg-gray-300 dark:bg-slate-700 dark:hover:bg-slate-600 px-4 py-2 rounded-md text-center cursor-pointer w-full text-sm font-medium">
+                                VER INVENTARIO
+                            </summary>
+                            <div className="mt-2 bg-white dark:bg-slate-800 rounded-lg shadow-md border border-gray-200 dark:border-slate-700 p-3 space-y-2 w-full max-w-md">
+                                {businesses.map(b => {
+                                    const qty = item.stocks[b.id] || 0;
+                                    const color =
+                                        qty === 0
+                                            ? "bg-red-500"
+                                            : qty < 6
+                                                ? "bg-yellow-400"
+                                                : "bg-green-500";
+                                    return (
+                                        <div key={b.id} className="flex justify-between items-center">
+                                            <span className="truncate">{b.name}</span>
+                                            <span className={`${color} text-white text-xs rounded-full px-2`}>
+                                                {qty}
+                                            </span>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </details>
+                    </td>
+
+                    {/* Acciones */}
+                    <td className="px-4 py-3 whitespace-nowrap">
+                        <div className="flex gap-2 justify-end items-center">
+                            <button
+                                onClick={() => openDrawer(item)}
+                                className="flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium bg-indigo-600 text-white hover:bg-indigo-700 transition"
+                            >
+                                Ajustar
+                            </button>
+                            <button
+                                onClick={() => {
+                                    if (confirm(`¿Eliminar ${item.name}?`)) {
+                                        supabase
+                                            .from("products_master")
+                                            .delete()
+                                            .eq("id", item.id)
+                                            .then(() =>
+                                                setInventory(prev => prev.filter(p => p.id !== item.id))
+                                            );
+                                        supabase.from("business_inventory").delete().eq("product_id", item.id);
+                                    }
+                                }}
+                                className="flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium bg-red-600 text-white hover:bg-red-700 transition"
+                            >
+                                Eliminar
+                            </button>
+                        </div>
+                    </td>
+                </tr>
+            );
+        });
+    }, [filtered, businesses, searchTerm]);
+    const [isStockModalOpen, setIsStockModalOpen] = useState(false);
+    const [stockModalAction, setStockModalAction] = useState<"add" | "remove" | null>(null);
+    const [stockModalBusiness, setStockModalBusiness] = useState<string | null>(null);
+    const [stockModalAmount, setStockModalAmount] = useState<number>(1);
+    function openStockModal(action: "add" | "remove", businessId: string) {
+        setStockModalAction(action);
+        setStockModalBusiness(businessId);
+        setStockModalAmount(1);
+        setIsStockModalOpen(true);
+    }
 
 
     return (
@@ -295,7 +448,7 @@ export default function InventoryPage() {
                 >
                     + Agregar Producto
                 </button>
-                <h1 className="text-3xl font-bold">Inventario por Local</h1>
+                <h1 className="text-3xl font-bold">Productos de 32 EXPRESS</h1>
                 <select
                     value={selectedCategory}
                     onChange={e => setSelectedCategory(e.target.value)}
@@ -306,46 +459,42 @@ export default function InventoryPage() {
                         <option key={c} value={c}>{c}</option>
                     ))}
                 </select>
-            </header>
 
+
+            </header>
+            <div className="w-full">
+                <input
+                    type="text"
+                    placeholder="Buscar por nombre o código"
+                    value={searchTerm}
+                    onChange={e => setSearchTerm(e.target.value)}
+                    className="w-full  border rounded-md p-2 text-sm bg-white dark:bg-slate-800"
+                />
+            </div>
             <div className="overflow-x-auto bg-white dark:bg-slate-800 rounded-2xl shadow-lg p-6">
                 <div className="overflow-hidden border border-gray-200 dark:border-slate-700 rounded-lg">
                     <table className="min-w-full text-base">
                         <thead className="bg-slate-100 dark:bg-slate-700 text-sm uppercase">
                             <tr>
-                                <th className="px-6 py-4">Producto</th>
-                                <th className="px-6 py-4">Compra</th>
-                                <th className="px-6 py-4">Venta</th>
-                                {businesses.map(b => (<th key={b.id} className="px-6 py-4">{b.name}</th>))}
-                                <th className="px-6 py-4">Acciones</th>
+                                <th className="px-6 py-4 text-left">Producto</th>
+                                <th className="px-6 py-4 text-left">Compra</th>
+                                <th
+                                    className="px-6 py-4 text-left cursor-pointer select-none"
+                                    onClick={toggleSortOrder}
+                                >
+                                    Venta
+                                    {sortOrder === "asc" && " ▲"}
+                                    {sortOrder === "desc" && " ▼"}
+                                </th>
+                                <th className="px-6 py-4 text-center">STOCK</th>
+                                <th className="px-6 py-4 text-right">Acciones</th>
                             </tr>
                         </thead>
                         <tbody>
                             {isBusy ? (
                                 <tr><td colSpan={4 + businesses.length} className="py-16 text-center">Cargando…</td></tr>
                             ) : (
-                                filtered.map(item => {
-                                    const sell = new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS" }).format(item.default_selling);
-                                    return (
-                                        <tr key={item.id} className="border-b even:bg-slate-50/60 dark:even:bg-slate-800/30 hover:bg-slate-100 transition">
-                                            <td className="px-6 py-4">
-                                                <div className="font-medium">{item.name}</div>
-                                                <div className="text-sm text-gray-500">{item.code}</div>
-                                            </td>
-                                            <td className="px-6 py-4">{new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS" }).format(item.default_purchase)}</td>
-                                            <td className="px-6 py-4">{sell}</td>
-                                            {businesses.map(b => {
-                                                const qty = item.stocks[b.id] || 0;
-                                                const color = qty === 0 ? "bg-red-500" : qty < 6 ? "bg-yellow-400" : "bg-green-500";
-                                                return <td key={b.id} className="px-6 py-4 text-center"><span className={`${color} text-white rounded-full px-2`}>{qty}</span></td>;
-                                            })}
-                                            <td className="px-6 py-4 flex gap-2 justify-end">
-                                                <button onClick={() => openDrawer(item)} className="bg-indigo-600 text-white px-4 py-2 rounded-lg">Ajustar</button>
-                                                <button onClick={() => { if (confirm(`¿Eliminar ${item.name}?`)) { supabase.from('products_master').delete().eq('id', item.id).then(() => setInventory(prev => prev.filter(p => p.id !== item.id))); supabase.from('business_inventory').delete().eq('product_id', item.id); } }} className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700">Eliminar</button>
-                                            </td>
-                                        </tr>
-                                    );
-                                })
+                                productRows
                             )}
                         </tbody>
                     </table>
@@ -355,58 +504,162 @@ export default function InventoryPage() {
             {drawerProduct && (
                 <div className="fixed inset-0 flex z-50">
                     <div className="absolute inset-0 bg-black/50" onClick={closeDrawer} />
-                    <div className="relative ml-auto w-3/5 h-full bg-white p-8 overflow-y-auto shadow-xl">
+                    <div className="relative ml-auto w-full max-w-3xl h-full bg-white p-6 overflow-y-auto shadow-xl rounded-l-2xl">
                         <h2 className="text-2xl font-semibold mb-6">Ajustar Producto</h2>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            <div>
-                                <label className="block text-sm">Categoría</label>
-                                <select value={drawerCategory} onChange={e => setDrawerCategory(e.target.value)} className="w-full border rounded-md p-2">
-                                    {categories.map(c => <option key={c} value={c}>{c}</option>)}
-                                </select>
-                            </div>
-                            <div>
-                                <label className="block text-sm">Nombre</label>
-                                <input type="text" value={drawerBase} onChange={e => setDrawerBase(e.target.value)} className="w-full border rounded-md p-2" />
-                            </div>
-                            <div>
-                                <label className="block text-sm">Código</label>
-                                <input
-                                    type="text"
-                                    value={drawerProduct.code || ""}
-                                    onChange={e =>
-                                        setDrawerProduct(pr =>
-                                            pr ? { ...pr, code: e.target.value } : pr
-                                        )
-                                    }
-                                    className="w-full border rounded-md p-2"
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-sm">Precio Compra</label>
-                                <input type="number" value={drawerProduct.default_purchase || ""} onChange={e => setDrawerProduct(pr => pr && ({ ...pr, default_purchase: Number(e.target.value) }))} className="w-full border rounded-md p-2" />
-                            </div>
-                            <div>
-                                <label className="block text-sm">Margen %</label>
-                                <input type="number" value={drawerProduct.margin_percent || ""} onChange={e => setDrawerProduct(pr => pr && ({ ...pr, margin_percent: Number(e.target.value) }))} className="w-full border rounded-md p-2" />
-                            </div>
-                            <div>
-                                <label className="block text-sm">Precio Venta</label>
-                                <input type="number" value={salePrice || ""} onChange={e => setSalePrice(Number(e.target.value))} className="w-full border rounded-md p-2" />
-                                <div className="text-xs italic text-gray-500 mt-1">Sugerido: {new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' }).format(drawerProduct.default_purchase * (1 + drawerProduct.margin_percent / 100))}</div>
+                        <div className="bg-slate-50 dark:bg-slate-900 rounded-xl p-6 shadow-md space-y-4 mb-8">
+                            <h3 className="text-lg font-semibold mb-2">Datos del producto</h3>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div className="space-y-2">
+                                    <label className="block text-sm font-medium">Categoría</label>
+                                    <select value={drawerCategory} onChange={e => setDrawerCategory(e.target.value)} className="w-full border rounded-lg p-3 text-sm bg-white dark:bg-slate-800">
+                                        {categories.map(c => <option key={c} value={c}>{c}</option>)}
+                                    </select>
+                                </div>
+                                <div className="space-y-2">
+                                    <label className="block text-sm font-medium">Nombre base</label>
+                                    <input type="text" value={drawerBase} onChange={e => setDrawerBase(e.target.value)} className="w-full border rounded-lg p-3 text-sm bg-white dark:bg-slate-800" />
+                                </div>
+                                <div className="space-y-2">
+                                    <label className="block text-sm font-medium">Código</label>
+                                    <input type="text" value={drawerProduct?.code || ""} onChange={e => setDrawerProduct(pr => pr ? { ...pr, code: e.target.value } : pr)} className="w-full border rounded-lg p-3 text-sm bg-white dark:bg-slate-800" />
+                                </div>
+                                <div className="space-y-2">
+                                    <label className="block text-sm font-medium">Precio Compra</label>
+                                    <input type="number" value={drawerProduct?.default_purchase || ""} onChange={e => setDrawerProduct(pr => pr ? { ...pr, default_purchase: Number(e.target.value) } : pr)} className="w-full border rounded-lg p-3 text-sm bg-white dark:bg-slate-800" />
+                                </div>
+                                <div className="space-y-2">
+                                    <label className="block text-sm font-medium">Margen %</label>
+                                    <input type="number" value={drawerProduct?.margin_percent || ""} onChange={e => setDrawerProduct(pr => pr ? { ...pr, margin_percent: Number(e.target.value) } : pr)} className="w-full border rounded-lg p-3 text-sm bg-white dark:bg-slate-800" />
+                                </div>
+                                <div className="space-y-2">
+                                    <label className="block text-sm font-medium">Precio Venta</label>
+                                    <input type="number" value={salePrice || ""} onChange={e => setSalePrice(Number(e.target.value))} className="w-full border rounded-lg p-3 text-sm bg-white dark:bg-slate-800" />
+                                    <div className="text-xs italic text-gray-500 mt-1">
+                                        Sugerido: {new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS" }).format(drawerProduct!.default_purchase * (1 + drawerProduct!.margin_percent / 100))}
+                                    </div>
+                                </div>
                             </div>
                         </div>
-                        <div className="mt-8 space-y-4">
-                            {businesses.map(b => (
-                                <div key={b.id} className="flex justify-between items-center"><span>{b.name}</span><input type="number" value={editableStocks[b.id] || ""} onChange={e => setEditableStocks(prev => ({ ...prev, [b.id]: Number(e.target.value) }))} className="w-24 border rounded-md p-2" /></div>
-                            ))}
+
+                        <div className="bg-slate-50 dark:bg-slate-900 rounded-xl p-6 shadow-md space-y-4">
+                            <h3 className="text-lg font-semibold mb-2">Stock por Local</h3>
+                            {businesses.map(b => {
+                                const current = editableStocks[b.id] ?? 0;
+
+                                const increase = () =>
+                                    setEditableStocks(prev => ({
+                                        ...prev,
+                                        [b.id]: (prev[b.id] ?? 0) + 1,
+                                    }));
+
+                                const decrease = () =>
+                                    setEditableStocks(prev => ({
+                                        ...prev,
+                                        [b.id]: Math.max(0, (prev[b.id] ?? 0) - 1),
+                                    }));
+
+                                return (
+                                    <div
+                                        key={b.id}
+                                        className="flex justify-between items-center bg-slate-50 dark:bg-slate-800 p-3 rounded-lg"
+                                    >
+                                        <span className="text-sm font-medium">{b.name}</span>
+                                        <div className="flex flex-col md:flex-row items-start md:items-center gap-2 md:gap-4">
+                                            <span className="text-sm text-gray-700">
+                                                Stock actual: <span className="font-semibold">{current}</span>
+                                            </span>
+                                            <div className="flex gap-2">
+                                                <button
+                                                    onClick={() => openStockModal("add", b.id)}
+                                                    className="px-3 py-1 rounded-md text-sm bg-green-600 text-white hover:bg-green-700"
+                                                >
+                                                    Agregar stock
+                                                </button>
+                                                <button
+                                                    onClick={() => openStockModal("remove", b.id)}
+                                                    className="px-3 py-1 rounded-md text-sm bg-red-600 text-white hover:bg-red-700"
+                                                >
+                                                    Quitar stock
+                                                </button>
+
+                                            </div>
+                                        </div>
+
+                                    </div>
+                                );
+                            })}
                         </div>
-                        <div className="flex justify-end gap-4 mt-8">
-                            <button onClick={closeDrawer} className="px-6 py-2 border rounded-md">Cancelar</button>
-                            <button onClick={saveAll} className="px-6 py-2 bg-green-600 text-white rounded-md">Guardar Todo</button>
+
+                        <div className="flex justify-end gap-4 mt-10">
+                            <button
+                                onClick={closeDrawer}
+                                disabled={isSaving}
+                                className={`px-6 py-3 border rounded-lg text-sm font-medium ${isSaving ? "bg-gray-100 cursor-not-allowed" : "hover:bg-gray-100"
+                                    }`}                            >
+                                CANCELAR
+                            </button>
+                            <button
+                                onClick={saveAll}
+                                disabled={isSaving}
+                                className={`px-6 py-3 rounded-lg text-sm font-semibold transition ${isSaving
+                                    ? "bg-gray-400 text-white cursor-not-allowed"
+                                    : "bg-green-600 text-white hover:bg-green-700"
+                                    }`}                            >
+                                CONFIRMAR CAMBIOS
+                            </button>
                         </div>
                     </div>
                 </div>
-            )}
-        </div>
+            )
+            }
+            {
+                isStockModalOpen && stockModalAction && stockModalBusiness && (
+                    <div className="fixed inset-0 flex z-50 items-center justify-center">
+                        <div className="absolute inset-0 bg-black/50" onClick={() => setIsStockModalOpen(false)} />
+                        <div className="relative z-10 bg-white dark:bg-slate-800 p-6 rounded-xl shadow-xl max-w-md w-full space-y-4">
+                            <h3 className="text-xl font-semibold">
+                                {stockModalAction === "add" ? "Agregar Stock" : "Quitar Stock"}
+                            </h3>
+                            <p className="text-sm text-gray-600 dark:text-gray-300">
+                                ¿Cuántas unidades querés {stockModalAction === "add" ? "agregar" : "quitar"} en{" "}
+                                {businesses.find(b => b.id === stockModalBusiness)?.name}?
+                            </p>
+                            <input
+                                type="number"
+                                min={1}
+                                value={stockModalAmount}
+                                onChange={e => setStockModalAmount(Number(e.target.value))}
+                                className="w-full border rounded-md p-2 bg-white dark:bg-slate-900"
+                            />
+                            <div className="flex justify-end gap-2">
+                                <button
+                                    onClick={() => setIsStockModalOpen(false)}
+                                    className="px-4 py-2 rounded-md border hover:bg-gray-100 dark:hover:bg-slate-700"
+                                >
+                                    Cancelar
+                                </button>
+                                <button
+                                    onClick={() => {
+                                        setEditableStocks(prev => {
+                                            const current = prev[stockModalBusiness] ?? 0;
+                                            const newValue =
+                                                stockModalAction === "add"
+                                                    ? current + stockModalAmount
+                                                    : Math.max(0, current - stockModalAmount);
+                                            return { ...prev, [stockModalBusiness]: newValue };
+                                        });
+                                        setIsStockModalOpen(false);
+                                    }}
+                                    className="px-4 py-2 rounded-md bg-green-600 text-white hover:bg-green-700"
+                                >
+                                    Confirmar
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )
+            }
+
+        </div >
     );
 }

@@ -48,6 +48,19 @@ export default function InventoryPage() {
   );
   const { user } = useSelector((s: RootState) => s.auth);
   const businessId = user?.businessId
+  const [stockModal, setStockModal] = useState<{
+    item: InventoryItem | null;
+    type: "add" | "remove" | null;
+  }>({ item: null, type: null });
+
+  const [stockAmount, setStockAmount] = useState<number>(0);
+  function openStockModal(item: InventoryItem, type: "add" | "remove") {
+    setStockModal({ item, type });
+    setStockAmount(0);
+  }
+  function closeStockModal() {
+    setStockModal({ item: null, type: null });
+  }
 
   // Estados
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
@@ -157,12 +170,17 @@ export default function InventoryPage() {
 
   // Filtrado por categoría
   const filtered = useMemo(() => {
-    if (!selectedCategory) return inventory;
-    return inventory.filter(item => {
-      const { category } = extractCategory(item.name);
-      return category === selectedCategory;
-    });
-  }, [inventory, selectedCategory]);
+  const filteredList = selectedCategory
+    ? inventory.filter(item => extractCategory(item.name).category === selectedCategory)
+    : inventory;
+
+  return filteredList.sort((a, b) => {
+    const stockA = a.stocks[businessId ?? ''] || 0;
+    const stockB = b.stocks[businessId ?? ''] || 0;
+    return stockB - stockA;
+  });
+}, [inventory, selectedCategory, businessId]);
+
 
   const isBusy = loading || businessesLoading;
 
@@ -285,7 +303,63 @@ export default function InventoryPage() {
     closeDrawer();
   }
 
+  const categoryColors: Record<string, string> = {
+    ALMACEN: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200",
+    CIGARRILLOS: "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200",
+    GOLOSINAS: "bg-pink-100 text-pink-800 dark:bg-pink-900 dark:text-pink-200",
+    BEBIDA: "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200",
+    CERVEZA: "bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200",
+    FIAMBRES: "bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200",
+    TABACO: "bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-200",
+    HUEVOS: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200",
+    HIGIENE: "bg-teal-100 text-teal-800 dark:bg-teal-900 dark:text-teal-200",
+    ALCOHOL: "bg-indigo-100 text-indigo-800 dark:bg-indigo-900 dark:text-indigo-200",
+    "SIN CATEGORIA": "bg-slate-200 text-slate-800 dark:bg-slate-700 dark:text-slate-200",
+  };
 
+  async function confirmStockChange() {
+    const product = stockModal.item;
+    const type = stockModal.type;
+    if (!product || !type || !businessId) return;
+
+    const currentStock = product.stocks[businessId] || 0;
+    const delta = type === "add" ? stockAmount : -stockAmount;
+    const newStock = Math.max(0, currentStock + delta);
+
+    // Upsert nuevo stock
+    const { error } = await supabase
+      .from("business_inventory")
+      .upsert([{ product_id: product.id, business_id: businessId, stock: newStock }], {
+        onConflict: ["business_id", "product_id"],
+      });
+
+    if (error) {
+      console.error("Error al actualizar stock:", error);
+      return;
+    }
+
+    // Log de actividad
+    const details = `${user?.name || "Usuario"} ${type === "add" ? "agregó" : "quitó"} stock de ${product.name}: ${currentStock} → ${newStock}`;
+    await supabase.from("activities").insert({
+      business_id: businessId,
+      details,
+      created_at: new Date().toISOString(),
+    });
+
+    // Actualiza local
+    setInventory(prev =>
+      prev.map(p =>
+        p.id === product.id
+          ? {
+            ...p,
+            stocks: { ...p.stocks, [businessId]: newStock },
+          }
+          : p
+      )
+    );
+
+    closeStockModal();
+  }
 
   return (
     <div className="space-y-6 p-6">
@@ -309,7 +383,6 @@ export default function InventoryPage() {
             <thead className="bg-slate-100 dark:bg-slate-700 text-sm uppercase">
               <tr>
                 <th className="px-6 py-4 text-left">Producto</th>
-                <th className="px-6 py-4">Compra</th>
                 <th className="px-6 py-4">Venta</th>
                 <th className="px-6 py-4">STOCK</th>
                 <th className="px-6 py-4">Acciones</th>
@@ -324,10 +397,22 @@ export default function InventoryPage() {
                   return (
                     <tr key={item.id} className="border-b even:bg-slate-50/60 dark:even:bg-slate-800/30 hover:bg-slate-100 transition">
                       <td className="px-6 py-4">
-                        <div className="font-medium">{item.name}</div>
-                        <div className="text-sm text-gray-500">{item.code}</div>
+                        {(() => {
+                          const { category, base } = extractCategory(item.name);
+                          const badgeStyle = categoryColors[category] || "bg-slate-200 text-slate-800 dark:bg-slate-700 dark:text-slate-200";
+                          return (
+                            <div>
+                              <span className={`text-xs rounded-full px-2 py-0.5 ${badgeStyle}`}>
+                                {category}
+                              </span>
+                              <div className="font-medium flex items-center gap-2">
+                                {base}
+                              </div>
+                              <div className="text-sm text-gray-500">{item.code}</div>
+                            </div>
+                          );
+                        })()}
                       </td>
-                      <td className="px-6 py-4">{new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS" }).format(item.default_purchase)}</td>
                       <td className="px-6 py-4">{sell}</td>
                       {businesses.filter(b => b.id === businessId).map(b => {
                         const qty = item.stocks[b.id] || 0;
@@ -335,8 +420,20 @@ export default function InventoryPage() {
                         return <td key={b.id} className="px-6 py-4 text-center"><span className={`${color} text-white rounded-full px-2`}>{qty}</span></td>;
                       })}
                       <td className="px-6 py-4 flex gap-2 justify-end">
-                        <button onClick={() => openDrawer(item)} className="bg-indigo-600 text-white text-xs px-6 py-2 rounded-lg">AJUSTAR STOCK</button>
+                        <button
+                          onClick={() => openStockModal(item, "add")}
+                          className="bg-green-600 text-white text-xs px-4 py-2 rounded-lg"
+                        >
+                          Agregar stock
+                        </button>
+                        <button
+                          onClick={() => openStockModal(item, "remove")}
+                          className="bg-red-600 text-white text-xs px-4 py-2 rounded-lg"
+                        >
+                          Quitar stock
+                        </button>
                       </td>
+
                     </tr>
                   );
                 })
@@ -345,25 +442,45 @@ export default function InventoryPage() {
           </table>
         </div>
       </div>
+      {stockModal.item && stockModal.type && (
+        <div className="fixed inset-0 z-50 pointer-events-none">
+          <div className="absolute inset-0 bg-black/20" onClick={closeStockModal} />
+          <div className="absolute top-1/2 left-1/2 w-full max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-xl shadow-lg bg-white dark:bg-slate-800 p-6 pointer-events-auto">
+            <h2 className="text-xl font-semibold mb-4">
+              {stockModal.type === "add" ? "Agregar" : "Quitar"} stock a <br />
+              <span className="text-indigo-600 dark:text-indigo-300">{stockModal.item.name}</span>
+            </h2>
 
-      {drawerProduct && (
-        <div className="fixed inset-0 flex z-50">
-          <div className="absolute inset-0 bg-black/50" onClick={closeDrawer} />
-          <div className="relative ml-auto w-3/5 h-full bg-white p-8 overflow-y-auto shadow-xl">
-            <h2 className="text-2xl font-semibold mb-6">{drawerProduct.name}</h2>
+            <label className="block text-sm mb-4">
+              Cantidad:
+              <input
+                type="number"
+                min="0"
+                value={stockAmount}
+                onChange={(e) => setStockAmount(Number(e.target.value))}
+                className="mt-1 w-full rounded-md border p-2 text-base"
+              />
+            </label>
 
-            <div className="mt-8 space-y-4">
-              {businesses.filter(b => b.id === businessId).map(b => (
-                <div key={b.id} className="flex justify-between items-center"><span>STOCK - {b.name}</span><input type="number" value={editableStocks[b.id] || ""} onChange={e => setEditableStocks(prev => ({ ...prev, [b.id]: Number(e.target.value) }))} className="w-24 border rounded-md p-2" /></div>
-              ))}
-            </div>
-            <div className="flex justify-end gap-4 mt-8">
-              <button onClick={closeDrawer} className="px-6 py-2 border rounded-md">Cancelar</button>
-              <button onClick={saveAll} className="px-6 py-2 bg-green-600 text-white rounded-md">Guardar Todo</button>
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={closeStockModal}
+                className="px-4 py-2 rounded-md border text-sm"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={confirmStockChange}
+                className={`px-4 py-2 text-sm rounded-md text-white ${stockModal.type === "add" ? "bg-green-600" : "bg-red-600"}`}
+              >
+                Confirmar
+              </button>
             </div>
           </div>
         </div>
       )}
+
+
     </div>
   );
 }

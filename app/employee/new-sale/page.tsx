@@ -275,19 +275,33 @@ export default function NewSalePage() {
   };
 
   const addToCart = (p: any) => {
-    setCart([
-      ...cart,
-      {
-        productId: p.id,
-        productName: p.name,
-        price: p.default_selling || p.default_selling,
-        quantity: 1,
-        total: p.default_selling || p.default_selling,
-        stock: p.stock - 1,
-        listID: p.products,
-      },
-    ]);
+    const currentInCart = cart.find((item) => item.productId === p.id);
+    const quantityInCart = currentInCart?.quantity || 0;
+
+    if (quantityInCart >= p.stock) {
+      toastSinStock();
+      return;
+    }
+
+    if (currentInCart) {
+      updateQty(cart.indexOf(currentInCart), quantityInCart + 1);
+    } else {
+      setCart([
+        ...cart,
+        {
+          productId: p.id,
+          productName: p.name,
+          price: p.default_selling || p.default_selling,
+          quantity: 1,
+          total: p.default_selling || p.default_selling,
+          stock: p.stock, // ← stock real, sin restar
+          listID: p.products,
+        },
+      ]);
+    }
   };
+
+
 
   const updateQty = (idx: number, newQ: number) => {
     const prod = products.find((p) => p.id === cart[idx].productId);
@@ -297,8 +311,8 @@ export default function NewSalePage() {
         ...next[idx],
         quantity: newQ,
         total: newQ * next[idx].price,
-        stock: prod.stock - newQ,
       };
+
       return next;
     });
   };
@@ -528,216 +542,225 @@ export default function NewSalePage() {
               </header>
               <div className="overflow-x-auto">
                 <table className="min-w-full text-sm">
-                  <thead className="bg-slate-100 dark:bg-slate-700/70">
+                  <thead className="bg-slate-100 dark:bg-slate-700/70 text-xs uppercase">
                     <tr>
-                      {["Producto", "Precio", "Acción"].map((h) => (
-                        <th key={h} className="px-4 py-2 text-left font-medium text-xs uppercase">
-                          {h}
-                        </th>
-                      ))}
+                      <th className="px-4 py-2 text-left">Producto</th>
+                      <th className="px-4 py-2 text-left">Precio</th>
+                      <th className="px-4 py-2 text-left">Acción</th>
                     </tr>
                   </thead>
                   <tbody>
                     {loading ? (
                       <tr>
-                        <td colSpan={3} className="py-8 text-center">
+                        <td colSpan={4} className="py-8 text-center">
                           Cargando…
                         </td>
                       </tr>
                     ) : filteredProducts.length ? (
                       filteredProducts.map((p) => {
                         const { category, baseName } = extractCategory(p.name);
+                        const badgeColor = p.code === "PROMO"
+                          ? "bg-rose-100 text-rose-800 dark:bg-rose-900/40 dark:text-rose-300"
+                          : "bg-sky-100 text-sky-800 dark:bg-sky-900/40 dark:text-sky-300";
+
                         return (
-                          <tr key={p.id} className="hover:bg-slate-50 dark:hover:bg-slate-700/50">
-                            <td className="px-4 py-2">
-                              {category && (
-                                <span className="block text-[10px] text-sky-500 font-bold">
-                                  {category}
-                                </span>
-                              )}
-                              <span className="block">{baseName.toUpperCase()}</span>
-                              <span
-                                className={`block text-[10px] ${p.code === "PROMO"
-                                  ? "text-rose-500"
-                                  : "text-slate-500 dark:text-slate-400"
-                                  }`}
-                              >
-                                {p.code.toUpperCase()}
-                              </span>
+                          <tr key={p.id} className="border-b border-slate-100 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition">
+                            <td className="px-4 py-3">
+                              <div className="flex flex-col">
+                                {category && (
+                                  <span className={`text-[10px] font-semibold mt-1 w-fit px-2 py-0.5 rounded-full ${badgeColor}`}>
+                                    {category}
+                                  </span>
+                                )}
+                                <span className="font-medium">{baseName}</span>
+                                <span className="text-xs text-slate-500 dark:text-slate-400">{p.code.toUpperCase()}</span>
+                              </div>
                             </td>
-                            <td className="px-4 py-2">{formatCurrency(p.default_selling)}</td>
-                            <td className="px-4 py-2">
+                            <td className="px-4 py-3">{formatCurrency(p.default_selling)}</td>
+
+                            <td className="px-4 py-3">
                               <button
                                 onClick={() => addToCart(p)}
-                                className={`px-3 py-1.5 rounded-md text-xs font-medium bg-emerald-600 text-white hover:bg-emerald-700`}
+                                className={`flex items-center gap-1 px-3 py-1.5 text-xs rounded-md ${p.stock <= 0
+                                  ? "bg-slate-300 text-slate-500 cursor-not-allowed"
+                                  : "bg-emerald-600 hover:bg-emerald-700 text-white"
+                                  }`}
+                                disabled={p.stock <= 0}
                               >
+                                <Plus className="h-4 w-4" />
                                 Agregar
                               </button>
+
                             </td>
                           </tr>
                         );
                       })
                     ) : (
                       <tr>
-                        <td colSpan={3} className="py-8 text-center">
+                        <td colSpan={4} className="py-8 text-center">
                           Sin coincidencias.
                         </td>
                       </tr>
                     )}
                   </tbody>
                 </table>
+
               </div>
             </div>
           )}
         </section>
 
         {/* Cart */}
-        <aside className="cols-6 space-y-4">
-          <div className="bg-white dark:bg-slate-800 rounded-lg shadow-sm p-4">
-            <header className="flex justify-between items-center">
-              <h2 className="font-semibold flex items-center gap-2">
+        <aside className="w-full  space-y-4">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-md p-5">
+            <header className="flex justify-between items-center mb-4">
+              <h2 className="text-lg font-bold flex items-center gap-2">
                 <ShoppingCart className="h-5 w-5" />
                 Carrito
+
               </h2>
-              <span className="text-xs bg-slate-100 dark:bg-slate-700 px-2 py-0.5 rounded-full">
-                {cart.length}
+
+              <span className="text-xs bg-slate-200 dark:bg-slate-700 px-2 py-0.5 rounded-full">
+
+                {cart.length} items
               </span>
             </header>
-
+            <div>
+              {cart.length > 1 && (
+                <button
+                  onClick={() => setCart([])}
+                  className="text-sm text-rose-500 hover:underline  mb-3"
+                >
+                  Vaciar carrito
+                </button>
+              )}
+            </div>
             {cart.length ? (
               <>
-                <ul className="space-y-3 mt-4">
+                <ul className="space-y-3 max-h-[50vh] overflow-y-auto pr-1">
                   {cart.map((it, i) => (
-                    <li key={i} className="flex items-center gap-3 bg-slate-50 dark:bg-slate-700 rounded p-2">
-                      <div className="flex-1">
-                        <p className="text-sm font-medium">{it.productName}</p>
-                        <p className="text-xs text-slate-500 dark:text-slate-400">
-                          {formatCurrency(it.price)} c/u
+                    <li key={i} className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-600 rounded-xl p-4 flex flex-col space-y-2 shadow-sm">
+                      {/* Nombre y eliminar */}
+                      <div className="flex justify-between items-start">
+                        <div className="flex-1">
+                          <p className="text-base font-bold text-gray-900 dark:text-gray-100">{it.productName}
+                            <span className="text-xs ml-3 font-normal bg-blue-200 dark:bg-slate-700 text-slate-800 dark:text-slate-100 rounded px-2 py-0.5">
+                              {formatCurrency(it.price)} c/u
+                            </span></p>
+                        </div>
+
+                        <button onClick={() => removeIdx(i)} className="text-rose-500 hover:text-rose-700">
+                          <Trash2 className="w-5 h-5" />
+                        </button>
+                      </div>
+
+                      {/* Controles de cantidad y total */}
+                      <div className="flex justify-between items-center mt-2">
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => {
+                              if (it.quantity == 1) return;
+                              updateQty(i, it.quantity - 1)
+                            }}
+                            disabled={it.quantity == 1}
+                            className="w-9 h-9 rounded-lg bg-slate-200 dark:bg-slate-600 flex items-center justify-center "
+                          >
+                            <Minus className="w-4 h-4" />
+                          </button>
+                          <span
+                            className="text-sm w-8 text-center font-semibold transition-transform duration-150 ease-in-out scale-100 group-hover:scale-110"
+                          >
+                            {it.quantity}
+                          </span>
+                          <button
+                            onClick={() => updateQty(i, it.quantity + 1)}
+                            disabled={it.quantity >= it.stock}
+                            className="w-9 h-9 rounded-lg bg-slate-200 dark:bg-slate-600 flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            <Plus className="w-4 h-4" />
+                          </button>
+
+
+                        </div>
+
+                        <p className="text-right text-base font-semibold text-gray-900 dark:text-gray-100 transition-colors duration-200">
+                          {formatCurrency(it.total)}
                         </p>
                       </div>
-
-                      {/* qty controls */}
-                      <div className="flex items-center gap-1">
-                        <Circle onClick={() => updateQty(i, it.quantity - 1)}>
-                          <Minus className="h-4 w-4" />
-                        </Circle>
-                        <span className="w-6 text-center">{it.quantity}</span>
-                        <Circle onClick={() => updateQty(i, it.quantity + 1)}>
-                          <Plus className="h-4 w-4" />
-                        </Circle>
-                      </div>
-
-                      {/* stock restante */}
-                      <span
-                        className={`px-1.5 py-0.5 text-[10px] rounded-full ${it.stock < 0
-                          ? "bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300"
-                          : "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300"
-                          }`}
-                      >
-                        {it.stock}
-                      </span>
-
-                      {/* remove */}
-                      <Circle onClick={() => removeIdx(i)}>
-                        <Trash2 className="h-4 w-4 text-rose-500" />
-                      </Circle>
-
-                      {/* total */}
-                      <p className="w-20 text-right font-medium">
-                        {formatCurrency(it.total)}
-                      </p>
                     </li>
+
                   ))}
                 </ul>
 
-                {/* summary */}
-                <div className="border-t border-slate-200 dark:border-slate-600 pt-4 mt-4 space-y-3">
-                  <div className="flex justify-between font-medium">
+                {/* Resumen y pago */}
+                <div className="border-t border-slate-300 dark:border-slate-600 pt-4 mt-4 space-y-4">
+                  <div className="flex justify-between font-bold text-base">
                     <span>Total</span>
                     <span>{formatCurrency(cartTotal)}</span>
                   </div>
-                  {paymentMethod === "cash" && (
-                    <>
-                      <div className="mt-3 space-y-2">
-                        <label
-                          htmlFor="amountGiven"
-                          className="block text-base font-semibold text-gray-900 dark:text-gray-100"
-                        >
-                          ¿Con cuánto paga el cliente?
-                        </label>
 
-                        <div className="relative">
-                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-lg text-gray-500 dark:text-gray-400">
-                            $
-                          </span>
-                          <input
-                            id="amountGiven"
-                            type="number"
-                            inputMode="decimal"
-                            step="any"
-                            min="0"
-                            className="w-full pl-7 pr-3 py-2 border border-gray-300 dark:border-gray-700 rounded-md text-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            value={amountGiven}
-                            onChange={(e) =>
-                              setAmountGiven(
-                                e.target.value === "" ? "" : Math.max(0, parseFloat(e.target.value))
-                              )
-                            }
-                          />
-                        </div>
-
-                        {typeof change === "number" && (
-                          <div className="flex justify-between items-center text-base font-semibold mt-2">
-                            <span className="text-gray-900 dark:text-gray-100">Vuelto a dar:</span>
-                            <span className={change < 0 ? "text-red-500" : "text-green-500"}>
-                              {change < 0 ? "Monto insuficiente" : formatCurrency(change)}
-                            </span>
-                          </div>
-                        )}
-                      </div>
-                    </>
-                  )}
-
-
-
-                  {/* payment buttons */}
-                  <div className="grid grid-cols-2 gap-2 text-xs">
+                  {/* Método de pago */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
                     {(["cash", "card", "transfer", "rappi"] as const).map((m) => (
                       <button
                         key={m}
                         onClick={() => setPaymentMethod(m)}
-                        className={`rounded py-1.5 ${paymentMethod === m
-                          ? "ring-2 ring-emerald-500 dark:ring-emerald-400"
+                        className={`rounded-md py-2 font-semibold transition-all ${paymentMethod === m
+                          ? "ring-2 ring-red-500 dark:ring-red-400"
                           : "ring-1 ring-slate-300 dark:ring-slate-600"
                           } ${{
-                            cash: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300",
-                            card: "bg-indigo-100 text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-300",
-                            transfer:
-                              "bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300",
-                            rappi:
-                              "bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-300",
-                          }[m]
-                          }`}
+                            cash: "bg-emerald-100 dark:bg-emerald-900/30",
+                            card: "bg-indigo-100 dark:bg-indigo-900/30",
+                            transfer: "bg-purple-100 dark:bg-purple-900/30",
+                            rappi: "bg-orange-100 dark:bg-orange-900/30",
+                          }[m]}`}
                       >
-                        {
-                          {
-                            cash: "Efectivo",
-                            card: "Tarjeta",
-                            transfer: "Transferencia",
-                            rappi: "Rappi",
-                          }[m]
-                        }
+                        {{
+                          cash: "Efectivo",
+                          card: "Tarjeta",
+                          transfer: "Transferencia",
+                          rappi: "Rappi",
+                        }[m]}
                       </button>
                     ))}
                   </div>
 
+                  {/* Input efectivo */}
+                  {paymentMethod === "cash" && (
+                    <div>
+                      <label htmlFor="amountGiven" className="block font-medium mb-1">
+                        ¿Con cuánto paga el cliente?
+                      </label>
+                      <input
+                        id="amountGiven"
+                        type="number"
+                        inputMode="decimal"
+                        step="any"
+                        min="0"
+                        className="w-full text-lg px-4 py-2 rounded-lg bg-white dark:bg-slate-900 border border-gray-300 dark:border-gray-700"
+                        value={amountGiven}
+                        onChange={(e) =>
+                          setAmountGiven(e.target.value === "" ? "" : Math.max(0, parseFloat(e.target.value)))
+                        }
+                      />
+                      {typeof change === "number" && (
+                        <p className={`mt-2 font-semibold ${change < 0 ? "text-red-600" : "text-green-600"}`}>
+                          {change < 0 ? "Monto insuficiente" : `Vuelto: ${formatCurrency(change)}`}
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Botón confirmar */}
                   <button
                     onClick={() => setConfirm(true)}
-                    className="btn btn-primary w-full"
+                    className="w-full mt-2 py-2 rounded-lg bg-emerald-600 text-white font-bold hover:bg-emerald-700 transition"
                     disabled={!activeShift}
                   >
                     Completar venta
                   </button>
+
+
                 </div>
               </>
             ) : (
@@ -750,6 +773,7 @@ export default function NewSalePage() {
             )}
           </div>
         </aside>
+
       </div>
 
       {/* confirm modal */}

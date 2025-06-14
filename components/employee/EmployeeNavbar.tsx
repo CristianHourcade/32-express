@@ -16,16 +16,22 @@ import {
   Menu,
   X,
   UserIcon,
+  Activity,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 
-const baseItems = [
+const employeeItems = [
   { name: "Dashboard", href: "/employee/dashboard", icon: BarChart },
   { name: "Productos", href: "/employee/products", icon: Package },
   { name: "Nueva Venta", href: "/employee/new-sale", icon: PlusCircle },
+
 ];
-const stockItem = { name: "Stock", href: "/employee/stock", icon: Save };
-const productos = { name: "Productos 2", href: "/employee/productos", icon: Package2Icon };
+
+const supervisorItems = [
+  { name: "Stock", href: "/employee/stock", icon: Save },
+  { name: "Inventario", href: "/employee/productos", icon: Package2Icon },
+  { name: "Actividad", href: "/employee/actividad", icon: Activity },
+];
 
 export default function EmployeeNavbar() {
   const pathname = usePathname();
@@ -46,8 +52,8 @@ export default function EmployeeNavbar() {
     }
     fetchFlag();
   }, [user?.email]);
+  const navItems = isSupervisor ? supervisorItems : employeeItems;
 
-  const navItems = isSupervisor ? [...baseItems, stockItem, productos] : baseItems;
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const handleLogout = async () => {
     setIsLoggingOut(true);
@@ -76,10 +82,9 @@ export default function EmployeeNavbar() {
                 key={item.name}
                 href={item.href}
                 className={`flex items-center space-x-2 md:space-x-3 px-4 md:px-6 py-2 md:py-3 rounded-md transition-colors focus:outline-none focus:ring-2 focus:ring-sky-500
-                  ${
-                    isActive
-                      ? 'bg-sky-50 dark:bg-slate-800 text-sky-600 dark:text-sky-400'
-                      : 'text-gray-600 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-slate-800'
+                  ${isActive
+                    ? 'bg-sky-50 dark:bg-slate-800 text-sky-600 dark:text-sky-400'
+                    : 'text-gray-600 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-slate-800'
                   }
                 `}
               >
@@ -92,7 +97,6 @@ export default function EmployeeNavbar() {
 
         {/* Right: Actions & User */}
         <div className="flex-shrink-0 flex items-center space-x-4 ml-auto">
-          <ThemeToggle />
           <MobileMenu navItems={navItems} pathname={pathname} />
           <div className="hidden md:flex items-center space-x-3 border-l border-gray-200 dark:border-slate-800 pl-4">
             <div className="w-8 h-8 md:w-10 md:h-10 rounded-full bg-gray-100 dark:bg-slate-700 flex items-center justify-center">
@@ -136,10 +140,9 @@ function MobileMenu({ navItems, pathname }: { navItems: typeof baseItems; pathna
                   href={item.href}
                   onClick={() => setOpen(false)}
                   className={`flex items-center space-x-2 p-3 md:p-4 rounded-md transition-colors
-                    ${
-                      isActive
-                        ? 'bg-sky-100 dark:bg-slate-800 text-sky-600 dark:text-sky-400'
-                        : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
+                    ${isActive
+                      ? 'bg-sky-100 dark:bg-slate-800 text-sky-600 dark:text-sky-400'
+                      : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
                     }
                   `}
                 >

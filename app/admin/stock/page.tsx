@@ -102,6 +102,7 @@ const loadSales = async (businessId: string, days: number) => {
           promotion_id,
           total,
           product_id,
+          product_master_id,
           products(name)
         )
       `)
@@ -127,6 +128,23 @@ const loadPromotionsByIds = async (ids: string[]) => {
 
   return data ?? [];
 };
+
+const loadProductMasters = async () => {
+  return fetchAll((from, to) =>
+    supabase
+      .from("products_master")
+      .select("id, name")
+      .range(from, to)
+  );
+};
+const loadMasterStocks = async (businessId: string) =>
+  fetchAll((from, to) =>
+    supabase
+      .from("business_inventory")
+      .select("product_id, stock")
+      .eq("business_id", businessId)
+      .range(from, to)
+  );
 
 
 const loadProducts = async (businessId: string) =>
@@ -178,11 +196,14 @@ export default function TopProductsPage() {
   const [sortCol, setSortCol] = useState<"qty" | "revenue" | "stock">("qty");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [promotions, setPromotions] = useState<any[]>([]);
+  const [productMasterMap, setProductMasterMap] = useState<Map<string, string>>(new Map());
+  const [masterStockMap, setMasterStockMap] = useState<Map<string, number>>(new Map());
 
   /* ---------- load data ---------- */
   useEffect(() => {
     (async () => setBusinesses(await loadBusinesses()))();
   }, []);
+
 
   useEffect(() => {
     if (!selectedBiz) return;
@@ -190,32 +211,35 @@ export default function TopProductsPage() {
     (async () => {
       setLoading(true);
 
-      // 1. Cargar ventas y productos
-      const [s, p] = await Promise.all([
+      const [s, p, masters, inventory] = await Promise.all([
         loadSales(selectedBiz, daysFilter),
         loadProducts(selectedBiz),
+        loadProductMasters(),
+        loadMasterStocks(selectedBiz),
       ]);
       setSales(s);
       setProducts(p);
 
-      // 2. Detectar promos involucradas en esas ventas
+      const masterMap = new Map<string, string>();
+      masters.forEach((m) => masterMap.set(m.id, m.name));
+      setProductMasterMap(masterMap);
+
+      const stockMap = new Map<string, number>();
+      inventory.forEach((inv) => stockMap.set(inv.product_id, inv.stock));
+      setMasterStockMap(stockMap);
+
       const promoIds = s
         .flatMap((sale) => sale.sale_items ?? [])
         .filter((item) => item.promotion_id)
         .map((item) => item.promotion_id);
 
       const uniquePromoIds = Array.from(new Set(promoIds));
-
-      // 3. Cargar promociones por id
       const promos = await loadPromotionsByIds(uniquePromoIds);
       setPromotions(promos);
 
       setLoading(false);
     })();
   }, [selectedBiz, daysFilter]);
-
-
-
   /* ---------- compute top ---------- */
   const top = useMemo(() => {
     if (!selectedBiz) return [];
@@ -237,18 +261,30 @@ export default function TopProductsPage() {
     recentSales.forEach((sale) =>
       sale.sale_items?.forEach((item: any) => {
         if (!item.promotion_id) {
-          const prod = products.find((p) => p.id === item.product_id);
-          if (!prod) return;
+          const key = item.product_id || item.product_master_id;
+          if (!key) return;
 
-          const key = item.product_id;
+          const prod = products.find((p) => p.id === item.product_id);
+          let stock: number | null = null;
+          if (item.product_id) {
+            stock = prod?.stock ?? null;
+          } else if (item.product_master_id) {
+            stock = masterStockMap.get(item.product_master_id) ?? null;
+          }
+          const name =
+            item.products?.name ||
+            productMasterMap.get(item.product_master_id) ||
+            prod?.name ||
+            "—";
+
           if (!map.has(key)) {
-            const { category, baseName } = extractCategory(item.products?.name ?? "—");
+            const { category, baseName } = extractCategory(name);
             map.set(key, {
               name: baseName,
               cat: category,
               qty: 0,
               revenue: 0,
-              stock: prod.stock ?? prod.current_stock ?? null,
+              stock,
             });
           }
 
@@ -258,6 +294,7 @@ export default function TopProductsPage() {
         }
       })
     );
+
 
     // 🔹 2. Ventas que son promociones → sumar productos internos
     recentSales.forEach((sale) =>
@@ -271,21 +308,30 @@ export default function TopProductsPage() {
         const promoUnitValue = promo.price / totalQty;
 
         promo.products.forEach((promoItem: any) => {
-          const prod = products.find((p) => p.id === promoItem.id);
-          if (!prod) return;
-
           const key = promoItem.id;
           const qty = promoItem.qty ?? 1;
           const revenue = promoUnitValue * qty;
 
+          // Intentamos buscar por ID en products
+          const prod = products.find((p) => p.id === key);
+          const stock =
+            prod?.stock ??
+            masterStockMap.get(key) ??
+            null;
+
+          const name =
+            productMasterMap.get(key) ??
+            prod?.name ??
+            "—";
+
           if (!map.has(key)) {
-            const { category, baseName } = extractCategory(prod.name ?? "—");
+            const { category, baseName } = extractCategory(name);
             map.set(key, {
               name: baseName,
               cat: category,
               qty: 0,
               revenue: 0,
-              stock: prod.stock ?? prod.current_stock ?? null,
+              stock,
             });
           }
 
@@ -295,6 +341,7 @@ export default function TopProductsPage() {
         });
       })
     );
+
 
     // 🔹 3. Filtros de categoría
     let arr = Array.from(map.values());

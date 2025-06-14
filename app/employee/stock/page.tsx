@@ -88,27 +88,72 @@ const loadBusinesses = async () => {
   return data ?? [];
 };
 
-const loadSales = async (businessId: string) =>
-  fetchAll((from, to) =>
+const loadSales = async (businessId: string, days: number) => {
+  const since = new Date(Date.now() - days * 86400000).toISOString();
+
+  return fetchAll((from, to) =>
     supabase
       .from("sales")
-      .select(
-        `
-        *,
+      .select(`
+        id,
+        timestamp,
         sale_items (
-          *,
+          quantity,
+          promotion_id,
+          total,
+          product_id,
+          product_master_id,
           products(name)
         )
-      `
-      )
+      `)
       .eq("business_id", businessId)
+      .gte("timestamp", since) // FILTRA EN LA DB, no en frontend
       .order("timestamp", { ascending: false })
       .range(from, to)
   );
+};
+
+const loadPromotionsByIds = async (ids: string[]) => {
+  if (!ids.length) return [];
+
+  const { data, error } = await supabase
+    .from("promotions")
+    .select("id, name, price, products")
+    .in("id", ids);
+
+  if (error) {
+    console.error("Error loading promotions:", error);
+    return [];
+  }
+
+  return data ?? [];
+};
+
+const loadProductMasters = async () => {
+  return fetchAll((from, to) =>
+    supabase
+      .from("products_master")
+      .select("id, name")
+      .range(from, to)
+  );
+};
+const loadMasterStocks = async (businessId: string) =>
+  fetchAll((from, to) =>
+    supabase
+      .from("business_inventory")
+      .select("product_id, stock")
+      .eq("business_id", businessId)
+      .range(from, to)
+  );
+
 
 const loadProducts = async (businessId: string) =>
   fetchAll((from, to) =>
-    supabase.from("products").select("*").eq("business_id", businessId).range(from, to)
+    supabase
+      .from("products")
+      .select("id, name, stock") // solo lo necesario
+      .eq("business_id", businessId)
+      .range(from, to)
   );
 
 /* ═════════════ CONST ═════════════ */
@@ -144,80 +189,192 @@ export default function TopProductsPage() {
   const [selectedBiz, setSelectedBiz] = useState("");
   const [sales, setSales] = useState<any[]>([]);
   const [products, setProducts] = useState<any[]>([]);
-  const [daysFilter, setDaysFilter] = useState(30);
+  const [daysFilter, setDaysFilter] = useState(7);
   const [selectedCats, setSelectedCats] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [copied, setCopied] = useState(false);
   const [sortCol, setSortCol] = useState<"qty" | "revenue" | "stock">("qty");
-  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+  const [promotions, setPromotions] = useState<any[]>([]);
+  const [productMasterMap, setProductMasterMap] = useState<Map<string, string>>(new Map());
+  const [masterStockMap, setMasterStockMap] = useState<Map<string, number>>(new Map());
 
   /* ---------- load data ---------- */
   useEffect(() => {
     (async () => setBusinesses(await loadBusinesses()))();
   }, []);
 
+
   useEffect(() => {
     if (!selectedBiz) return;
+
     (async () => {
       setLoading(true);
-      const [s, p] = await Promise.all([loadSales(selectedBiz), loadProducts(selectedBiz)]);
+
+      const [s, p, masters, inventory] = await Promise.all([
+        loadSales(selectedBiz, daysFilter),
+        loadProducts(selectedBiz),
+        loadProductMasters(),
+        loadMasterStocks(selectedBiz),
+      ]);
       setSales(s);
       setProducts(p);
+
+      const masterMap = new Map<string, string>();
+      masters.forEach((m) => masterMap.set(m.id, m.name));
+      setProductMasterMap(masterMap);
+
+      const stockMap = new Map<string, number>();
+      inventory.forEach((inv) => stockMap.set(inv.product_id, inv.stock));
+      setMasterStockMap(stockMap);
+
+      const promoIds = s
+        .flatMap((sale) => sale.sale_items ?? [])
+        .filter((item) => item.promotion_id)
+        .map((item) => item.promotion_id);
+
+      const uniquePromoIds = Array.from(new Set(promoIds));
+      const promos = await loadPromotionsByIds(uniquePromoIds);
+      setPromotions(promos);
+
       setLoading(false);
     })();
-  }, [selectedBiz]);
-
+  }, [selectedBiz, daysFilter]);
   /* ---------- compute top ---------- */
   const top = useMemo(() => {
     if (!selectedBiz) return [];
 
-    /* filtrar ventas recientes */
     const now = Date.now();
+
+    // Ventas dentro del rango
     const recentSales = sales.filter(
       (s) => (now - new Date(s.timestamp).getTime()) / 86400000 <= daysFilter
     );
 
-    /* mapear productos */
+    // Acumulador de productos
     const map = new Map<
       string,
       { name: string; qty: number; revenue: number; stock: number | null; cat: string }
     >();
 
+    // 🔹 1. Ventas normales (no promo)
     recentSales.forEach((sale) =>
       sale.sale_items?.forEach((item: any) => {
-        const prod = products.find((p) => p.id === item.product_id);
-        if (!prod) return;
-        const key = item.product_id as string;
-        if (!map.has(key)) {
-          const { category, baseName } = extractCategory(item.products?.name ?? "—");
-          map.set(key, {
-            name: baseName,
-            cat: category,
-            qty: 0,
-            revenue: 0,
-            stock: prod.stock ?? prod.current_stock ?? null,
-          });
+        if (!item.promotion_id) {
+          const key = item.product_id || item.product_master_id;
+          if (!key) return;
+
+          const prod = products.find((p) => p.id === item.product_id);
+          let stock: number | null = null;
+          if (item.product_id) {
+            stock = prod?.stock ?? null;
+          } else if (item.product_master_id) {
+            stock = masterStockMap.get(item.product_master_id) ?? null;
+          }
+          const name =
+            item.products?.name ||
+            productMasterMap.get(item.product_master_id) ||
+            prod?.name ||
+            "—";
+
+          if (!map.has(key)) {
+            const { category, baseName } = extractCategory(name);
+            map.set(key, {
+              name: baseName,
+              cat: category,
+              qty: 0,
+              revenue: 0,
+              stock,
+            });
+          }
+
+          const e = map.get(key)!;
+          e.qty += item.quantity;
+          e.revenue += item.total;
         }
-        const e = map.get(key)!;
-        e.qty += item.quantity;
-        e.revenue += item.total;
       })
     );
 
-    /* a array + filtros */
+
+    // 🔹 2. Ventas que son promociones → sumar productos internos
+    recentSales.forEach((sale) =>
+      sale.sale_items?.forEach((item: any) => {
+        if (!item.promotion_id) return;
+
+        const promo = promotions.find((p) => p.id === item.promotion_id);
+        if (!promo?.products) return;
+
+        const totalQty = promo.products.reduce((sum, p) => sum + p.qty, 0) || 1;
+        const promoUnitValue = promo.price / totalQty;
+
+        promo.products.forEach((promoItem: any) => {
+          const key = promoItem.id;
+          const qty = promoItem.qty ?? 1;
+          const revenue = promoUnitValue * qty;
+
+          // Intentamos buscar por ID en products
+          const prod = products.find((p) => p.id === key);
+          const stock =
+            prod?.stock ??
+            masterStockMap.get(key) ??
+            null;
+
+          const name =
+            productMasterMap.get(key) ??
+            prod?.name ??
+            "—";
+
+          if (!map.has(key)) {
+            const { category, baseName } = extractCategory(name);
+            map.set(key, {
+              name: baseName,
+              cat: category,
+              qty: 0,
+              revenue: 0,
+              stock,
+            });
+          }
+
+          const e = map.get(key)!;
+          e.qty += qty;
+          e.revenue += revenue;
+        });
+      })
+    );
+
+
+    // 🔹 3. Filtros de categoría
     let arr = Array.from(map.values());
     if (selectedCats.length) arr = arr.filter((p) => selectedCats.includes(p.cat));
 
-    /* ordenar */
+    // 🔹 4. Orden
     arr.sort((a, b) => {
       const diff = (a[sortCol] ?? -Infinity) - (b[sortCol] ?? -Infinity);
       return sortDir === "asc" ? diff : -diff;
     });
+    const categorySummary = (() => {
+      const totalRevenue = arr.reduce((sum, p) => sum + p.revenue, 0);
+      const map = new Map<string, { revenue: number; percent: number }>();
 
-    return arr;
+      arr.forEach((p) => {
+        if (!map.has(p.cat)) map.set(p.cat, { revenue: 0, percent: 0 });
+        map.get(p.cat)!.revenue += p.revenue;
+      });
+
+      const result = Array.from(map.entries()).map(([cat, val]) => ({
+        category: cat,
+        revenue: val.revenue,
+        percent: totalRevenue ? (val.revenue / totalRevenue) * 100 : 0,
+      }));
+
+      return result.sort((a, b) => b.revenue - a.revenue); // ordenar por más facturación
+    })();
+
+    return { products: arr, categorySummary };
   }, [
     sales,
     products,
+    promotions,
     daysFilter,
     selectedCats,
     selectedBiz,
@@ -249,7 +406,7 @@ export default function TopProductsPage() {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  /* ---------- UI ---------- */
+  /* ───────── UI ───────── */
   const selectedBizName = businesses.find((b) => b.id === selectedBiz)?.name ?? "";
 
   return (
@@ -285,6 +442,17 @@ export default function TopProductsPage() {
           ))}
         </select>
 
+        <select
+          className="appearance-none bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-full px-3 py-1.5 text-xs shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 w-[140px]"
+          value={daysFilter}
+          onChange={(e) => setDaysFilter(Number(e.target.value))}
+        >
+          {[1, 2, 3, 7, 14, 30].map((d) => (
+            <option key={d} value={d}>
+              Últimos {d} días
+            </option>
+          ))}
+        </select>
 
         <MultiSelectDropdown
           options={[...CATEGORIES, "SIN CATEGORIA"]}
@@ -292,68 +460,141 @@ export default function TopProductsPage() {
           onChange={setSelectedCats}
         />
 
+        <button
+          disabled={!top.products?.length}
+          onClick={copyList}
+          className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-medium rounded-full px-4 py-2 transition focus:outline-none focus:ring-2 focus:ring-indigo-500"
+        >
+          {copied ? (
+            <>
+              <Check size={16} /> Copiado
+            </>
+          ) : (
+            <>
+              <ClipboardCopy size={16} /> Copiar faltantes
+            </>
+          )}
+        </button>
       </div>
 
-      {/* ───────── Tabla ───────── */}
-      <div className="bg-white dark:bg-slate-800 rounded-xl shadow ring-1 ring-slate-200 dark:ring-slate-700">
-        <div className="overflow-x-auto rounded-xl">
-          <table className="min-w-full text-sm">
-            <thead className="bg-slate-50 dark:bg-slate-700 sticky top-0 z-10 text-[11px] uppercase tracking-wide select-none">
-              <tr className="divide-x divide-slate-200 dark:divide-slate-600">
-                <th className="px-4 py-3 text-left font-semibold">Categoría</th>
-                <th className="px-4 py-3 text-left font-semibold">Producto</th>
-
-                <th
-                  onClick={() => {
-                    if (sortCol === "stock") setSortDir(sortDir === "asc" ? "desc" : "asc");
-                    else {
-                      setSortCol("stock");
-                      setSortDir("desc");
-                    }
-                  }}
-                  className="px-4 py-3 font-semibold cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-600/30"
-                >
-                  Stock&nbsp;
-                  {sortCol === "stock" && (sortDir === "asc" ? "↑" : "↓")}
-                </th>
-              </tr>
-            </thead>
-
-            <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
-              {!selectedBiz ? (
-                <tr>
-                  <td colSpan={5} className="py-8 text-center text-slate-500 dark:text-slate-400">
-                    Seleccioná un negocio para comenzar.
-                  </td>
-                </tr>
-              ) : loading ? (
-                <tr>
-                  <td colSpan={5} className="py-8 text-center text-slate-500 dark:text-slate-400">
-                    Cargando…
-                  </td>
-                </tr>
-              ) : top.length === 0 ? (
-                <tr>
-                  <td colSpan={5} className="py-8 text-center text-slate-500 dark:text-slate-400">
-                    Sin resultados para los filtros seleccionados.
-                  </td>
-                </tr>
-              ) : (
-                top.map((p) => (
-                  <tr
-                    key={p.name + p.cat}
-                    className="hover:bg-slate-50 dark:hover:bg-slate-700/40 odd:bg-slate-50/40 dark:odd:bg-slate-800/30"
+      {/* ───────── Tablas ───────── */}
+      <div className="flex flex-col lg:flex-row gap-6">
+        {/* Tabla productos (60%) */}
+        <div className="w-full lg:w-[60%] bg-white dark:bg-slate-800 rounded-xl shadow ring-1 ring-slate-200 dark:ring-slate-700">
+          <div className="overflow-x-auto rounded-xl">
+            <table className="min-w-full text-sm">
+              <thead className="bg-slate-50 dark:bg-slate-700 sticky top-0 z-10 text-[11px] uppercase tracking-wide select-none">
+                <tr className="divide-x divide-slate-200 dark:divide-slate-600">
+                  <th className="px-4 py-3 text-left font-semibold">Categoría</th>
+                  <th className="px-4 py-3 text-left font-semibold">Producto</th>
+                  <th
+                    onClick={() => {
+                      if (sortCol === "qty") setSortDir(sortDir === "asc" ? "desc" : "asc");
+                      else {
+                        setSortCol("qty");
+                        setSortDir("desc");
+                      }
+                    }}
+                    className="px-4 py-3 font-semibold cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-600/30"
                   >
-                    <td className="px-4 py-2">{p.cat}</td>
-                    <td className="px-4 py-2 font-medium">{p.name}</td>
-                    <td className="px-4 py-2">{p.stock ?? "—"}</td>
+                    Unidades&nbsp;
+                    {sortCol === "qty" && (sortDir === "asc" ? "↑" : "↓")}
+                  </th>
+                  <th
+                    onClick={() => {
+                      if (sortCol === "revenue") setSortDir(sortDir === "asc" ? "desc" : "asc");
+                      else {
+                        setSortCol("revenue");
+                        setSortDir("desc");
+                      }
+                    }}
+                    className="px-4 py-3 font-semibold cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-600/30"
+                  >
+                    Facturado&nbsp;
+                    {sortCol === "revenue" && (sortDir === "asc" ? "↑" : "↓")}
+                  </th>
+                  <th
+                    onClick={() => {
+                      if (sortCol === "stock") setSortDir(sortDir === "asc" ? "desc" : "asc");
+                      else {
+                        setSortCol("stock");
+                        setSortDir("desc");
+                      }
+                    }}
+                    className="px-4 py-3 font-semibold cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-600/30"
+                  >
+                    Stock&nbsp;
+                    {sortCol === "stock" && (sortDir === "asc" ? "↑" : "↓")}
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
+                {!selectedBiz ? (
+                  <tr>
+                    <td colSpan={5} className="py-8 text-center text-slate-500 dark:text-slate-400">
+                      Seleccioná un negocio para comenzar.
+                    </td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+                ) : loading ? (
+                  <tr>
+                    <td colSpan={5} className="py-8 text-center text-slate-500 dark:text-slate-400">
+                      Cargando…
+                    </td>
+                  </tr>
+                ) : top.products?.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="py-8 text-center text-slate-500 dark:text-slate-400">
+                      Sin resultados para los filtros seleccionados.
+                    </td>
+                  </tr>
+                ) : (
+                  top.products?.map((p) => (
+                    <tr
+                      key={p.name + p.cat}
+                      className="hover:bg-slate-50 dark:hover:bg-slate-700/40 odd:bg-slate-50/40 dark:odd:bg-slate-800/30"
+                    >
+                      <td className="px-4 py-2">{p.cat}</td>
+                      <td className="px-4 py-2 font-medium">{p.name}</td>
+                      <td className="px-4 py-2">{p.qty}</td>
+                      <td className="px-4 py-2">
+                        <span className="font-semibold text-green-700">
+                          $ {formatPrice(p.revenue)}
+                        </span>
+                      </td>
+                      <td className="px-4 py-2">{p.stock ?? "—"}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* Tabla resumen (40%) */}
+        <div className="w-full lg:w-[40%] bg-white dark:bg-slate-800 rounded-xl shadow ring-1 ring-slate-200 dark:ring-slate-700 h-[500px]">
+          <div className="overflow-x-auto rounded-xl">
+            <table className="min-w-full text-sm">
+              <thead className="bg-slate-100 dark:bg-slate-700 text-[11px] uppercase tracking-wide select-none">
+                <tr>
+                  <th className="px-4 py-3 text-left font-semibold">Categoría</th>
+                  <th className="px-4 py-3 text-right font-semibold">Facturado</th>
+                  <th className="px-4 py-3 text-right font-semibold">% del total</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
+                {top.categorySummary?.map((cat) => (
+                  <tr key={cat.category} className="hover:bg-slate-50 dark:hover:bg-slate-700/40">
+                    <td className="px-4 py-2">{cat.category}</td>
+                    <td className="px-4 py-2 text-right">$ {formatPrice(cat.revenue)}</td>
+                    <td className="px-4 py-2 text-right">{cat.percent.toFixed(1)}%</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
     </div>
   );
+
 }
