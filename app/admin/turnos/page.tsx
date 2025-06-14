@@ -87,7 +87,11 @@ export default function ShiftsPage() {
               total,
               stock,
               product_id,
+              product_master_id,
               products (
+                name
+              ),
+              products_master (
                 name
               )
             )
@@ -172,7 +176,7 @@ export default function ShiftsPage() {
           quantity: it.quantity,
           total: it.total,
           stock: it.stock,
-          productName: it.products?.name ?? "—",
+          productName: it.products?.name ?? it.products_master?.name ?? "—",
         })),
       }));
 
@@ -480,15 +484,15 @@ function DetailsModal({
               value={
                 <span
                   className={`inline-block px-2 py-0.5 rounded-full text-[11px] font-semibold ${shift.active
-                      ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300"
-                      : "bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300"
+                    ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300"
+                    : "bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300"
                     }`}
                 >
                   {shift.active ? "Activo" : "Completado"}
                 </span>
               }
             />
-            <Info label="Ventas" value={shift.sales} />
+            <Info label="Ventas" value={getShiftSales(shift.id).length} />
             <Info label="Caja Inicial" value={`$${formatPrice(shift.startCash || 0)}`} />
             <Info
               label="Caja Final"
