@@ -327,7 +327,7 @@ export default function InventoryPage() {
     const productRows = useMemo(() => {
         const itemsToRender = searchTerm.trim()
             ? filtered.slice(0, 10)
-            : filtered;
+            : filtered.slice(0, 50);
 
         return itemsToRender.map(item => {
             return (
@@ -472,32 +472,34 @@ export default function InventoryPage() {
                 />
             </div>
             <div className="overflow-x-auto bg-white dark:bg-slate-800 rounded-2xl shadow-lg p-6">
-                <div className="overflow-hidden border border-gray-200 dark:border-slate-700 rounded-lg">
-                    <table className="min-w-full text-base">
-                        <thead className="bg-slate-100 dark:bg-slate-700 text-sm uppercase">
-                            <tr>
-                                <th className="px-6 py-4 text-left">Producto</th>
-                                <th className="px-6 py-4 text-left">Compra</th>
-                                <th
-                                    className="px-6 py-4 text-left cursor-pointer select-none"
-                                    onClick={toggleSortOrder}
-                                >
-                                    Venta
-                                    {sortOrder === "asc" && " ▲"}
-                                    {sortOrder === "desc" && " ▼"}
-                                </th>
-                                <th className="px-6 py-4 text-center">STOCK</th>
-                                <th className="px-6 py-4 text-right">Acciones</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {isBusy ? (
-                                <tr><td colSpan={4 + businesses.length} className="py-16 text-center">Cargando…</td></tr>
-                            ) : (
-                                productRows
-                            )}
-                        </tbody>
-                    </table>
+                <div className="border border-gray-200 dark:border-slate-700 rounded-lg">
+                    <div className="max-h-[600px] overflow-y-auto overflow-x-auto">
+                        <table className="min-w-full text-base">
+                            <thead className="bg-slate-100 dark:bg-slate-700 text-sm uppercase">
+                                <tr>
+                                    <th className="px-6 py-4 text-left">Producto</th>
+                                    <th className="px-6 py-4 text-left">Compra</th>
+                                    <th
+                                        className="px-6 py-4 text-left cursor-pointer select-none"
+                                        onClick={toggleSortOrder}
+                                    >
+                                        Venta
+                                        {sortOrder === "asc" && " ▲"}
+                                        {sortOrder === "desc" && " ▼"}
+                                    </th>
+                                    <th className="px-6 py-4 text-center">STOCK</th>
+                                    <th className="px-6 py-4 text-right">Acciones</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {isBusy ? (
+                                    <tr><td colSpan={4 + businesses.length} className="py-16 text-center">Cargando…</td></tr>
+                                ) : (
+                                    productRows
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
 

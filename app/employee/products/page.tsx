@@ -417,7 +417,7 @@ export default function InventoryPage() {
               {isBusy ? (
                 <tr><td colSpan={4 + businesses.length} className="py-16 text-center">Cargando…</td></tr>
               ) : (
-                filtered.map(item => {
+                filtered.slice(0,100).map(item => {
                   const sell = new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS" }).format(item.default_selling);
                   return (
                     <tr key={item.id} className="border-b even:bg-slate-50/60 dark:even:bg-slate-800/30 hover:bg-slate-100 transition">
