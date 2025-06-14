@@ -71,6 +71,8 @@ export default function InventoryPage() {
   const [drawerCategory, setDrawerCategory] = useState<string>("SIN CATEGORIA");
   const [drawerBase, setDrawerBase] = useState<string>("");
   const [selectedCategory, setSelectedCategory] = useState<string>("");
+  const [searchQuery, setSearchQuery] = useState<string>("");
+
   async function fetchAllMasters() {
     const step = 1000;
     let from = 0;
@@ -170,16 +172,26 @@ export default function InventoryPage() {
 
   // Filtrado por categoría
   const filtered = useMemo(() => {
-  const filteredList = selectedCategory
-    ? inventory.filter(item => extractCategory(item.name).category === selectedCategory)
-    : inventory;
+    const filteredList = inventory.filter(item => {
+      const categoryMatch = selectedCategory
+        ? extractCategory(item.name).category === selectedCategory
+        : true;
 
-  return filteredList.sort((a, b) => {
-    const stockA = a.stocks[businessId ?? ''] || 0;
-    const stockB = b.stocks[businessId ?? ''] || 0;
-    return stockB - stockA;
-  });
-}, [inventory, selectedCategory, businessId]);
+      const searchMatch = searchQuery.trim() === "" || (
+        item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        item.code.toLowerCase().includes(searchQuery.toLowerCase())
+      );
+
+      return categoryMatch && searchMatch;
+    });
+
+    return filteredList.sort((a, b) => {
+      const stockA = a.stocks[businessId ?? ""] || 0;
+      const stockB = b.stocks[businessId ?? ""] || 0;
+      return stockB - stockA;
+    });
+  }, [inventory, selectedCategory, searchQuery, businessId]);
+
 
 
   const isBusy = loading || businessesLoading;
@@ -364,18 +376,31 @@ export default function InventoryPage() {
   return (
     <div className="space-y-6 p-6">
       <header className="flex flex-col md:flex-row justify-between items-center gap-4">
-        <h1 className="text-3xl font-bold">Inventario </h1>
-        <select
-          value={selectedCategory}
-          onChange={e => setSelectedCategory(e.target.value)}
-          className="bg-white dark:bg-slate-800 border rounded-md p-2 text-sm"
-        >
-          <option value="">Todas las categorías</option>
-          {categories.map(c => (
-            <option key={c} value={c}>{c}</option>
-          ))}
-        </select>
+        <h1 className="text-3xl font-bold">Inventario</h1>
+
+        <div className="flex flex-col md:flex-row gap-2">
+          <input
+            type="text"
+            placeholder="Buscar producto..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="bg-white dark:bg-slate-800 border rounded-md p-2 text-sm"
+          />
+          <select
+            value={selectedCategory}
+            onChange={(e) => setSelectedCategory(e.target.value)}
+            className="bg-white dark:bg-slate-800 border rounded-md p-2 text-sm"
+          >
+            <option value="">Todas las categorías</option>
+            {categories.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </select>
+        </div>
       </header>
+
 
       <div className="overflow-x-auto bg-white dark:bg-slate-800 rounded-2xl shadow-lg p-6">
         <div className="overflow-hidden border border-gray-200 dark:border-slate-700 rounded-lg">
