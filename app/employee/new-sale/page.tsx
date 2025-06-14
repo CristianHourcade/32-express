@@ -160,38 +160,59 @@ export default function NewSalePage() {
     (async () => {
       setProductsLoading(true);
       try {
-        // 1. Traigo stock del negocio
-        const { data: invRows, error: invErr } = await supabase
-          .from("business_inventory")
-          .select("product_id, stock")
-          .eq("business_id", businessId);
-        if (invErr) throw invErr;
+        // 1. Traigo stock del negocio paginado
         const stockMap: Record<string, number> = {};
-        invRows?.forEach((r: any) => {
-          stockMap[r.product_id] = r.stock;
-        });
-
-        // 2. Traigo todos los productos master en páginas de 1000
         const pageSize = 1000;
         let page = 0;
-        let acc: any[] = [];
         let done = false;
+
         while (!done) {
-          const { from, to } = { from: page * pageSize, to: page * pageSize + pageSize - 1 };
+          const { from, to } = {
+            from: page * pageSize,
+            to: page * pageSize + pageSize - 1,
+          };
+          const { data, error } = await supabase
+            .from("business_inventory")
+            .select("product_id, stock")
+            .eq("business_id", businessId)
+            .range(from, to);
+
+          if (error) throw error;
+
+          (data ?? []).forEach((r: any) => {
+            stockMap[r.product_id.toString()] = r.stock;
+          });
+
+          if (!data?.length || data.length < pageSize) done = true;
+          page++;
+        }
+
+        console.log("📦 Inventario cargado:", stockMap);
+
+        // 2. Traigo todos los productos master en páginas de 1000
+        let acc: any[] = [];
+        page = 0;
+        done = false;
+
+        while (!done) {
+          const { from, to } = {
+            from: page * pageSize,
+            to: page * pageSize + pageSize - 1,
+          };
           const { data, error } = await supabase
             .from("products_master")
             .select("*")
             .range(from, to);
           if (error) throw error;
-          if (!data?.length || data.length < pageSize) done = true;
           acc = acc.concat(data ?? []);
+          if (!data?.length || data.length < pageSize) done = true;
           page++;
         }
 
         // 3. Mapeo stock en cada producto master
         const prodsWithStock = acc.map((p) => ({
           ...p,
-          stock: stockMap[p.id] ?? 0,
+          stock: stockMap[p.id.toString()] ?? 0,
         }));
 
         // 4. Traigo promociones y les asigno stock "ilimitado"
@@ -208,6 +229,7 @@ export default function NewSalePage() {
             stock: 999,
           })) ?? [];
 
+        // 5. Seteo productos con stock + promos
         setProducts([...promoRows, ...prodsWithStock]);
       } catch (err) {
         console.error(err);
@@ -217,6 +239,7 @@ export default function NewSalePage() {
       }
     })();
   }, [businessId]);
+
 
   /* ─ Shifts ─ */
   useEffect(() => {
@@ -467,7 +490,7 @@ export default function NewSalePage() {
     return amountGiven - cartTotal;
   }, [amountGiven, cartTotal]);
 
-
+  console.log(businessId)
   /* ───────────────────────────────────── UI ───────────────────────────────────── */
   if (loadingShifts) {
     return (
@@ -577,7 +600,6 @@ export default function NewSalePage() {
                               </div>
                             </td>
                             <td className="px-4 py-3">{formatCurrency(p.default_selling)}</td>
-
                             <td className="px-4 py-3">
                               <button
                                 onClick={() => addToCart(p)}
