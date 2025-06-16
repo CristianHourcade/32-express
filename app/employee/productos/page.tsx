@@ -204,15 +204,11 @@ export default function InventoryPage() {
         if (!drawerProduct) return;
         setIsSaving(true);
 
-        // 1) Snapshot de stocks viejos
         const oldStocks = { ...drawerProduct.stocks };
-
-        // 2) Construye el nombre final
         const newName =
             drawerCategory === "SIN CATEGORIA"
                 ? drawerBase
                 : `${drawerCategory} ${drawerBase}`;
-
         let prodId = drawerProduct.id;
 
         // 3) Inserta o actualiza en products_master
@@ -229,6 +225,7 @@ export default function InventoryPage() {
                 .select("id");
             if (insErr || !insData?.[0]?.id) {
                 console.error("Error al crear producto master:", insErr);
+                setIsSaving(false);
                 return;
             }
             prodId = insData[0].id;
@@ -245,22 +242,66 @@ export default function InventoryPage() {
                 .eq("id", prodId);
             if (updErr) {
                 console.error("Error al actualizar producto master:", updErr);
+                setIsSaving(false);
                 return;
             }
         }
 
-        // 4) Upsert en business_inventory
-        const ops = Object.entries(editableStocks).map(([business_id, stock]) => ({
-            product_id: prodId,
-            business_id,
-            stock,
-        }));
-        const { error: invErr } = await supabase
+        // 4) Guardar inventario sin usar upsert
+        const businessIds = Object.keys(editableStocks);
+        const { data: existing, error: fetchError } = await supabase
             .from("business_inventory")
-            .upsert(ops, { onConflict: ["business_id", "product_id"] });
-        if (invErr) {
-            console.error("Error al guardar inventario:", invErr);
+            .select("product_id, business_id")
+            .eq("product_id", prodId)
+            .in("business_id", businessIds);
+
+        if (fetchError) {
+            console.error("Error al obtener inventario existente:", fetchError);
+            setIsSaving(false);
             return;
+        }
+
+        const existingSet = new Set(
+            (existing ?? []).map(r => `${r.product_id}_${r.business_id}`)
+        );
+
+        const updates: any[] = [];
+        const inserts: any[] = [];
+
+        for (const [business_id, stock] of Object.entries(editableStocks)) {
+            const key = `${prodId}_${business_id}`;
+            const record = { product_id: prodId, business_id, stock };
+            if (existingSet.has(key)) {
+                updates.push(record);
+            } else {
+                inserts.push(record);
+            }
+        }
+
+        // Ejecutar updates
+        for (const u of updates) {
+            const { error } = await supabase
+                .from("business_inventory")
+                .update({ stock: u.stock })
+                .eq("product_id", u.product_id)
+                .eq("business_id", u.business_id);
+            if (error) {
+                console.error("Error al actualizar stock:", error);
+                setIsSaving(false);
+                return;
+            }
+        }
+
+        // Ejecutar inserts
+        if (inserts.length > 0) {
+            const { error } = await supabase
+                .from("business_inventory")
+                .insert(inserts);
+            if (error) {
+                console.error("Error al insertar stock:", error);
+                setIsSaving(false);
+                return;
+            }
         }
 
         // 5) Actualiza estado local
@@ -278,14 +319,12 @@ export default function InventoryPage() {
                 })
         );
 
-        // 6) Log en activities por cada cambio, usando el nombre del local
+        // 6) Log de actividades
         for (const [business_id, newStock] of Object.entries(editableStocks)) {
             const oldStock = oldStocks[business_id] ?? 0;
             if (oldStock !== newStock) {
-                // Busca el nombre del local en el array de businesses
                 const biz = businesses.find(b => b.id === business_id);
                 const bizName = biz ? biz.name : business_id;
-
                 const details = user?.name
                     ? `${user.name} cambió stock de ${newName} en ${bizName}: ${oldStock} → ${newStock}`
                     : `Cambio stock de ${newName} en ${bizName}: ${oldStock} → ${newStock}`;
@@ -302,10 +341,11 @@ export default function InventoryPage() {
             }
         }
 
-        // 7) Cierra el drawer
+        // 7) Finalizar
         setIsSaving(false);
         closeDrawer();
     }
+
     const [isSaving, setIsSaving] = useState(false);
 
     function categoryColor(cat: string): string {
