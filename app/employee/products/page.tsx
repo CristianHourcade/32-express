@@ -338,15 +338,24 @@ export default function InventoryPage() {
     const delta = type === "add" ? stockAmount : -stockAmount;
     const newStock = Math.max(0, currentStock + delta);
 
-    // Upsert nuevo stock
-    const { error } = await supabase
+    // 1. Intentar update
+    const { error: updateError, count } = await supabase
       .from("business_inventory")
-      .upsert([{ product_id: product.id, business_id: businessId, stock: newStock }], {
-        onConflict: ["business_id", "product_id"],
-      });
+      .update({ stock: newStock })
+      .eq("product_id", product.id)
+      .eq("business_id", businessId)
+      .select("*");
 
-    if (error) {
-      console.error("Error al actualizar stock:", error);
+    if (count === 0) {
+      // 2. Si no actualizó nada, insertás
+      await supabase
+        .from("business_inventory")
+        .insert({ product_id: product.id, business_id: businessId, stock: newStock });
+    }
+
+
+    if (updateError) {
+      console.error("Error al actualizar stock:", updateError);
       return;
     }
 
@@ -417,7 +426,7 @@ export default function InventoryPage() {
               {isBusy ? (
                 <tr><td colSpan={4 + businesses.length} className="py-16 text-center">Cargando…</td></tr>
               ) : (
-                filtered.slice(0,100).map(item => {
+                filtered.slice(0, 100).map(item => {
                   const sell = new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS" }).format(item.default_selling);
                   return (
                     <tr key={item.id} className="border-b even:bg-slate-50/60 dark:even:bg-slate-800/30 hover:bg-slate-100 transition">
