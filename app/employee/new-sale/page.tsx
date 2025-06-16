@@ -180,7 +180,7 @@ export default function NewSalePage() {
           if (error) throw error;
 
           (data ?? []).forEach((r: any) => {
-            stockMap[r.product_id.toString()] = r.stock;
+            stockMap[r.product_id?.toString()] = r.stock;
           });
 
           if (!data?.length || data.length < pageSize) done = true;
