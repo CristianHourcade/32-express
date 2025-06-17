@@ -295,9 +295,17 @@ export default function InventoryPage() {
         const biz = businesses.find(b => b.id === business_id);
         const bizName = biz ? biz.name : business_id;
 
-        const details = user?.name
+        const unitPrice = drawerProduct.default_purchase || 0;
+        const delta = newStock - oldStock;
+        let details = user?.name
           ? `${user.name} cambió stock de ${newName} en ${bizName}: ${oldStock} → ${newStock}`
           : `Cambio stock de ${newName} en ${bizName}: ${oldStock} → ${newStock}`;
+
+        if (delta < 0) {
+          const loss = Math.abs(delta) * unitPrice;
+          details += ` [PERDIDA - $${loss.toFixed(2)}]`;
+        }
+
 
         try {
           await supabase.from("activities").insert({
@@ -360,12 +368,19 @@ export default function InventoryPage() {
     }
 
     // Log de actividad
-    const details = `${user?.name || "Usuario"} ${type === "add" ? "agregó" : "quitó"} stock de ${product.name}: ${currentStock} → ${newStock}`;
+    const unitPrice = product.default_selling || 0;
+    const lossAmount = unitPrice * stockAmount;
+
+    let details = `${user?.name || "Usuario"} ${type === "add" ? "agregó" : "quitó"} stock de ${product.name}: ${currentStock} → ${newStock}`;
+    if (type === "remove" && stockAmount > 0) {
+      details += ` [PERDIDA - $${lossAmount.toFixed(2)}]`;
+    }
     await supabase.from("activities").insert({
       business_id: businessId,
       details,
       created_at: new Date().toISOString(),
     });
+
 
     // Actualiza local
     setInventory(prev =>
