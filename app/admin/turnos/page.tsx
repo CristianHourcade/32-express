@@ -41,18 +41,20 @@ async function fetchAllPaginated(
   return acc;
 }
 /* ───────── helpers de fecha ───────── */
-function monthRange(offset = 0) {
-  // hoy (hora local)
-  const today = new Date();
-
-  // inicio del mes en hora **local**
-  const start = new Date(today.getFullYear(), today.getMonth() + offset, 1, 0, 0, 0, 0);
-
-  // fin exclusivo (primer día del mes siguiente, hora local)
-  const end = new Date(start.getFullYear(), start.getMonth() + 1, 1, 0, 0, 0, 0);
-
-  return { start, end };
+function computeDateRange(type: "month" | number) {
+  const now = new Date();
+  if (type === "month") {
+    const start = new Date(now.getFullYear(), now.getMonth(), 1);
+    const end = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    return { start, end };
+  } else {
+    const end = new Date();
+    const start = new Date();
+    start.setDate(end.getDate() - type);
+    return { start, end };
+  }
 }
+
 
 /* ───────── formatting ───────── */
 const formatPrice = (n: number) =>
@@ -161,6 +163,7 @@ export default function ShiftsPage() {
   const [sales, setSales] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [hasFetchedData, setHasFetchedData] = useState(false);
+  const [dateRangeType, setDateRangeType] = useState<"month" | number>("month");
 
   /* ─── local state ─── */
   const [selectedBusinessId, setSelectedBusinessId] = useState("all");
@@ -170,8 +173,8 @@ export default function ShiftsPage() {
 
   /* paginación por mes */
   const [monthOffset, setMonthOffset] = useState(0);
-  const { start: monthStart, end: monthEnd } = useMemo(() => monthRange(monthOffset), [monthOffset]);
-  const monthLabel = monthStart.toLocaleString("es-ES", { month: "long", year: "numeric" });
+  const { start: dateStart, end: dateEnd } = useMemo(() => computeDateRange(dateRangeType), [dateRangeType]);
+  const monthLabel = dateStart.toLocaleString("es-ES", { month: "long", year: "numeric" });
   const [search, setSearch] = useState("");   // 🔍 producto buscado
 
   useEffect(() => {
@@ -191,7 +194,7 @@ export default function ShiftsPage() {
       setIsLoading(true);
 
       // Primero obtenemos los turnos
-      const sh = await fetchShifts(monthStart, monthEnd);
+      const sh = await fetchShifts(dateStart, dateEnd);
 
       // Después traemos ventas para cada turno individualmente
       const sa = await fetchSalesByShift(sh.map(s => s.id));
@@ -223,7 +226,7 @@ export default function ShiftsPage() {
       setIsLoading(false);
       setHasFetchedData(true);
     })();
-  }, [hasSelectedBusiness, selectedBusinessId, monthStart, monthEnd]);
+  }, [hasSelectedBusiness, selectedBusinessId, dateStart, dateEnd]);
 
 
   const handleBusinessChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -255,9 +258,9 @@ export default function ShiftsPage() {
   const monthSales = useMemo(
     () =>
       sales.filter(
-        (s) => new Date(s.timestamp) >= monthStart && new Date(s.timestamp) < monthEnd
+        (s) => new Date(s.timestamp) >= dateStart && new Date(s.timestamp) < dateEnd
       ),
-    [sales, monthStart, monthEnd]
+    [sales, dateStart, dateEnd]
   );
 
 
@@ -319,6 +322,19 @@ export default function ShiftsPage() {
             className="rounded-full px-3 py-1.5 text-xs border bg-white dark:bg-slate-800
              shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 w-[180px]"
           />
+          <select
+            value={dateRangeType}
+            onChange={(e) =>
+              setDateRangeType(e.target.value === "month" ? "month" : parseInt(e.target.value))
+            }
+            className="appearance-none bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-full px-3 py-1.5 text-xs shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          >
+            <option value="month">Este mes</option>
+            <option value="7">Últimos 7 días</option>
+            <option value="14">Últimos 14 días</option>
+            <option value="21">Últimos 21 días</option>
+            <option value="30">Últimos 30 días</option>
+          </select>
 
           {/* navegación por mes */}
           <div className="flex items-center gap-2">
@@ -348,33 +364,43 @@ export default function ShiftsPage() {
           <table className="min-w-full text-sm">
             <thead className="bg-slate-100 dark:bg-slate-700/70 sticky top-0 z-10 text-[11px] uppercase tracking-wide">
               <tr>
-                {["Empleado", "Negocio", "Inicio", "Fin", "Estado", "Ventas", "Total", ""].map(
-                  (h) => (
-                    <th key={h} className="px-4 py-3 text-left font-semibold">
-                      {h}
-                    </th>
-                  )
-                )}
+                {[
+                  "Empleado",
+                  "Inicio",
+                  "Estado",
+                  "Ventas",
+                  "Total",
+                  "Métodos",
+                  "Caja",
+                  "",
+                ].map((h) => (
+                  <th key={h} className="px-4 py-3 text-left font-semibold">
+                    {h}
+                  </th>
+                ))}
               </tr>
             </thead>
+
             <tbody>
               {hasFetchedData && sortedShifts.length ? (
                 filteredShifts.map((sh) => {
-                  const total = getShiftSales(sh.id).reduce((s, v) => s + v.total, 0);
+                  const shiftSales = getShiftSales(sh.id);
+                  const total = shiftSales.reduce((s, v) => s + v.total, 0);
+
+                  const paymentsByMethod = shiftSales.reduce((acc, s) => {
+                    const method = s.paymentMethod === "mercadopago" ? "transfer" : s.paymentMethod;
+                    acc[method] = (acc[method] || 0) + s.total;
+                    return acc;
+                  }, {} as Record<string, number>);
+
                   return (
                     <tr
                       key={sh.id}
                       className="border-l-4 border-transparent hover:border-sky-500 even:bg-slate-50/60 dark:even:bg-slate-800/30"
                     >
-                      <td className="px-4 py-2 font-medium whitespace-nowrap">
-                        {sh.employeeName}
-                      </td>
-                      <td className="px-4 py-2 whitespace-nowrap">{sh.businessName}</td>
+                      <td className="px-4 py-2 font-medium whitespace-nowrap">{sh.employeeName}</td>
                       <td className="px-4 py-2 whitespace-nowrap">
                         {new Date(sh.startTime).toLocaleString()}
-                      </td>
-                      <td className="px-4 py-2 whitespace-nowrap">
-                        {sh.endTime ? new Date(sh.endTime).toLocaleString() : "—"}
                       </td>
                       <td className="px-4 py-2">
                         <span
@@ -386,11 +412,34 @@ export default function ShiftsPage() {
                           {!sh.endTime ? "Activo" : "Completado"}
                         </span>
                       </td>
-                      <td className="px-4 py-2 text-center">
-                        {getShiftSales(sh.id).length}
-                      </td>
+                      <td className="px-4 py-2 text-center">{shiftSales.length}</td>
                       <td className="px-4 py-2 font-semibold text-emerald-600 dark:text-emerald-400">
                         ${formatPrice(total)}
+                      </td>
+                      {/* NUEVO: MÉTODOS DE PAGO */}
+                      <td className="px-4 py-2 text-xs">
+                        <div className="flex flex-wrap gap-1">
+                          {[
+                            { k: "cash", label: "Efectivo", style: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300" },
+                            { k: "transfer", label: "Transfer", style: "bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300" },
+                            { k: "card", label: "Tarjeta", style: "bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300" },
+                          ]
+                            .filter(({ k }) => paymentsByMethod[k])
+                            .map(({ k, label, style }) => (
+                              <div
+                                key={k}
+                                className={`inline-flex items-center rounded-full px-2 py-0.5 font-medium text-[11px] ${style}`}
+                              >
+                                {label}: ${formatPrice(paymentsByMethod[k])}
+                              </div>
+                            ))}
+                        </div>
+                      </td>
+
+                      {/* NUEVO: CAJA */}
+                      <td className="px-4 py-2 text-xs leading-4">
+                        <div>Apertura: ${formatPrice(sh.startCash || 0)}</div>
+                        <div>Cierre: {sh.endCash != null ? `$${formatPrice(sh.endCash)}` : "—"}</div>
                       </td>
                       <td className="px-4 py-2">
                         <button
@@ -405,10 +454,7 @@ export default function ShiftsPage() {
                 })
               ) : (
                 <tr>
-                  <td
-                    colSpan={8}
-                    className="py-10 text-center text-slate-500 dark:text-slate-400"
-                  >
+                  <td colSpan={10} className="py-10 text-center text-slate-500 dark:text-slate-400">
                     Sin turnos para este mes.
                   </td>
                 </tr>
