@@ -347,18 +347,27 @@ export default function InventoryPage() {
     const newStock = Math.max(0, currentStock + delta);
 
     // 1. Intentar update
-    const { error: updateError, count } = await supabase
+    const { error: updateError, data: updated } = await supabase
       .from("business_inventory")
       .update({ stock: newStock })
       .eq("product_id", product.id)
       .eq("business_id", businessId)
-      .select("*");
+      .select();
 
-    if (count === 0) {
-      // 2. Si no actualizó nada, insertás
-      await supabase
+    if (updateError) {
+      console.error("Error en update:", updateError);
+      return;
+    }
+
+    if (!updated || updated.length === 0) {
+      const { error: insertError } = await supabase
         .from("business_inventory")
         .insert({ product_id: product.id, business_id: businessId, stock: newStock });
+
+      if (insertError) {
+        console.error("Error en insert:", insertError);
+        return;
+      }
     }
 
 
@@ -468,19 +477,21 @@ export default function InventoryPage() {
                         const color = qty === 0 ? "bg-red-500" : qty < 6 ? "bg-yellow-400" : "bg-green-500";
                         return <td key={b.id} className="px-6 py-4 text-center"><span className={`${color} text-white rounded-full px-2`}>{qty}</span></td>;
                       })}
-                      <td className="px-6 py-4 flex gap-2 justify-end">
-                        <button
-                          onClick={() => openStockModal(item, "add")}
-                          className="bg-green-600 text-white text-xs px-4 py-2 rounded-lg"
-                        >
-                          Agregar stock
-                        </button>
-                        <button
-                          onClick={() => openStockModal(item, "remove")}
-                          className="bg-red-600 text-white text-xs px-4 py-2 rounded-lg"
-                        >
-                          Quitar stock
-                        </button>
+                      <td className="px-6 py-4 ">
+                        <div className="flex gap-2 justify-end">
+                          <button
+                            onClick={() => openStockModal(item, "add")}
+                            className="bg-green-600 text-white text-xs px-4 py-2 rounded-lg"
+                          >
+                            Agregar stock
+                          </button>
+                          <button
+                            onClick={() => openStockModal(item, "remove")}
+                            className="bg-red-600 text-white text-xs px-4 py-2 rounded-lg"
+                          >
+                            Quitar stock
+                          </button>
+                        </div>
                       </td>
 
                     </tr>
