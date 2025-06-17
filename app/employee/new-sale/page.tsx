@@ -242,9 +242,9 @@ export default function NewSalePage() {
 
 
   /* ─ Shifts ─ */
-  useEffect(() => {
-    dispatch(getShifts());
-  }, [dispatch]);
+  // useEffect(() => {
+  //   dispatch(getShifts());
+  // }, [dispatch]);
 
   const currentEmp = useMemo(() => {
     if (!user) return null;
@@ -348,34 +348,57 @@ export default function NewSalePage() {
     if (!businessId) return;
     setProductsLoading(true);
     try {
-      // 1. Traigo stock
-      const { data: invRows } = await supabase
-        .from("business_inventory")
-        .select("product_id, stock")
-        .eq("business_id", businessId);
+      // 1. Traigo stock del negocio paginado
       const stockMap: Record<string, number> = {};
-      invRows?.forEach((r: any) => (stockMap[r.product_id] = r.stock));
-
-      // 2. Traigo productos (supabase.from("products") → aquí usas tu tabla master)
       const pageSize = 1000;
       let page = 0;
-      let acc: any[] = [];
       let done = false;
+
       while (!done) {
-        const { from, to } = { from: page * pageSize, to: page * pageSize + pageSize - 1 };
+        const { from, to } = {
+          from: page * pageSize,
+          to: page * pageSize + pageSize - 1,
+        };
+        const { data, error } = await supabase
+          .from("business_inventory")
+          .select("product_id, stock")
+          .eq("business_id", businessId)
+          .range(from, to);
+
+        if (error) throw error;
+
+        (data ?? []).forEach((r: any) => {
+          stockMap[r.product_id?.toString()] = r.stock;
+        });
+
+        if (!data?.length || data.length < pageSize) done = true;
+        page++;
+      }
+
+      // 2. Traigo productos paginados
+      let acc: any[] = [];
+      page = 0;
+      done = false;
+
+      while (!done) {
+        const { from, to } = {
+          from: page * pageSize,
+          to: page * pageSize + pageSize - 1,
+        };
         const { data, error } = await supabase
           .from("products_master")
           .select("*")
           .range(from, to);
         if (error) throw error;
-        if (!data?.length || data.length < pageSize) done = true;
         acc = acc.concat(data ?? []);
+        if (!data?.length || data.length < pageSize) done = true;
         page++;
       }
-      // 3. Inyecto stock
+
+      // 3. Mapeo stock en productos
       const prodsWithStock = acc.map((p) => ({
         ...p,
-        stock: stockMap[p.id] ?? 0,
+        stock: stockMap[p.id.toString()] ?? 0,
       }));
 
       // 4. Promos
@@ -392,14 +415,16 @@ export default function NewSalePage() {
           stock: 999,
         })) ?? [];
 
+      // 5. Seteo todo
       setProducts([...promoRows, ...prodsWithStock]);
     } catch (err) {
-      console.error(err);
+      console.error("Error al cargar productos:", err);
       setProducts([]);
     } finally {
       setProductsLoading(false);
     }
   };
+
 
   /* ─ Complete sale ─ */
   const handleComplete = async () => {
@@ -439,16 +464,18 @@ export default function NewSalePage() {
       // 4. Agrupo cantidades a descontar por productId
       const stockToUpdate: Record<string, number> = {};
       for (const it of cart) {
-        if (it.listID) {
-          // si es promo, it.listID = array de { id, qty }
+        if (it.listID && Array.isArray(it.listID)) {
           for (const pi of it.listID) {
+            if (!pi.id || typeof pi.qty !== "number") continue;
             const qty = pi.qty * it.quantity;
             stockToUpdate[pi.id] = (stockToUpdate[pi.id] || 0) + qty;
           }
         } else {
-          stockToUpdate[it.productId] = (stockToUpdate[it.productId] || 0) + it.quantity;
+          const qty = it.quantity;
+          stockToUpdate[it.productId] = (stockToUpdate[it.productId] || 0) + qty;
         }
       }
+
 
       // 5. Actualizo stock en business_inventory
       for (const productId in stockToUpdate) {

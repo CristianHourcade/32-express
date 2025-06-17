@@ -22,7 +22,7 @@ export const toCamel = <T extends Record<string, any>>(row: T) =>
 async function fetchAllPaginated(
   queryFn: (from: number, to: number) => Promise<{ data: any[] | null; error: any }>
 ): Promise<any[]> {
-  const pageSize = 999;
+  const pageSize = 1000;
   let page = 0;
   let acc: any[] = [];
   for (; ;) {
@@ -102,6 +102,41 @@ export default function ShiftsPage() {
     );
   }
 
+  async function fetchSalesByShift(shiftIds: string[]) {
+    const allSales: any[] = [];
+    for (const shiftId of shiftIds) {
+      const { data, error } = await supabase
+        .from("sales")
+        .select(`
+          id,
+          timestamp,
+          total,
+          payment_method,
+          shift_id,
+          sale_items (
+            quantity,
+            total,
+            stock,
+            product_id,
+            product_master_id,
+            products ( name ),
+            products_master ( name )
+          )
+        `)
+        .eq("shift_id", shiftId);
+
+      if (error) {
+        console.error(`Error con shift ${shiftId}:`, error);
+        continue; // evitamos que caiga todo
+      }
+
+      allSales.push(...(data ?? []));
+    }
+
+    return allSales;
+  }
+
+
   async function fetchEmployees() {
     const { data, error } = await supabase.from("employees").select("*").order("name");
     if (error) {
@@ -154,10 +189,13 @@ export default function ShiftsPage() {
 
     (async () => {
       setIsLoading(true);
-      const [sh, sa] = await Promise.all([
-        fetchShifts(monthStart, monthEnd),
-        fetchSales(monthStart, monthEnd),
-      ]);
+
+      // Primero obtenemos los turnos
+      const sh = await fetchShifts(monthStart, monthEnd);
+
+      // Después traemos ventas para cada turno individualmente
+      const sa = await fetchSalesByShift(sh.map(s => s.id));
+
       const shiftsFixed = sh.map(r => ({
         ...r,
         startTime: r.start_time,
@@ -166,12 +204,12 @@ export default function ShiftsPage() {
         endCash: r.end_cash ?? null,
         employeeName: employees.find(e => e.id === r.employee_id)?.name ?? "—",
         businessName: businesses.find(b => b.id === r.business_id)?.name ?? "—",
-      }))
+      }));
 
       const salesFixed = sa.map(r => ({
         ...r,
         shiftId: r.shift_id,
-        paymentMethod: r.payment_method,
+        paymentMethod: r.payment_method === "mercadopago" ? "transfer" : r.payment_method,
         items: r.sale_items.map(it => ({
           quantity: it.quantity,
           total: it.total,
@@ -180,13 +218,13 @@ export default function ShiftsPage() {
         })),
       }));
 
-      // ⬇️ usa estas
       setShifts(shiftsFixed);
       setSales(salesFixed);
       setIsLoading(false);
-      setHasFetchedData(true); // <--- acá
+      setHasFetchedData(true);
     })();
   }, [hasSelectedBusiness, selectedBusinessId, monthStart, monthEnd]);
+
 
   const handleBusinessChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     setSelectedBusinessId(e.target.value);
