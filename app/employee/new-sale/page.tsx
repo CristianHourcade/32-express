@@ -224,11 +224,11 @@ export default function NewSalePage() {
           promos?.map((p) => ({
             ...p,
             code: "PROMO",
-            selling_price: p.price,
+            default_selling: p.price,
             products: p.products,
             stock: 999,
           })) ?? [];
-
+          console.log(promos)
         // 5. Seteo productos con stock + promos
         setProducts([...promoRows, ...prodsWithStock]);
       } catch (err) {
@@ -410,11 +410,12 @@ export default function NewSalePage() {
         promos?.map((p) => ({
           ...p,
           code: "PROMO",
-          selling_price: p.price,
+          default_selling: p.price,
           products: p.products,
           stock: 999,
         })) ?? [];
 
+        console.log("TEST",promoRows)
       // 5. Seteo todo
       setProducts([...promoRows, ...prodsWithStock]);
     } catch (err) {
