@@ -242,22 +242,20 @@ export default function TopProductsPage() {
   }, [selectedBiz, daysFilter]);
   /* ---------- compute top ---------- */
   const top = useMemo(() => {
-    if (!selectedBiz) return [];
+    if (!selectedBiz) return { products: [], categorySummary: [] };
 
     const now = Date.now();
 
-    // Ventas dentro del rango
     const recentSales = sales.filter(
       (s) => (now - new Date(s.timestamp).getTime()) / 86400000 <= daysFilter
     );
 
-    // Acumulador de productos
     const map = new Map<
       string,
-      { name: string; qty: number; revenue: number; stock: number | null; cat: string }
+      { id: string; name: string; qty: number; revenue: number; stock: number | null; cat: string }
     >();
 
-    // 🔹 1. Ventas normales (no promo)
+    // 🔹 1. Ventas normales
     recentSales.forEach((sale) =>
       sale.sale_items?.forEach((item: any) => {
         if (!item.promotion_id) {
@@ -280,6 +278,7 @@ export default function TopProductsPage() {
           if (!map.has(key)) {
             const { category, baseName } = extractCategory(name);
             map.set(key, {
+              id: key,
               name: baseName,
               cat: category,
               qty: 0,
@@ -295,8 +294,7 @@ export default function TopProductsPage() {
       })
     );
 
-
-    // 🔹 2. Ventas que son promociones → sumar productos internos
+    // 🔹 2. Promociones
     recentSales.forEach((sale) =>
       sale.sale_items?.forEach((item: any) => {
         if (!item.promotion_id) return;
@@ -312,21 +310,16 @@ export default function TopProductsPage() {
           const qty = promoItem.qty ?? 1;
           const revenue = promoUnitValue * qty;
 
-          // Intentamos buscar por ID en products
           const prod = products.find((p) => p.id === key);
           const stock =
-            prod?.stock ??
-            masterStockMap.get(key) ??
-            null;
-
+            prod?.stock ?? masterStockMap.get(key) ?? null;
           const name =
-            productMasterMap.get(key) ??
-            prod?.name ??
-            "—";
+            productMasterMap.get(key) ?? prod?.name ?? "—";
 
           if (!map.has(key)) {
             const { category, baseName } = extractCategory(name);
             map.set(key, {
+              id: key,
               name: baseName,
               cat: category,
               qty: 0,
@@ -342,16 +335,14 @@ export default function TopProductsPage() {
       })
     );
 
-
-    // 🔹 3. Filtros de categoría
     let arr = Array.from(map.values());
     if (selectedCats.length) arr = arr.filter((p) => selectedCats.includes(p.cat));
 
-    // 🔹 4. Orden
     arr.sort((a, b) => {
       const diff = (a[sortCol] ?? -Infinity) - (b[sortCol] ?? -Infinity);
       return sortDir === "asc" ? diff : -diff;
     });
+
     const categorySummary = (() => {
       const totalRevenue = arr.reduce((sum, p) => sum + p.revenue, 0);
       const map = new Map<string, { revenue: number; percent: number }>();
@@ -361,13 +352,13 @@ export default function TopProductsPage() {
         map.get(p.cat)!.revenue += p.revenue;
       });
 
-      const result = Array.from(map.entries()).map(([cat, val]) => ({
-        category: cat,
-        revenue: val.revenue,
-        percent: totalRevenue ? (val.revenue / totalRevenue) * 100 : 0,
-      }));
-
-      return result.sort((a, b) => b.revenue - a.revenue); // ordenar por más facturación
+      return Array.from(map.entries())
+        .map(([cat, val]) => ({
+          category: cat,
+          revenue: val.revenue,
+          percent: totalRevenue ? (val.revenue / totalRevenue) * 100 : 0,
+        }))
+        .sort((a, b) => b.revenue - a.revenue);
     })();
 
     return { products: arr, categorySummary };
@@ -389,7 +380,7 @@ export default function TopProductsPage() {
     const header = `*${bizName.toUpperCase()} — Ventas últimos ${daysFilter} días*`;
 
     const grouped = new Map<string, { name: string; qty: number }[]>();
-    top.forEach((p) => {
+    top.products?.forEach((p) => {
       if (!grouped.has(p.cat)) grouped.set(p.cat, []);
       grouped.get(p.cat)!.push({ name: p.name.toUpperCase(), qty: p.qty });
     });
@@ -549,8 +540,7 @@ export default function TopProductsPage() {
                   </tr>
                 ) : (
                   top.products?.map((p) => (
-                    <tr
-                      key={p.name + p.cat}
+                    <tr key={p.id}
                       className="hover:bg-slate-50 dark:hover:bg-slate-700/40 odd:bg-slate-50/40 dark:odd:bg-slate-800/30"
                     >
                       <td className="px-4 py-2">{p.cat}</td>
