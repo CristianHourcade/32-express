@@ -97,6 +97,7 @@ const loadSales = async (businessId: string, days: number) => {
       .select(`
         id,
         timestamp,
+        payment_method,
         sale_items (
           quantity,
           promotion_id,
@@ -179,8 +180,11 @@ function extractCategory(name: string) {
   return { category: "SIN CATEGORIA", baseName: name };
 }
 
-const formatPrice = (n: number) =>
-  n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const formatPrice = (n: number | null | undefined) =>
+  typeof n === "number" && !isNaN(n)
+    ? n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    : "0.00";
+
 
 /* ═════════════ PAGE ═════════════ */
 export default function TopProductsPage() {
@@ -240,9 +244,94 @@ export default function TopProductsPage() {
       setLoading(false);
     })();
   }, [selectedBiz, daysFilter]);
+
+  const categorySummary = useMemo(() => {
+    if (!sales.length) {
+      return {
+        rows: [],
+        totals: {
+          revenue: 0,
+          cash: 0,
+          transfer: 0,
+          card: 0,
+          rappi: 0,
+        },
+      };
+    }
+
+    const totalRevenue = sales.reduce((sum, sale) => {
+      const items = sale.sale_items ?? [];
+      return sum + items.reduce((s, i) => s + i.total, 0);
+    }, 0);
+
+    const summaryMap = new Map<
+      string,
+      {
+        revenue: number;
+        percent: number;
+        cash: number;
+        card: number;
+        transfer: number;
+        rappi: number;
+      }
+    >();
+
+    sales.forEach((sale) => {
+      const items = sale.sale_items ?? [];
+      const method = sale.payment_method === "mercadopago" ? "transfer" : sale.payment_method;
+
+      items.forEach((item) => {
+        const name =
+          item.products?.name || productMasterMap.get(item.product_master_id) || "—";
+        const { category } = extractCategory(name);
+
+        if (!summaryMap.has(category)) {
+          summaryMap.set(category, {
+            revenue: 0,
+            percent: 0,
+            cash: 0,
+            card: 0,
+            transfer: 0,
+            rappi: 0,
+          });
+        }
+
+        const m = summaryMap.get(category)!;
+        m.revenue += item.total;
+        m[method] += item.total;
+      });
+    });
+
+    const totals = {
+      revenue: 0,
+      cash: 0,
+      transfer: 0,
+      card: 0,
+      rappi: 0,
+    };
+
+    summaryMap.forEach((v) => {
+      totals.revenue += v.revenue;
+      totals.cash += v.cash;
+      totals.transfer += v.transfer;
+      totals.card += v.card;
+      totals.rappi += v.rappi;
+    });
+
+    return {
+      rows: Array.from(summaryMap.entries())
+        .map(([category, values]) => ({
+          category,
+          ...values,
+          percent: totalRevenue ? (values.revenue / totalRevenue) * 100 : 0,
+        }))
+        .sort((a, b) => b.revenue - a.revenue),
+      totals,
+    };
+  }, [sales, productMasterMap]);
   /* ---------- compute top ---------- */
   const top = useMemo(() => {
-    if (!selectedBiz) return { products: [], categorySummary: [] };
+    if (!selectedBiz) return { products: [] };
 
     const now = Date.now();
 
@@ -294,6 +383,8 @@ export default function TopProductsPage() {
       })
     );
 
+
+
     // 🔹 2. Promociones
     recentSales.forEach((sale) =>
       sale.sale_items?.forEach((item: any) => {
@@ -343,25 +434,11 @@ export default function TopProductsPage() {
       return sortDir === "asc" ? diff : -diff;
     });
 
-    const categorySummary = (() => {
-      const totalRevenue = arr.reduce((sum, p) => sum + p.revenue, 0);
-      const map = new Map<string, { revenue: number; percent: number }>();
 
-      arr.forEach((p) => {
-        if (!map.has(p.cat)) map.set(p.cat, { revenue: 0, percent: 0 });
-        map.get(p.cat)!.revenue += p.revenue;
-      });
 
-      return Array.from(map.entries())
-        .map(([cat, val]) => ({
-          category: cat,
-          revenue: val.revenue,
-          percent: totalRevenue ? (val.revenue / totalRevenue) * 100 : 0,
-        }))
-        .sort((a, b) => b.revenue - a.revenue);
-    })();
 
-    return { products: arr, categorySummary };
+
+    return { products: arr };
   }, [
     sales,
     products,
@@ -561,25 +638,41 @@ export default function TopProductsPage() {
         </div>
 
         {/* Tabla resumen (40%) */}
-        <div className="w-full lg:w-[40%] bg-white dark:bg-slate-800 rounded-xl shadow ring-1 ring-slate-200 dark:ring-slate-700 h-[500px]">
+        <div className="w-full lg:w-[50%] bg-white dark:bg-slate-800 rounded-xl shadow ring-1 ring-slate-200 dark:ring-slate-700 ">
           <div className="overflow-x-auto rounded-xl">
             <table className="min-w-full text-sm">
               <thead className="bg-slate-100 dark:bg-slate-700 text-[11px] uppercase tracking-wide select-none">
                 <tr>
                   <th className="px-4 py-3 text-left font-semibold">Categoría</th>
-                  <th className="px-4 py-3 text-right font-semibold">Facturado</th>
-                  <th className="px-4 py-3 text-right font-semibold">% del total</th>
+                  <th className="px-4 py-3 text-right font-semibold">Total</th>
+                  <th className="px-4 py-3 text-right font-semibold">Efectivo</th>
+                  <th className="px-4 py-3 text-right font-semibold">Transfer</th>
+                  <th className="px-4 py-3 text-right font-semibold">Tarjeta</th>
+                  <th className="px-4 py-3 text-right font-semibold">% Total</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
-                {top.categorySummary?.map((cat) => (
+                {categorySummary?.rows?.map((cat) => (
                   <tr key={cat.category} className="hover:bg-slate-50 dark:hover:bg-slate-700/40">
                     <td className="px-4 py-2">{cat.category}</td>
-                    <td className="px-4 py-2 text-right">$ {formatPrice(cat.revenue)}</td>
+                    <td className="px-4 py-2 text-right font-semibold">$ {formatPrice(cat.revenue)}</td>
+                    <td className="px-4 py-2 text-right text-emerald-700">$ {formatPrice(cat.cash)}</td>
+                    <td className="px-4 py-2 text-right text-purple-700">$ {formatPrice(cat.transfer)}</td>
+                    <td className="px-4 py-2 text-right text-indigo-700">$ {formatPrice(cat.card)}</td>
                     <td className="px-4 py-2 text-right">{cat.percent.toFixed(1)}%</td>
                   </tr>
                 ))}
+                <tr className="bg-slate-200 dark:bg-slate-700 font-semibold">
+                  <td className="px-4 py-2">TOTAL</td>
+                  <td className="px-4 py-2 text-right">$ {formatPrice(categorySummary.totals?.revenue)}</td>
+                  <td className="px-4 py-2 text-right text-emerald-700">$ {formatPrice(categorySummary.totals?.cash)}</td>
+                  <td className="px-4 py-2 text-right text-purple-700">$ {formatPrice(categorySummary.totals?.transfer)}</td>
+                  <td className="px-4 py-2 text-right text-indigo-700">$ {formatPrice(categorySummary.totals?.card)}</td>
+                  <td className="px-4 py-2 text-right">100%</td>
+                </tr>
               </tbody>
+
+
             </table>
           </div>
         </div>
