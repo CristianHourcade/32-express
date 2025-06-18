@@ -228,7 +228,7 @@ export default function NewSalePage() {
             products: p.products,
             stock: 999,
           })) ?? [];
-          console.log(promos)
+        console.log(promos)
         // 5. Seteo productos con stock + promos
         setProducts([...promoRows, ...prodsWithStock]);
       } catch (err) {
@@ -415,7 +415,7 @@ export default function NewSalePage() {
           stock: 999,
         })) ?? [];
 
-        console.log("TEST",promoRows)
+      console.log("TEST", promoRows)
       // 5. Seteo todo
       setProducts([...promoRows, ...prodsWithStock]);
     } catch (err) {
@@ -428,88 +428,104 @@ export default function NewSalePage() {
 
 
   /* ─ Complete sale ─ */
-  const handleComplete = async () => {
-    if (!activeShift || !cart.length) return;
-    setProcessing(true);
+ const handleComplete = async () => {
+  if (!activeShift || !cart.length) return;
+  setProcessing(true);
 
-    try {
-      // 1. Armo los datos de la venta
-      const saleData = {
-        businessId: businessId!,
-        businessName: activeShift.businessName,
-        employeeId: currentEmp ? currentEmp.id : user!.id,
-        employeeName: user!.name,
-        items: cart,
-        total: cartTotal,
-        paymentMethod,
-        timestamp: new Date().toISOString(),
-        shiftId: activeShift.id,
+  try {
+    // 1. Armo los datos de la venta
+    const saleData = {
+      businessId: businessId!,
+      businessName: activeShift.businessName,
+      employeeId: currentEmp ? currentEmp.id : user!.id,
+      employeeName: user!.name,
+      items: cart,
+      total: cartTotal,
+      paymentMethod,
+      timestamp: new Date().toISOString(),
+      shiftId: activeShift.id,
+    };
+
+    // 2. Registro la venta en Redux / backend
+    const saleResult = await dispatch(createSale(saleData)).unwrap();
+    if (!saleResult) throw new Error("No se pudo registrar la venta.");
+
+    // 3. Traigo stock actual paginado desde business_inventory
+    const stockMap: Record<string, number> = {};
+    const pageSize = 1000;
+    let page = 0;
+    let done = false;
+
+    while (!done) {
+      const { from, to } = {
+        from: page * pageSize,
+        to: page * pageSize + pageSize - 1,
       };
 
-      // 2. Registro la venta en Redux / backend
-      const saleResult = await dispatch(createSale(saleData)).unwrap();
-      if (!saleResult) throw new Error("No se pudo registrar la venta.");
-
-      // 3. Traigo stock actual de business_inventory para calcular descuentos
-      const { data: invRows, error: invErr } = await supabase
+      const { data, error } = await supabase
         .from("business_inventory")
         .select("product_id, stock")
-        .eq("business_id", businessId);
-      if (invErr) throw invErr;
+        .eq("business_id", businessId)
+        .range(from, to);
 
-      const stockMap: Record<string, number> = {};
-      invRows?.forEach((r: any) => {
+      if (error) throw error;
+
+      (data ?? []).forEach((r: any) => {
         stockMap[r.product_id] = r.stock;
       });
 
-      // 4. Agrupo cantidades a descontar por productId
-      const stockToUpdate: Record<string, number> = {};
-      for (const it of cart) {
-        if (it.listID && Array.isArray(it.listID)) {
-          for (const pi of it.listID) {
-            if (!pi.id || typeof pi.qty !== "number") continue;
-            const qty = pi.qty * it.quantity;
-            stockToUpdate[pi.id] = (stockToUpdate[pi.id] || 0) + qty;
-          }
-        } else {
-          const qty = it.quantity;
-          stockToUpdate[it.productId] = (stockToUpdate[it.productId] || 0) + qty;
-        }
-      }
-
-
-      // 5. Actualizo stock en business_inventory
-      for (const productId in stockToUpdate) {
-        const currentStock = stockMap[productId] ?? 0;
-        const newStock = Math.max(0, currentStock - stockToUpdate[productId]);
-
-        const { error } = await supabase
-          .from("business_inventory")
-          .update({ stock: newStock })
-          .eq("business_id", businessId)
-          .eq("product_id", productId);
-
-        if (error) throw error;
-      }
-
-      // 6. Refresco productos (trae nuevamente stock + promos)
-      await loadProducts();
-
-      // 7. Éxito: limpio carrito, cierro modal, muestro toast
-      setToast("Venta registrada ✔︎");
-      setCart([]);
-      setConfirm(false);
-      setAmountGiven("");
-      setSearch("");
-      setTimeout(() => setToast(""), 3000);
-    } catch (err: any) {
-      console.error("Error al completar venta:", err);
-      setToast("❌ Error: " + (err.message || "algo salió mal"));
-      setTimeout(() => setToast(""), 4000);
-    } finally {
-      setProcessing(false);
+      if (!data?.length || data.length < pageSize) done = true;
+      page++;
     }
-  };
+
+    // 4. Agrupo cantidades a descontar por productId
+    const stockToUpdate: Record<string, number> = {};
+    for (const it of cart) {
+      if (Array.isArray(it.listID) && it.listID.length > 0) {
+        for (const pi of it.listID) {
+          if (!pi.id || typeof pi.qty !== "number") continue;
+          const qty = pi.qty * it.quantity;
+          stockToUpdate[pi.id] = (stockToUpdate[pi.id] || 0) + qty;
+        }
+      } else {
+        const qty = it.quantity;
+        stockToUpdate[it.productId] = (stockToUpdate[it.productId] || 0) + qty;
+      }
+    }
+
+    // 5. Actualizo stock en business_inventory
+    for (const productId in stockToUpdate) {
+      const qtyToDiscount = stockToUpdate[productId] ?? 0;
+      const currentStock = stockMap[productId] ?? 0;
+      const newStock = Math.max(0, currentStock - qtyToDiscount);
+
+      const { error } = await supabase
+        .from("business_inventory")
+        .update({ stock: newStock })
+        .eq("business_id", businessId)
+        .eq("product_id", productId);
+
+      if (error) throw error;
+    }
+
+    // 6. Refresco productos (trae nuevamente stock + promos)
+    await loadProducts();
+
+    // 7. Éxito: limpio carrito, cierro modal, muestro toast
+    setToast("Venta registrada ✔︎");
+    setCart([]);
+    setConfirm(false);
+    setAmountGiven("");
+    setSearch("");
+    setTimeout(() => setToast(""), 3000);
+  } catch (err: any) {
+    console.error("Error al completar venta:", err);
+    setToast("❌ Error: " + (err.message || "algo salió mal"));
+    setTimeout(() => setToast(""), 4000);
+  } finally {
+    setProcessing(false);
+  }
+};
 
 
 
