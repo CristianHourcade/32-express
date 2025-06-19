@@ -16,22 +16,46 @@ type ActivityRow = {
 
 /* ────────── Helper: resaltar “added/removed” ────────── */
 function highlight(text: string) {
-  return text.replace(/(added|removed)/gi, (m) =>
-    `<span class="${
-      m.toLowerCase() === "added" ? "text-emerald-600" : "text-rose-600"
-    } font-semibold">${m}</span>`
-  );
+  return text
+    .replace(/\[PERDIDA - \$([\d.]+)\]/gi, (_, monto) => {
+      const montoNum = parseFloat(monto);
+      return `
+        <button
+          class="ml-2 inline-block px-2 hover:bg-red-700 py-1 bg-red-500 text-white font-semiboldcursor-pointer"
+          data-monto="${montoNum}" style="border-radius:25px">
+          [PERDIDA - $${monto}]
+        </button>
+      `;
+    })
+    .replace(/(added|removed)/gi, (m) =>
+      `<span class="${m.toLowerCase() === "added" ? "text-emerald-600" : "text-rose-600"
+      } font-semibold">${m}</span>`
+    );
 }
+
+
 
 export default function ActivitiesPage() {
   /* ---------- state ---------- */
   const [activities, setActivities] = useState<ActivityRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [totalPerdidas, setTotalPerdidas] = useState(0);
 
   const [selectedResponsible, setSelectedResponsible] = useState("all");
   const [selectedBusiness, setSelectedBusiness] = useState("all");
   const [selectedDate, setSelectedDate] = useState("");
   const [search, setSearch] = useState("");
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (target.tagName === "BUTTON" && target.dataset.monto) {
+        const monto = parseFloat(target.dataset.monto);
+        if (!isNaN(monto)) setTotalPerdidas((prev) => prev + monto);
+      }
+    };
+    document.addEventListener("click", handler);
+    return () => document.removeEventListener("click", handler);
+  }, []);
 
   /* ---------- fetch ---------- */
   useEffect(() => {
@@ -110,6 +134,19 @@ export default function ActivitiesPage() {
         <p className="text-slate-600 dark:text-slate-400">
           Histórico de acciones de usuarios
         </p>
+        <div>
+          <div className="py-3 text-sm font-semibold text-red-600 dark:text-red-400">
+            Total de pérdidas seleccionadas: ${totalPerdidas.toLocaleString("es-AR", {
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2,
+            })}
+          </div>
+          {totalPerdidas > 0 && (
+            <button className="bg-white px-3 py-1 border" onClick={() => setTotalPerdidas(0)}>
+              Limpiar
+            </button>
+          )}
+        </div>
       </header>
 
       {/* Filtros */}
@@ -177,6 +214,7 @@ export default function ActivitiesPage() {
         </div>
       </div>
 
+
       {/* Tabla */}
       <div className="bg-white dark:bg-slate-800 rounded-xl shadow ring-1 ring-slate-200 dark:ring-slate-700 overflow-hidden">
         <div className="overflow-x-auto">
@@ -211,10 +249,11 @@ export default function ActivitiesPage() {
                         className="px-4 py-2"
                         dangerouslySetInnerHTML={{
                           __html: `
-                            <span class="font-semibold text-sky-600 dark:text-sky-400 mr-1">${resp}</span>
-                            ${highlight(detalle)}
-                          `,
+    <span class="font-semibold text-sky-600 dark:text-sky-400 mr-1">${resp}</span>
+    ${highlight(detalle, (m) => setTotalPerdidas((prev) => prev + m))}
+  `,
                         }}
+
                       />
                     </tr>
                   );
