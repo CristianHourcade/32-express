@@ -39,6 +39,7 @@ export class ExpenseService extends SupabaseService<Expense> {
       businessName: expense.businesses?.name || "",
       category: expense.category,
       amount: expense.amount,
+      method: expense.method,
       description: expense.description || "",
       date: expense.date,
     }))
