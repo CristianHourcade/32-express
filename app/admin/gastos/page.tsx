@@ -44,6 +44,7 @@ export default function ExpensesPage() {
     category: "",
     amount: 0,
     description: "",
+    method: "cash",
     date: getLocalDateString(new Date()),
   })
 
@@ -75,7 +76,9 @@ export default function ExpensesPage() {
       amount: 0,
       description: "",
       date: getLocalDateString(new Date()),
-    })
+      method: "cash", // nuevo campo
+    });
+
     setIsModalOpen(true)
   }
 
@@ -91,7 +94,9 @@ export default function ExpensesPage() {
       amount: expense.amount,
       description: expense.description,
       date: datePart,
-    })
+      method: expense.method ?? "cash", // fallback por seguridad
+    });
+
     setIsModalOpen(true)
   }
 
@@ -108,10 +113,10 @@ export default function ExpensesPage() {
         editExpense({
           ...currentExpense,
           ...formData,
-          // Guardamos date como "YYYY-MM-DD"
           date: formData.date,
         })
-      )
+      );
+
     } else {
       // Crear nuevo
       const businessName = businesses.find((b) => b.id === formData.businessId)?.name || ""
@@ -121,7 +126,7 @@ export default function ExpensesPage() {
           businessName,
           date: formData.date,
         })
-      )
+      );
     }
     setIsModalOpen(false)
   }
@@ -168,6 +173,14 @@ export default function ExpensesPage() {
       </div>
     );
   }
+
+  const efectivoTotal = filteredExpenses
+    .filter((e) => e.method === "cash")
+    .reduce((sum, e) => sum + e.amount, 0);
+
+  const transferenciaTotal = filteredExpenses
+    .filter((e) => e.method === "transfer")
+    .reduce((sum, e) => sum + e.amount, 0);
 
   /* ╔═════════ COMIENZA EL RETURN PRINCIPAL ═════════ */
   return (
@@ -250,17 +263,32 @@ export default function ExpensesPage() {
         </div>
 
         {/* Resumen */}
-        <div className="border-t border-slate-200 dark:border-slate-700 px-4 py-3 flex justify-between">
+        <div className="border-t border-slate-200 dark:border-slate-700 px-4 py-3 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2 sm:gap-4">
           <p className="text-slate-600 dark:text-slate-400 text-sm">
             Mostrando {filteredExpenses.length} gastos
           </p>
-          <p className="text-sm font-semibold">
-            Total:{" "}
-            <span className="text-red-600 dark:text-red-400">
-              ${formatCurrency(totalExpenses)}
+          <div className="text-sm font-semibold space-x-4 text-right">
+            <span>
+              Efectivo:{" "}
+              <span className="text-emerald-600 dark:text-emerald-400">
+                ${formatCurrency(efectivoTotal)}
+              </span>
             </span>
-          </p>
+            <span>
+              Transferencia:{" "}
+              <span className="text-sky-600 dark:text-sky-400">
+                ${formatCurrency(transferenciaTotal)}
+              </span>
+            </span>
+            <span>
+              Total:{" "}
+              <span className="text-red-600 dark:text-red-400">
+                ${formatCurrency(totalExpenses)}
+              </span>
+            </span>
+          </div>
         </div>
+
       </div>
 
       {/* ───── Tabla Gastos ───── */}
@@ -269,7 +297,7 @@ export default function ExpensesPage() {
           <table className="min-w-full text-sm">
             <thead className="bg-slate-100 dark:bg-slate-700/70 backdrop-blur sticky top-0 z-10 text-[11px] uppercase tracking-wide">
               <tr>
-                {["Fecha", "Negocio", "Categoría", "Descripción", "Monto", "Acciones"].map((h) => (
+                {["Fecha", "Negocio", "Categoría", "Descripción", "Método", "Monto", "Acciones"].map((h) => (
                   <th key={h} className="px-4 py-3 text-left font-semibold">
                     {h}
                   </th>
@@ -293,6 +321,23 @@ export default function ExpensesPage() {
                       </span>
                     </td>
                     <td className="px-4 py-2">{ex.description}</td>
+                    <td className="px-4 py-2 whitespace-nowrap">
+                      {ex.method ? (
+                        <span
+                          className={`inline-block px-2 py-0.5 rounded-full text-[11px] font-semibold
+        ${ex.method === "cash"
+                              ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300"
+                              : "bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300"}
+      `}
+                        >
+                          {ex.method === "cash" ? "Efectivo" : "Transferencia"}
+                        </span>
+                      ) : (
+                        <span className="text-slate-500 dark:text-slate-400 text-xs italic">Sin método</span>
+                      )}
+                    </td>
+
+
                     <td className="px-4 py-2 font-semibold text-red-600 dark:text-red-400">
                       ${formatCurrency(ex.amount)}
                     </td>
@@ -454,6 +499,20 @@ export default function ExpensesPage() {
                   required
                   className="appearance-none bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-full px-3 py-1.5 text-xs w-full focus:outline-none focus:ring-2 focus:ring-indigo-500"
                 />
+              </div>
+              {/* Método de pago */}
+              <div>
+                <label className="block text-xs font-medium mb-1">Método de pago</label>
+                <select
+                  name="method"
+                  value={formData.method}
+                  onChange={handleInputChange}
+                  required
+                  className="appearance-none bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-full px-3 py-1.5 text-xs w-full focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                >
+                  <option value="cash">Efectivo</option>
+                  <option value="transfer">Transferencia</option>
+                </select>
               </div>
 
               {/* Fecha */}

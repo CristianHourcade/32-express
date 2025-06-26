@@ -7,6 +7,7 @@ export interface Expense {
   businessName: string
   category: string
   amount: number
+  method: any;
   description: string
   date: string
 }

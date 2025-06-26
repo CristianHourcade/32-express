@@ -61,6 +61,7 @@ export class ExpenseService extends SupabaseService<Expense> {
       business_id: expense.businessId,
       category: expense.category,
       amount: expense.amount,
+      method: expense.method,
       description: expense.description,
       date: expense.date,
     }
@@ -84,6 +85,7 @@ export class ExpenseService extends SupabaseService<Expense> {
       businessId: data.business_id,
       businessName: data.businesses?.name || "",
       category: data.category,
+      method: data.method,
       amount: data.amount,
       description: data.description || "",
       date: data.date,
@@ -99,6 +101,7 @@ export class ExpenseService extends SupabaseService<Expense> {
       business_id: expense.businessId,
       category: expense.category,
       amount: expense.amount,
+      method: expense.method,
       description: expense.description,
       date: expense.date,
     }
@@ -123,6 +126,7 @@ export class ExpenseService extends SupabaseService<Expense> {
       businessId: data.business_id,
       businessName: data.businesses?.name || "",
       category: data.category,
+      method: data.method,
       amount: data.amount,
       description: data.description || "",
       date: data.date,
