@@ -132,21 +132,30 @@ const loadSales = async (businessId: string, from: Date, to: Date) =>
   fetchAllPaginated((lo, hi) =>
     supabase
       .from("sales")
-      .select(
-        `
-        *,
-        sale_items (
-          *,
-          products(name)
-        )
-      `
-      )
+      .select("*") // sin joins
       .eq("business_id", businessId)
       .gte("timestamp", from.toISOString())
       .lt("timestamp", to.toISOString())
       .order("timestamp", { ascending: false })
       .range(lo, hi)
   );
+const loadSaleItemsPorSaleIds = async (saleIds: string[]) => {
+  const pageSize = 1000;
+  const batches = [];
+
+  for (let i = 0; i < saleIds.length; i += pageSize) {
+    const batchIds = saleIds.slice(i, i + pageSize);
+    batches.push(
+      supabase
+        .from("sale_items")
+        .select("*, products(name)")
+        .in("sale_id", batchIds)
+    );
+  }
+
+  const results = await Promise.all(batches);
+  return results.flatMap((r) => r.data || []);
+};
 
 const loadProducts = async (businessId: string) =>
   fetchAllPaginated((lo, hi) =>
@@ -281,10 +290,23 @@ export default function AdminDashboard() {
     if (!selectedBusinessForTop) return;
     (async () => {
       setDirectSalesLoading(true);
-      setDirectSales(await loadSales(selectedBusinessForTop, monthStart, monthEnd));
+      const sales = await loadSales(selectedBusinessForTop, monthStart, monthEnd);
+      setDirectSales(sales);
+
+      const saleIds = sales.map((s: any) => s.id);
+      const items = await loadSaleItemsPorSaleIds(saleIds);
+
+      // Merge: agregamos los items a su venta correspondiente
+      const salesConItems = sales.map((s: any) => ({
+        ...s,
+        sale_items: items.filter((it) => it.sale_id === s.id),
+      }));
+
+      setDirectSales(salesConItems);
       setDirectSalesLoading(false);
     })();
   }, [selectedBusinessForTop, monthStart, monthEnd]);
+
 
   useEffect(() => {
     if (!selectedBusinessForTop) {
