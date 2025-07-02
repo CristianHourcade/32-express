@@ -39,6 +39,7 @@ type InventoryItem = {
     margin_percent: number;
     default_selling: number;
     stocks: Record<string, number>;
+    inventario?: boolean | null;
 };
 
 export default function InventoryPage() {
@@ -66,7 +67,7 @@ export default function InventoryPage() {
         while (true) {
             const { data, error } = await supabase
                 .from("products_master")
-                .select("id, code, name, default_purchase, margin_percent, default_selling")
+                .select("id, code, name, default_purchase, margin_percent, default_selling, inventario")
                 .range(from, from + step - 1);
 
             if (error) throw error;
@@ -146,6 +147,7 @@ export default function InventoryPage() {
                     margin_percent: m.margin_percent,
                     default_selling: m.default_selling,
                     stocks: map[m.id] || {},
+                    inventario: m.inventario ?? true, // fallback a true si es null
                 }))
             );
 
@@ -398,6 +400,29 @@ export default function InventoryPage() {
                     {/* Acciones */}
                     <td className="px-4 py-3 whitespace-nowrap">
                         <div className="flex gap-2 justify-end items-center">
+                            <label className="flex items-center gap-2">
+                                <input
+                                    type="checkbox"
+                                    checked={item.inventario ?? true}
+                                    onChange={async (e) => {
+                                        const newValue = e.target.checked;
+                                        const { error } = await supabase
+                                            .from("products_master")
+                                            .update({ inventario: newValue })
+                                            .eq("id", item.id);
+                                        if (!error) {
+                                            setInventory(prev =>
+                                                prev.map(p =>
+                                                    p.id === item.id ? { ...p, inventario: newValue } : p
+                                                )
+                                            );
+                                        } else {
+                                            console.error("Error actualizando inventario:", error);
+                                        }
+                                    }}
+                                />
+                                <span className="text-xs">Inventario</span>
+                            </label>
                             <button
                                 onClick={() => openDrawer(item)}
                                 className="flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium bg-indigo-600 text-white hover:bg-indigo-700 transition"
