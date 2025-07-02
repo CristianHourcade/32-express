@@ -24,6 +24,24 @@ function formatNumber(num: number) {
     maximumFractionDigits: 2,
   }).format(num)
 }
+const CATEGORIES = [
+  "ALMACEN",
+  "CIGARRILLOS",
+  "GOLOSINAS",
+  "BEBIDA",
+  "CERVEZA",
+  "FIAMBRES",
+  "TABACO",
+  "HUEVOS",
+  "HIGIENE",
+  "ALCOHOL",
+]
+
+function extractCategory(name: string) {
+  const parts = name.trim().split(" ")
+  const cat = parts[0].toUpperCase()
+  return CATEGORIES.includes(cat) ? cat : "SIN CATEGORIA"
+}
 
 export default function BusinessPage() {
   const dispatch = useDispatch<AppDispatch>()
@@ -131,39 +149,36 @@ export default function BusinessPage() {
   const businessFinancials = useMemo(() => {
     const map = new Map<
       string,
-      { merchandiseInvested: number; potentialSale: number; projectedProfit: number }
-    >()
+      {
+        total: number;
+        byCategory: { [cat: string]: number };
+      }
+    >();
 
     businesses.forEach((business) => {
-      // Obtiene la lista completa de productos para este negocio
-      const businessProducts = productsByBusiness.get(business.id) || []
+      const businessProducts = productsByBusiness.get(business.id) || [];
+      const categoryTotals: { [cat: string]: number } = {};
+      let total = 0;
 
-      const merchandiseInvested = businessProducts.reduce(
-        (sum, p) => sum + p.purchase_price * p.stock,
-        0,
-      )
-      const potentialSale = businessProducts.reduce(
-        (sum, p) => sum + p.selling_price * p.stock,
-        0,
-      )
-      const projectedProfit = potentialSale - merchandiseInvested
+      businessProducts.forEach((p) => {
+        const cat = extractCategory(p.name);
+        const profit = (p.selling_price - p.purchase_price) * p.stock;
 
-      // Log resumido para este negocio
-      console.log(`Negocio: ${business.name}`);
-      console.log(
-        `Total inversión: ${formatNumber(merchandiseInvested)} - Total venta potencial: ${formatNumber(
-          potentialSale,
-        )} - Ganancia proyectada: ${formatNumber(projectedProfit)}`,
-      )
+        categoryTotals[cat] = (categoryTotals[cat] || 0) + profit;
+        total += profit;
+      });
 
       map.set(business.id, {
-        merchandiseInvested,
-        potentialSale,
-        projectedProfit,
-      })
-    })
-    return map
-  }, [businesses, productsByBusiness])
+        total,
+        byCategory: categoryTotals,
+      });
+    });
+
+    return map;
+  }, [businesses, productsByBusiness]);
+
+
+
 
   // Handlers para creación, edición y eliminación (sin cambios)
   const handleCreateBusiness = async (data: CreateBusinessData) => {
@@ -259,15 +274,18 @@ export default function BusinessPage() {
                 <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-300 uppercase tracking-wider">
                   Nombre
                 </th>
-                <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 dark:text-slate-300 uppercase tracking-wider">
-                  Mercadería Invertida
+                {CATEGORIES.map((cat) => (
+                  <th
+                    key={cat}
+                    className="px-4 py-3 text-right text-xs font-medium text-slate-500 dark:text-slate-300 uppercase tracking-wider"
+                  >
+                    {cat}
+                  </th>
+                ))}
+                <th className="px-4 py-3 text-right text-xs font-bold text-green-700 uppercase tracking-wider">
+                  Total
                 </th>
-                <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 dark:text-slate-300 uppercase tracking-wider">
-                  Venta Potencial
-                </th>
-                <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 dark:text-slate-300 uppercase tracking-wider">
-                  Ganancia Proyectada
-                </th>
+
                 <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 dark:text-slate-300 uppercase tracking-wider">
                   Acciones
                 </th>
@@ -295,15 +313,19 @@ export default function BusinessPage() {
                           </div>
                         </div>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-right text-sm text-slate-700 dark:text-slate-300">
-                        ${formatNumber(financials.merchandiseInvested)}
+                      {CATEGORIES.map((cat) => (
+                        <td
+                          key={cat}
+                          className="px-4 py-4 whitespace-nowrap text-right text-sm text-slate-700 dark:text-slate-300"
+                        >
+                          ${formatNumber(financials.byCategory[cat] || 0)}
+                        </td>
+                      ))}
+                      <td className="px-4 py-4 whitespace-nowrap text-right text-sm font-bold text-green-600">
+                        ${formatNumber(financials.total)}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-right text-sm text-slate-700 dark:text-slate-300">
-                        ${formatNumber(financials.potentialSale)}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-bold text-green-600">
-                        ${formatNumber(financials.projectedProfit)}
-                      </td>
+
+
                       <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                         <div className="flex justify-end gap-2">
                           <Button
