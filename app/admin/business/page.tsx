@@ -29,7 +29,7 @@ export default function BusinessPage() {
   const dispatch = useDispatch<AppDispatch>()
   const { businesses, loading, error } = useSelector((state: RootState) => state.businesses)
   // Aunque aquí no usamos products del store para los cálculos, aún queremos mostrarlos globalmente (si es necesario)
-  const { products, loading: productsLoading } = useSelector((state: RootState) => state.products)
+  const productsLoading = false; // ya no usamos este estado
 
   const [searchQuery, setSearchQuery] = useState("")
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false)
@@ -42,34 +42,82 @@ export default function BusinessPage() {
 
   useEffect(() => {
     dispatch(fetchBusinesses())
-    dispatch(getProducts())
   }, [dispatch])
 
   // Cada vez que cambien los negocios, hacemos una petición por cada negocio para obtener sus productos completos
   useEffect(() => {
-    async function fetchProductsForEachBusiness() {
-      const newMap = new Map<string, any[]>()
-      await Promise.all(
-        businesses.map(async (business) => {
-          // Ajusta la consulta para no limitar la cantidad (o usa un límite suficientemente alto)
-          const { data, error } = await supabase
-            .from("products")
-            .select("*")
-            .eq("business_id", business.id)
-          if (error) {
-            console.error("Error fetching products for business", business.id, error)
-            newMap.set(business.id, [])
-          } else {
-            newMap.set(business.id, data || [])
-          }
-        }),
-      )
-      setProductsByBusiness(newMap)
+    async function fetchProductsWithInventory() {
+      const step = 1000;
+      let from = 0;
+      let allMasters: any[] = [];
+      let allInventory: any[] = [];
+
+      // Traer todos los productos de products_master (paginado)
+      while (true) {
+        const { data, error } = await supabase
+          .from("products_master")
+          .select("id, name, code, default_purchase, default_selling, inventario")
+          .range(from, from + step - 1);
+
+        if (error) {
+          console.error("Error fetching products_master:", error);
+          break;
+        }
+
+        allMasters = allMasters.concat(data || []);
+        if (!data || data.length < step) break;
+        from += step;
+      }
+
+      // Traer todo el inventario desde business_inventory (paginado)
+      from = 0;
+      while (true) {
+        const { data, error } = await supabase
+          .from("business_inventory")
+          .select("product_id, business_id, stock")
+          .range(from, from + step - 1);
+
+        if (error) {
+          console.error("Error fetching business_inventory:", error);
+          break;
+        }
+
+        allInventory = allInventory.concat(data || []);
+        if (!data || data.length < step) break;
+        from += step;
+      }
+
+      // Filtramos solo productos con inventario activo (inventario !== false)
+      const masters = allMasters.filter(p => p.inventario !== false);
+
+      // Creamos el map con productos por negocio
+      const map = new Map<string, any[]>();
+
+      for (const biz of businesses) {
+        const productos = masters.map(p => {
+          const inv = allInventory.find(i => i.product_id === p.id && i.business_id === biz.id);
+          const stock = inv?.stock ?? 0;
+
+          return {
+            id: p.id,
+            name: p.name,
+            code: p.code,
+            purchase_price: p.default_purchase,
+            selling_price: p.default_selling,
+            stock,
+          };
+        });
+
+        map.set(biz.id, productos);
+      }
+
+      setProductsByBusiness(map);
     }
+
     if (businesses.length > 0) {
-      fetchProductsForEachBusiness()
+      fetchProductsWithInventory();
     }
-  }, [businesses])
+  }, [businesses]);
 
   // Filtrar negocios según la búsqueda
   const filteredBusinesses = businesses.filter((business) =>
