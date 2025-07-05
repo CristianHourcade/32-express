@@ -192,8 +192,40 @@ export default function EmployeeDashboard() {
     [businessProducts],
   )
 
+  function esDelMesActual(fecha: Date) {
+    const ahora = new Date()
+    return fecha.getMonth() === ahora.getMonth() && fecha.getFullYear() === ahora.getFullYear()
+  }
+
+  function calcularMinutosTarde(shifts: any[]) {
+    return shifts.reduce((total, shift) => {
+      const start = new Date(shift.start_time)
+
+      if (!esDelMesActual(start)) return total
+
+      const esperado = new Date(start)
+      esperado.setHours(10, 0, 0, 0)
+
+      const diferenciaMin = (start.getTime() - esperado.getTime()) / 60000
+      return diferenciaMin > 0 ? total + diferenciaMin : total
+    }, 0)
+  }
+  function calcularMinutosTardeTurnoActual(turno: any) {
+    if (!turno) return 0
+
+    const start = new Date(turno.start_time)
+    const esperado = new Date(start)
+    esperado.setHours(10, 0, 0, 0)
+
+    const diferenciaMin = (start.getTime() - esperado.getTime()) / 60000
+    return diferenciaMin > 0 ? Math.round(diferenciaMin) : 0
+  }
+
+
   // Get active shift
   const activeShift = shifts.find(s => !s.end_time)
+  const totalMinutosTarde = useMemo(() => calcularMinutosTarde(shifts), [shifts])
+  const minutosTardeTurnoActual = useMemo(() => calcularMinutosTardeTurnoActual(activeShift), [activeShift])
 
   // Get sales for active shift
   const activeShiftSales = useMemo(() => {
@@ -378,6 +410,15 @@ export default function EmployeeDashboard() {
         <div>
           <h1 className="text-2xl font-bold">Dashboard de Empleado</h1>
           <p className="text-gray-600 dark:text-gray-400">Bienvenido, {user?.name}!</p>
+          <p className="text-sm text-gray-500 dark:text-gray-400">
+            Minutos acumulados de llegada tarde este mes: <strong>{Math.round(totalMinutosTarde)} minutos</strong>
+          </p>
+          {activeShift && (
+            <p className="text-sm text-gray-500 dark:text-gray-400">
+              Llegaste <b style={{ color: "red" }}>{minutosTardeTurnoActual} minutos tarde</b>  hoy.
+            </p>
+          )}
+
         </div>
         <div className="mt-4 md:mt-0 bg-white dark:bg-gray-800 p-3 rounded-lg shadow-sm">
           <p className="text-sm text-gray-500 dark:text-gray-400">Negocio Asignado</p>

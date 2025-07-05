@@ -9,8 +9,31 @@ import { getEmployees, editEmployee, removeEmployee, type Employee } from "@/lib
 import { fetchBusinesses } from "@/lib/redux/slices/businessSlice" // Changed from getBusinesses
 import { Plus, Edit, Trash2, X, Eye, EyeOff, Info, AlertTriangle } from "lucide-react"
 import { addEmployee as createEmployee } from "@/services/admin/employeeService"
+import { supabase } from "@/lib/supabase"
+
+
+async function fetchShiftsByOffset(offset: number) {
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth() + offset, 1);
+  const end = new Date(now.getFullYear(), now.getMonth() + offset + 1, 1);
+
+  const { data, error } = await supabase
+    .from("shifts")
+    .select("start_time, end_time, employee_id, business_id")
+    .gte("start_time", start.toISOString())
+    .lt("start_time", end.toISOString());
+
+  if (error) {
+    console.error("Error al traer turnos:", error);
+    return [];
+  }
+
+  return data ?? [];
+}
+
 
 export default function EmployeesPage() {
+  const [monthlyShifts, setMonthlyShifts] = useState<any[]>([]);
   const dispatch = useDispatch<AppDispatch>()
   const {
     employees,
@@ -18,6 +41,7 @@ export default function EmployeesPage() {
     error: employeesError,
   } = useSelector((state: RootState) => state.employees)
   const { businesses, loading: businessesLoading } = useSelector((state: RootState) => state.businesses)
+  const [monthOffset, setMonthOffset] = useState(0); // 0 = mes actual, -1 = mes pasado, +1 = mes próximo
 
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false)
@@ -31,11 +55,59 @@ export default function EmployeesPage() {
   })
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
-
   useEffect(() => {
-    dispatch(getEmployees())
-    dispatch(fetchBusinesses()) // Changed from getBusinesses
-  }, [dispatch])
+    dispatch(getEmployees());
+    dispatch(fetchBusinesses());
+    fetchShiftsByOffset(monthOffset).then(setMonthlyShifts);
+  }, [dispatch, monthOffset]);
+
+  function sumLateMinutes(employeeId: string, expectedStartTime: string | null): number {
+    if (!expectedStartTime) return 0;
+
+    return monthlyShifts.reduce((acc, shift) => {
+      if (shift.employee_id !== employeeId || !shift.start_time) return acc;
+
+      try {
+        const expectedParts = expectedStartTime.split(":");
+        const utcDate = new Date(shift.start_time); // UTC original
+
+        // Convertimos el UTC a local de forma explícita
+        const localDate = new Date(
+          utcDate.getUTCFullYear(),
+          utcDate.getUTCMonth(),
+          utcDate.getUTCDate(),
+          utcDate.getUTCHours() - 3, // Convertimos UTC a GMT-3 manualmente
+          utcDate.getUTCMinutes(),
+          utcDate.getUTCSeconds()
+        );
+
+        // Creamos la hora esperada para esa fecha (en local)
+        const expectedDate = new Date(
+          localDate.getFullYear(),
+          localDate.getMonth(),
+          localDate.getDate(),
+          parseInt(expectedParts[0]),
+          parseInt(expectedParts[1]),
+          expectedParts[2] ? parseInt(expectedParts[2]) : 0
+        );
+
+        const diffMs = localDate.getTime() - expectedDate.getTime();
+        const diffMin = Math.floor(diffMs / 60000);
+
+        return diffMin > 0 ? acc + diffMin : acc;
+      } catch (e) {
+        console.error("Error calculando minutos de tardanza:", e);
+        return acc;
+      }
+    }, 0);
+  }
+
+  function formatMinutesToHHMM(totalMinutes: number): string {
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    return `${hours}:${minutes.toString().padStart(2, "0")}`;
+  }
+
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target
@@ -145,6 +217,9 @@ export default function EmployeesPage() {
       }
     }
   }
+  function countShifts(employeeId: string): number {
+    return monthlyShifts.filter((shift) => shift.employee_id === employeeId).length;
+  }
 
   const isLoading = employeesLoading || businessesLoading
 
@@ -202,35 +277,59 @@ export default function EmployeesPage() {
 
       <div className="card">
         <div className="table-container">
+          <div className="flex justify-end items-center space-x-2 mb-2">
+            <button onClick={() => setMonthOffset((prev) => prev - 1)} className="btn btn-sm">
+              ←
+            </button>
+            <span className="text-sm font-semibold">
+              {new Date(new Date().getFullYear(), new Date().getMonth() + monthOffset)
+                .toLocaleString("es-AR", { month: "long", year: "numeric" })
+                .replace(/^./, (str) => str.toUpperCase())}
+            </span>
+            <button onClick={() => setMonthOffset((prev) => prev + 1)} className="btn btn-sm">
+              →
+            </button>
+          </div>
+
           <table className="table">
             <thead className="table-header">
               <tr>
                 <th className="table-header-cell">Nombre</th>
                 <th className="table-header-cell">Correo Electrónico</th>
                 <th className="table-header-cell">Negocio</th>
-                <th className="table-header-cell">Turno Actual</th>
+                <th className="table-header-cell">Llegadas tarde</th>
+                <th className="table-header-cell">Turnos</th>
+                <th className="table-header-cell">Sueldo</th>
+                <th className="table-header-cell text-center">A cobrar</th>
                 <th className="table-header-cell">Acciones</th>
               </tr>
             </thead>
             <tbody className="table-body">
               {employees.map((employee) => {
                 const business = businesses.find((b) => b.id === employee.businessId)
+                const sueldoMensual = employee.sueldo || 0
+                const diasTrabajados = countShifts(employee.id)
+                const totalACobrar = Math.round((sueldoMensual / (employee.dias_mes ?? 26)) * diasTrabajados)
+
                 return (
                   <tr key={employee.id} className="table-row">
                     <td className="table-cell font-medium">{employee.name}</td>
                     <td className="table-cell">{employee.email}</td>
                     <td className="table-cell">{business?.name || "Desconocido"}</td>
-                    <td className="table-cell">
-                      {employee.currentShift ? (
-                        <span className="bg-green-100 text-green-800 text-xs font-medium px-2.5 py-0.5 rounded dark:bg-green-900 dark:text-green-300">
-                          Activo
-                        </span>
-                      ) : (
-                        <span className="bg-gray-100 text-gray-800 text-xs font-medium px-2.5 py-0.5 rounded dark:bg-gray-700 dark:text-gray-300">
-                          Inactivo
-                        </span>
-                      )}
+                    <td
+                      className={`table-cell text-center ${sumLateMinutes(employee.id, employee.start_time) > 60 ? "text-red-600 font-bold" : ""
+                        }`}
+                    >
+                      {formatMinutesToHHMM(sumLateMinutes(employee.id, employee.start_time))} HS
                     </td>
+                    <td className="table-cell text-center">{countShifts(employee.id)}</td>
+                    <td className="table-cell text-center">
+                      {employee.sueldo ? `$${employee.sueldo.toLocaleString("es-AR")}` : "—"}
+                    </td>
+                    <td className="table-cell text-center">
+                      {totalACobrar ? `$${totalACobrar.toLocaleString("es-AR")}` : "—"}
+                    </td>
+
                     <td className="table-cell">
                       <div className="flex space-x-2">
                         <button
