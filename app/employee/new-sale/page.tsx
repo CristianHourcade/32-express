@@ -21,10 +21,13 @@ import {
   X,
   Check,
   AlertTriangle,
+  Key,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import LoadingSpinner from "@/components/LoadingSpinner";
-
+const ANGEL_CRISTIAN_USERTOKEN = process.env.NEXT_PUBLIC_ANGEL_CRISTIAN_USERTOKEN;
+const ANGEL_CRISTIAN_APIKEY = process.env.NEXT_PUBLIC_ANGEL_CRISTIAN_APIKEY;
+const ANGEL_CRISTIAN_APITOKEN = process.env.NEXT_PUBLIC_ANGEL_CRISTIAN_APITOKEN;
 /* ────────────────────────────────────────────────────────── */
 /*  Constantes & helpers                                      */
 /* ────────────────────────────────────────────────────────── */
@@ -428,104 +431,183 @@ export default function NewSalePage() {
 
 
   /* ─ Complete sale ─ */
- const handleComplete = async () => {
-  if (!activeShift || !cart.length) return;
-  setProcessing(true);
+  const handleComplete = async () => {
+    if (!activeShift || !cart.length) return;
+    setProcessing(true);
 
-  try {
-    // 1. Armo los datos de la venta
-    const saleData = {
-      businessId: businessId!,
-      businessName: activeShift.businessName,
-      employeeId: currentEmp ? currentEmp.id : user!.id,
-      employeeName: user!.name,
-      items: cart,
-      total: cartTotal,
-      paymentMethod,
-      timestamp: new Date().toISOString(),
-      shiftId: activeShift.id,
-    };
-
-    // 2. Registro la venta en Redux / backend
-    const saleResult = await dispatch(createSale(saleData)).unwrap();
-    if (!saleResult) throw new Error("No se pudo registrar la venta.");
-
-    // 3. Traigo stock actual paginado desde business_inventory
-    const stockMap: Record<string, number> = {};
-    const pageSize = 1000;
-    let page = 0;
-    let done = false;
-
-    while (!done) {
-      const { from, to } = {
-        from: page * pageSize,
-        to: page * pageSize + pageSize - 1,
+    try {
+      // 1. Armo los datos de la venta
+      const saleData = {
+        businessId: businessId!,
+        businessName: activeShift.businessName,
+        employeeId: currentEmp ? currentEmp.id : user!.id,
+        employeeName: user!.name,
+        items: cart,
+        total: cartTotal,
+        paymentMethod,
+        timestamp: new Date().toISOString(),
+        shiftId: activeShift.id,
       };
 
-      const { data, error } = await supabase
-        .from("business_inventory")
-        .select("product_id, stock")
-        .eq("business_id", businessId)
-        .range(from, to);
+      // 2. Registro la venta en Redux / backend
+      const saleResult = await dispatch(createSale(saleData)).unwrap();
+      if (!saleResult) throw new Error("No se pudo registrar la venta.");
 
-      if (error) throw error;
+      // 3. Traigo stock actual paginado desde business_inventory
+      const stockMap: Record<string, number> = {};
+      const pageSize = 1000;
+      let page = 0;
+      let done = false;
 
-      (data ?? []).forEach((r: any) => {
-        stockMap[r.product_id] = r.stock;
-      });
+      while (!done) {
+        const { from, to } = {
+          from: page * pageSize,
+          to: page * pageSize + pageSize - 1,
+        };
 
-      if (!data?.length || data.length < pageSize) done = true;
-      page++;
-    }
+        const { data, error } = await supabase
+          .from("business_inventory")
+          .select("product_id, stock")
+          .eq("business_id", businessId)
+          .range(from, to);
 
-    // 4. Agrupo cantidades a descontar por productId
-    const stockToUpdate: Record<string, number> = {};
-    for (const it of cart) {
-      if (Array.isArray(it.listID) && it.listID.length > 0) {
-        for (const pi of it.listID) {
-          if (!pi.id || typeof pi.qty !== "number") continue;
-          const qty = pi.qty * it.quantity;
-          stockToUpdate[pi.id] = (stockToUpdate[pi.id] || 0) + qty;
-        }
-      } else {
-        const qty = it.quantity;
-        stockToUpdate[it.productId] = (stockToUpdate[it.productId] || 0) + qty;
+        if (error) throw error;
+
+        (data ?? []).forEach((r: any) => {
+          stockMap[r.product_id] = r.stock;
+        });
+
+        if (!data?.length || data.length < pageSize) done = true;
+        page++;
       }
+
+      // 4. Agrupo cantidades a descontar por productId
+      const stockToUpdate: Record<string, number> = {};
+      for (const it of cart) {
+        if (Array.isArray(it.listID) && it.listID.length > 0) {
+          for (const pi of it.listID) {
+            if (!pi.id || typeof pi.qty !== "number") continue;
+            const qty = pi.qty * it.quantity;
+            stockToUpdate[pi.id] = (stockToUpdate[pi.id] || 0) + qty;
+          }
+        } else {
+          const qty = it.quantity;
+          stockToUpdate[it.productId] = (stockToUpdate[it.productId] || 0) + qty;
+        }
+      }
+
+      // 5. Actualizo stock en business_inventory
+      for (const productId in stockToUpdate) {
+        const qtyToDiscount = stockToUpdate[productId] ?? 0;
+        const currentStock = stockMap[productId] ?? 0;
+        const newStock = Math.max(0, currentStock - qtyToDiscount);
+
+        const { error } = await supabase
+          .from("business_inventory")
+          .update({ stock: newStock })
+          .eq("business_id", businessId)
+          .eq("product_id", productId);
+
+        if (error) throw error;
+      }
+
+      // 6. Refresco productos (trae nuevamente stock + promos)
+      await loadProducts();
+
+      if (paymentMethod === "card" || paymentMethod === "transfer") {
+        try {
+          const formatDate = (date) => {
+            const d = new Date(date);
+            const day = String(d.getDate()).padStart(2, '0');
+            const month = String(d.getMonth() + 1).padStart(2, '0');
+            const year = d.getFullYear();
+            return `${day}/${month}/${year}`;
+          };
+
+          const today = new Date();
+          const dueDate = new Date();
+          dueDate.setDate(today.getDate() + 2);
+
+          const facturaPayload = {
+            "cliente": {
+              "documento_tipo": "OTRO",
+              "condicion_iva": "CF",
+              "condicion_iva_operacion": "CF",
+              "domicilio": "No especifica",
+              "condicion_pago": "201",
+              "documento_nro": "0",
+              "reclama_deuda": "N",
+              "razon_social": "Consumidor final",
+              "provincia": "2",
+              "email": "email@dominio.com",
+              "envia_por_mail": "N",
+              "rg5329": "N"
+            },
+            comprobante: {
+              tipo: "FACTURA C",
+              operacion: "V",
+              moneda: "PES",
+              detalle: [
+                {
+                  cantidad: 1,
+                  producto: {
+                    descripcion: "Venta de kiosko",
+                    unidad_bulto: 1,
+                    lista_precios: "standard",
+                    precio_unitario_sin_iva: cartTotal,
+                    alicuota: 0,
+                  }
+                }
+              ],
+              fecha: formatDate(today),
+              vencimiento: formatDate(dueDate),
+              total: cartTotal,
+              pagos: {
+                formas_pago: [
+                  { descripcion: "MercadoPago", importe: cartTotal }
+                ],
+                total: cartTotal
+              },
+              punto_venta: 32,
+              tributos: []
+            }
+          };
+
+          // ANGEL GALLARDO
+          if (businessId === "7050459b-b342-4e66-ab11-ab856b7f11f1") {
+            const FacturaConFACTURADOR = {
+              ...facturaPayload,
+              usertoken: ANGEL_CRISTIAN_USERTOKEN,
+              apikey: ANGEL_CRISTIAN_APIKEY,
+              apitoken: ANGEL_CRISTIAN_APITOKEN,
+            }
+            fetch("/api/facturar", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(FacturaConFACTURADOR),
+            });
+          }
+        } catch (err) {
+          console.error("Error al facturar:", err);
+        }
+
+      }
+
+      // 7. Éxito: limpio carrito, cierro modal, muestro toast
+      setToast("Venta registrada ✔︎");
+      setCart([]);
+      setConfirm(false);
+      setAmountGiven("");
+      setSearch("");
+      setTimeout(() => setToast(""), 3000);
+    } catch (err: any) {
+      console.error("Error al completar venta:", err);
+      setToast("❌ Error: " + (err.message || "algo salió mal"));
+      setTimeout(() => setToast(""), 4000);
+    } finally {
+      setProcessing(false);
     }
-
-    // 5. Actualizo stock en business_inventory
-    for (const productId in stockToUpdate) {
-      const qtyToDiscount = stockToUpdate[productId] ?? 0;
-      const currentStock = stockMap[productId] ?? 0;
-      const newStock = Math.max(0, currentStock - qtyToDiscount);
-
-      const { error } = await supabase
-        .from("business_inventory")
-        .update({ stock: newStock })
-        .eq("business_id", businessId)
-        .eq("product_id", productId);
-
-      if (error) throw error;
-    }
-
-    // 6. Refresco productos (trae nuevamente stock + promos)
-    await loadProducts();
-
-    // 7. Éxito: limpio carrito, cierro modal, muestro toast
-    setToast("Venta registrada ✔︎");
-    setCart([]);
-    setConfirm(false);
-    setAmountGiven("");
-    setSearch("");
-    setTimeout(() => setToast(""), 3000);
-  } catch (err: any) {
-    console.error("Error al completar venta:", err);
-    setToast("❌ Error: " + (err.message || "algo salió mal"));
-    setTimeout(() => setToast(""), 4000);
-  } finally {
-    setProcessing(false);
-  }
-};
+  };
 
 
 
