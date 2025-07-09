@@ -573,7 +573,7 @@ export default function NewSalePage() {
             }
           };
 
-          // ANGEL GALLARDO
+          // ANGEL GALLARDOx
           if (businessId === "7050459b-b342-4e66-ab11-ab856b7f11f1") {
             const FacturaConFACTURADOR = {
               ...facturaPayload,
