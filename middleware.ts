@@ -24,7 +24,6 @@ export function middleware(request: NextRequest) {
 // Configurar el middleware para ejecutarse en todas las rutas
 export const config = {
   matcher: [
-    // Aplica a todas las rutas excepto /_next/*, /favicon.ico, /public/* y /api/*
     "/((?!_next/static|_next/image|favicon.ico|public|api).*)",
   ],
 }
