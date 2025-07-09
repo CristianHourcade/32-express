@@ -219,21 +219,21 @@ export default function NewSalePage() {
         }));
 
         // 4. Traigo promociones y les asigno stock "ilimitado"
-        const { data: promos } = await supabase
-          .from("promotions")
-          .select("*")
-          .eq("businesses_id", businessId);
-        const promoRows =
-          promos?.map((p) => ({
-            ...p,
-            code: "PROMO",
-            default_selling: p.price,
-            products: p.products,
-            stock: 999,
-          })) ?? [];
-        console.log(promos)
+        // const { data: promos } = await supabase
+        //   .from("promotions")
+        //   .select("*")
+        //   .eq("businesses_id", businessId);
+        // const promoRows =
+        //   promos?.map((p) => ({
+        //     ...p,
+        //     code: "PROMO",
+        //     default_selling: p.price,
+        //     products: p.products,
+        //     stock: 999,
+        //   })) ?? [];
+        // console.log(promos)
         // 5. Seteo productos con stock + promos
-        setProducts([...promoRows, ...prodsWithStock]);
+        setProducts([...prodsWithStock]);
       } catch (err) {
         console.error(err);
         setProducts([]);
