@@ -5,6 +5,9 @@ export async function POST(req: NextRequest) {
 
   const body = await req.json();
 
+  // Opcional: si querés testear que esto anda antes de tocar la API real
+  // return NextResponse.json({ recibido: true, body });
+
   const res = await fetch("https://www.tusfacturas.app/app/api/v2/facturacion/nuevo", {
     method: "POST",
     headers: {
