@@ -338,6 +338,8 @@ export default function EmployeeDashboard() {
     }
   }
 
+  const [selectedMethod, setSelectedMethod] = useState('Todos');
+
   const handleEndShift = async (endCash: number) => {
     if (!activeShift) return
 
@@ -362,6 +364,66 @@ export default function EmployeeDashboard() {
       setIsEndingShift(false)
     }
   }
+
+
+  const [monthlySales, setMonthlySales] = useState<Sale[]>([])
+  useEffect(() => {
+    const fetchMonthlySales = async () => {
+      if (!businesses.length) return;
+
+      const now = new Date();
+      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+      const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+
+      const allSales: Sale[] = [];
+
+      for (const business of businesses) {
+        const { data, error } = await supabase
+          .from("sales")
+          .select("id, business_id, total, timestamp")
+          .eq("business_id", business.id)
+          .gte("timestamp", startOfMonth.toISOString())
+          .lt("timestamp", endOfMonth.toISOString());
+
+        if (error) {
+          console.error(`Error cargando ventas para negocio ${business.name}`, error);
+          continue;
+        }
+
+        if (data) allSales.push(...data as Sale[]);
+      }
+
+      setMonthlySales(allSales);
+    };
+
+    fetchMonthlySales();
+  }, [businesses]);
+
+  const businessRanking = useMemo(() => {
+    const rankingMap = new Map<string, number>()
+
+    monthlySales.forEach(sale => {
+      const businessId = sale.business_id
+      if (!businessId) return
+      rankingMap.set(businessId, (rankingMap.get(businessId) || 0) + sale.total)
+    })
+
+    const sorted = [...rankingMap.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .map(([businessId]) => businesses.find(b => b.id === businessId))
+      .filter((b): b is { id: string; name: string } => !!b)
+
+    return sorted
+  }, [monthlySales, businesses])
+
+  const [isMobileDevice, setIsMobileDevice] = useState(false);
+  useEffect(() => {
+    const userAgent = navigator.userAgent || navigator.vendor || window.opera
+    const isMobile = /android|iphone|ipad|mobile/i.test(userAgent)
+    setIsMobileDevice(isMobile)
+  }, [])
+
+
   const isLoading = productsLoading || loadingSales || loadingShifts || businessesLoading || employeesLoading
 
   if (isLoading) {
@@ -404,32 +466,112 @@ export default function EmployeeDashboard() {
     return classes[method] || "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300"
   }
 
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-12">
+
+      {/* Encabezado */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center">
         <div>
-          <h1 className="text-2xl font-bold">Dashboard de Empleado</h1>
-          <p className="text-gray-600 dark:text-gray-400">Bienvenido, {user?.name}!</p>
+          <h1 className="text-3xl font-extrabold text-indigo-700 dark:text-indigo-300 mb-1">Panel de Empleado</h1>
+          <p className="text-gray-700 dark:text-gray-400 text-lg">¡Hola, {user?.name}!</p>
           <p className="text-sm text-gray-500 dark:text-gray-400">
-            Minutos acumulados de llegada tarde este mes: <strong>{Math.round(totalMinutosTarde)} minutos</strong>
+            ⏱️ Llegadas tarde este mes: <strong>{Math.round(totalMinutosTarde)} min</strong>
           </p>
           {activeShift && (
-            <p className="text-sm text-gray-500 dark:text-gray-400">
-              Llegaste <b style={{ color: "red" }}>{minutosTardeTurnoActual} minutos tarde</b>  hoy.
+            <p className="text-sm text-red-600 dark:text-red-400 font-medium">
+              Hoy llegaste <strong>{minutosTardeTurnoActual} minutos tarde</strong>
             </p>
           )}
-
         </div>
-        <div className="mt-4 md:mt-0 bg-white dark:bg-gray-800 p-3 rounded-lg shadow-sm">
-          <p className="text-sm text-gray-500 dark:text-gray-400">Negocio Asignado</p>
+        <div className="mt-4 md:mt-0 bg-white dark:bg-gray-800 p-4 rounded-xl shadow-md border border-gray-200 dark:border-gray-700">
+          <p className="text-sm text-gray-500 dark:text-gray-400 mb-1">📍 Negocio Asignado</p>
           <div className="flex items-center gap-2">
-            <Building className="h-4 w-4 text-gray-500" />
-            <p className="font-medium">
+            <Building className="h-5 w-5 text-indigo-500" />
+            <p className="font-semibold text-gray-800 dark:text-white">
               {currentBusiness?.name || <span className="text-amber-600">No asignado</span>}
             </p>
           </div>
         </div>
       </div>
+
+      {/* Ranking */}
+      {businessRanking.length > 0 && (
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 border border-gray-200 dark:border-gray-700">
+          <h2 className="text-2xl font-bold mb-5 text-center text-indigo-700 dark:text-indigo-400">🏆 Ranking de Locales</h2>
+          <ul className="divide-y divide-gray-200 dark:divide-gray-700">
+            {businessRanking.map((biz, index) => {
+              const isCurrent = biz.id === currentBusiness?.id
+              const placeIcon =
+                index === 0 ? "🥇" :
+                  index === 1 ? "🥈" :
+                    index === 2 ? "🥉" : `#${index + 1}`
+
+              const currentTotal = monthlySales
+                .filter(s => s.business_id === biz.id)
+                .reduce((sum, s) => sum + s.total, 0)
+
+              const prevBiz = index > 0 ? businessRanking[index - 1] : null
+              const prevTotal = prevBiz
+                ? monthlySales
+                  .filter(s => s.business_id === prevBiz.id)
+                  .reduce((sum, s) => sum + s.total, 0)
+                : null
+
+              const percentToClimb =
+                isCurrent && prevTotal && currentTotal > 0
+                  ? Math.round(((prevTotal - currentTotal) / currentTotal) * 100)
+                  : null
+
+              const progress =
+                isCurrent && prevTotal && currentTotal > 0
+                  ? Math.min(100, Math.round((currentTotal / prevTotal) * 100))
+                  : null
+
+              return (
+                <li
+                  key={biz.id}
+                  className={`py-4 px-4 flex flex-col md:flex-row justify-between items-start md:items-center rounded-md transition hover:bg-indigo-50 dark:hover:bg-indigo-900/30 ${isCurrent ? "border-2 border-green-500 bg-green-50 dark:bg-green-900/20" : ""
+                    }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <span className="text-2xl">{placeIcon}</span>
+                    <span className="font-medium text-lg text-gray-800 dark:text-white">{biz.name}</span>
+                  </div>
+
+                  <div className="mt-2 md:mt-0 md:text-right w-full md:w-auto">
+                    {isCurrent && (
+                      <div className="flex flex-col items-start md:items-end gap-1 w-full">
+                        <span className="text-sm text-green-700 dark:text-green-300 font-semibold bg-green-100 dark:bg-green-800 px-2 py-1 rounded">
+                          ⭐ Tu Local
+                        </span>
+                        {percentToClimb !== null && percentToClimb > 0 && (
+                          <>
+                            <span className="text-xs text-amber-600">
+                              🔥 Estás a solo <strong>{percentToClimb}%</strong> del próximo puesto
+                            </span>
+                            <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2.5 mt-2">
+                              <div
+                                className="bg-green-500 h-2.5 rounded-full transition-all duration-500"
+                                style={{ width: `${progress}%` }}
+                              />
+                            </div>
+                          </>
+                        )}
+                        {index === 0 && (
+                          <span className="text-xs text-blue-600 mt-1">
+                            👑 ¡Estás en la cima!
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </li>
+              )
+            })}
+          </ul>
+        </div>
+      )}
 
       {/* Error message */}
       {error && (
@@ -487,25 +629,23 @@ export default function EmployeeDashboard() {
         </div>
       )}
 
-      {/* Shift Status Card */}
-      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm p-5">
+      {/* Estado del Turno */}
+      <div className="bg-gradient-to-r from-white to-indigo-50 dark:from-gray-800 dark:to-indigo-900 rounded-2xl shadow-md p-6 border border-indigo-100 dark:border-indigo-700">
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-4">
             <div
-              className={`p-3 rounded-full ${activeShift ? "bg-green-100 dark:bg-green-900/30" : "bg-gray-100 dark:bg-gray-700/30"
-                }`}
+              className={`p-3 rounded-full transition-all duration-300 ${activeShift ? "bg-green-200 dark:bg-green-900/30" : "bg-gray-200 dark:bg-gray-700/30"}`}
             >
               <Clock
-                className={`h-6 w-6 ${activeShift ? "text-green-600 dark:text-green-400" : "text-gray-600 dark:text-gray-400"
-                  }`}
+                className={`h-7 w-7 ${activeShift ? "text-green-700 dark:text-green-400" : "text-gray-600 dark:text-gray-400"}`}
               />
             </div>
             <div>
-              <h2 className="text-lg font-semibold">Estado del Turno</h2>
+              <h2 className="text-xl font-bold">Estado del Turno</h2>
               <p
-                className={`${activeShift ? "text-green-600 dark:text-green-400" : "text-gray-600 dark:text-gray-400"}`}
+                className={`text-sm ${activeShift ? "text-green-700 dark:text-green-400" : "text-gray-600 dark:text-gray-400"}`}
               >
-                {activeShift ? "Turno Activo" : "Sin Turno Activo"}
+                {activeShift ? "✅ Turno Activo" : "⏸️ Sin Turno Activo"}
               </p>
               {activeShift && (
                 <p className="text-sm text-gray-500 dark:text-gray-400">
@@ -522,184 +662,130 @@ export default function EmployeeDashboard() {
             ) : (
               <button
                 onClick={() => setShowStartShiftModal(true)}
-                disabled={isStartingShift || !businessId || !currentEmployee}
-                className={`btn ${!businessId || !currentEmployee ? "btn-disabled" : "btn-success"}`}
+                disabled={isStartingShift || !businessId || !currentEmployee || isMobileDevice}
+                className={`btn ${!businessId || !currentEmployee || isMobileDevice ? "btn-disabled" : "btn-success"}`}
                 title={
                   !businessId
-                    ? "Necesitas tener un negocio asignado para iniciar un turno"
+                    ? "Necesitás tener un negocio asignado"
                     : !currentEmployee
                       ? "No se encontró tu registro de empleado"
-                      : ""
+                      : isMobileDevice
+                        ? "No podés iniciar turno desde el celular"
+                        : ""
                 }
               >
                 {isStartingShift ? "Iniciando..." : "Iniciar Turno"}
               </button>
+
             )}
           </div>
         </div>
       </div>
 
-      {/* Quick Actions */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <Link
-          href="/employee/products"
-          className="bg-white dark:bg-gray-800 rounded-lg shadow-sm p-5 hover:shadow-md transition-shadow"
-        >
-          <div className="flex items-center gap-3">
-            <div className="bg-blue-100 dark:bg-blue-900/30 p-3 rounded-full">
-              <Package className="h-6 w-6 text-blue-600 dark:text-blue-400" />
-            </div>
-            <div>
-              <h3 className="text-lg font-semibold">Productos</h3>
-              <p className="text-sm text-gray-500 dark:text-gray-400">Ver y gestionar inventario</p>
-            </div>
-          </div>
-        </Link>
-
-        <Link
-          href="/employee/new-sale"
-          className="bg-white dark:bg-gray-800 rounded-lg shadow-sm p-5 hover:shadow-md transition-shadow"
-        >
-          <div className="flex items-center gap-3">
-            <div className="bg-green-100 dark:bg-green-900/30 p-3 rounded-full">
-              <ShoppingCart className="h-6 w-6 text-green-600 dark:text-green-400" />
-            </div>
-            <div>
-              <h3 className="text-lg font-semibold">Nueva Venta</h3>
-              <p className="text-sm text-gray-500 dark:text-gray-400">Registrar una nueva venta</p>
-            </div>
-          </div>
-        </Link>
-
-      </div>
-
-      {/* Low Stock Alert */}
-      {lowStockProducts.length > 0 && (
-        <div className="bg-amber-50 dark:bg-amber-900/20 border-l-4 border-amber-500 p-4 rounded-md">
-          <div className="flex items-center">
-            <div className="flex-shrink-0">
-              <AlertTriangle className="h-5 w-5 text-amber-500" aria-hidden="true" />
-            </div>
-            <div className="ml-3">
-              <h3 className="text-sm font-medium text-amber-800 dark:text-amber-300">Alerta de Stock Bajo</h3>
-              <div className="mt-2 text-sm text-amber-700 dark:text-amber-200">
-                <p>
-                  Hay {lowStockProducts.length} productos con stock por debajo del mínimo requerido.
-                  <Link href="/employee/products" className="ml-2 font-medium underline">
-                    Ver productos
-                  </Link>
-                </p>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Active Shift Sales */}
       {activeShift && (
-        <div className="space-y-4">
+        <div className="space-y-4 mb-4">
           <div className="flex justify-between items-center">
-            <h2 className="text-xl font-semibold">Ventas del Turno Actual</h2>
-            <div className="text-sm bg-gray-100 dark:bg-gray-800 px-3 py-1 rounded-full">
-              Total:{" "}
-              <span className="font-semibold">
-                {formatCurrency(activeShiftSales.reduce((sum, sale) => sum + sale.total, 0))}
-              </span>
+            <h2 className="text-2xl font-bold text-indigo-700 dark:text-indigo-400">📊 Ventas del Turno Actual</h2>
+            <div className="text-sm bg-indigo-100 dark:bg-indigo-900 text-indigo-800 dark:text-indigo-300 px-3 py-1 rounded-full shadow">
+              Total: <span className="font-semibold">{formatCurrency(activeShiftSales.reduce((sum, sale) => sum + sale.total, 0))}</span>
             </div>
           </div>
-
+          {/* Payment Filter Buttons */}
+          <div className="flex flex-wrap gap-2">
+            {['Todos', 'Efectivo', 'Tarjeta', 'Transferencia', 'Rappi'].map((method) => (
+              <button
+                key={method}
+                onClick={() => setSelectedMethod(method)}
+                className={`text-sm px-3 py-1 rounded-full font-medium border transition-all shadow-sm ${selectedMethod === method
+                  ? 'bg-indigo-600 text-white border-indigo-600'
+                  : 'bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 border-gray-300 dark:border-gray-600 hover:bg-indigo-100 dark:hover:bg-gray-600'
+                  }`}
+              >
+                {method}
+              </button>
+            ))}
+          </div>
           {/* Payment Method Breakdown */}
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm">
-              <p className="text-sm text-gray-500 dark:text-gray-400">Efectivo</p>
-              <p className="text-xl font-bold text-green-600 dark:text-green-400">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="p-4 bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-green-200 dark:border-green-700">
+              <p className="text-sm text-gray-600 dark:text-gray-400">Efectivo</p>
+              <p className="text-2xl font-extrabold text-green-600 dark:text-green-400">
                 {formatCurrency(paymentMethodBreakdown.cash)}
               </p>
             </div>
-            <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm">
-              <p className="text-sm text-gray-500 dark:text-gray-400">Tarjeta</p>
-              <p className="text-xl font-bold text-blue-600 dark:text-blue-400">
+            <div className="p-4 bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-blue-200 dark:border-blue-700">
+              <p className="text-sm text-gray-600 dark:text-gray-400">Tarjeta</p>
+              <p className="text-2xl font-extrabold text-blue-600 dark:text-blue-400">
                 {formatCurrency(paymentMethodBreakdown.card)}
               </p>
             </div>
-            <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm">
-              <p className="text-sm text-gray-500 dark:text-gray-400">Transferencia</p>
-              <p className="text-xl font-bold text-purple-600 dark:text-purple-400">
+            <div className="p-4 bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-purple-200 dark:border-purple-700">
+              <p className="text-sm text-gray-600 dark:text-gray-400">Transferencia</p>
+              <p className="text-2xl font-extrabold text-purple-600 dark:text-purple-400">
                 {formatCurrency(paymentMethodBreakdown.transfer)}
               </p>
             </div>
-            <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm">
-              <p className="text-sm text-gray-500 dark:text-gray-400">Rappi</p>
-              <p className="text-xl font-bold text-orange-600 dark:text-orange-400">
+            <div className="p-4 bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-orange-200 dark:border-orange-700">
+              <p className="text-sm text-gray-600 dark:text-gray-400">Rappi</p>
+              <p className="text-2xl font-extrabold text-orange-600 dark:text-orange-400">
                 {formatCurrency(paymentMethodBreakdown.rappi)}
               </p>
             </div>
           </div>
 
           {/* Sales List */}
-          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm overflow-hidden">
-            <div className="p-4 border-b border-gray-200 dark:border-gray-700">
-              <h3 className="font-semibold">Listado de Ventas</h3>
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow overflow-hidden">
+            <div className="p-4 bg-indigo-50 dark:bg-indigo-900/20 border-b border-indigo-200 dark:border-indigo-700">
+              <h3 className="font-semibold text-indigo-800 dark:text-indigo-300">📋 Listado de Ventas</h3>
             </div>
             <div className="overflow-x-auto">
               <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
                 <thead className="bg-gray-50 dark:bg-gray-800">
                   <tr>
-                    <th
-                      scope="col"
-                      className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider"
-                    >
+                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                       Hora
                     </th>
-                    <th
-                      scope="col"
-                      className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider"
-                    >
+                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                       Productos
                     </th>
-                    <th
-                      scope="col"
-                      className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider"
-                    >
+                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                       Método de Pago
                     </th>
-                    <th
-                      scope="col"
-                      className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider"
-                    >
+                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                       Total
                     </th>
                   </tr>
                 </thead>
-                <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                  {activeShiftSales.length > 0 ? (
-                    activeShiftSales.map((sale) => (
-                      <tr key={sale.id} className="hover:bg-gray-50 dark:hover:bg-gray-700">
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
-                          {new Date(sale.timestamp).toLocaleTimeString()}
-                        </td>
-                        <td className="px-6 py-4 text-sm text-gray-500 dark:text-gray-400">
-                          <div className="space-y-1">
-                            {sale.sale_items.map((item, i) => (
-                              <div key={i} className="text-xs">
-                                {item.quantity}× {(item.products_master?.name ?? item.products?.name) ?? "–"} – {formatCurrency(item.total)}
-                              </div>
-                            ))}
-                          </div>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm">
-                          <span
-                            className={`px-2 py-1 rounded text-xs font-medium ${getPaymentMethodClass(sale.paymentMethod)}`}
-                          >
-                            {translatePaymentMethod(sale.payment_method)}
-                          </span>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white">
-                          {formatCurrency(sale.total)}
-                        </td>
-                      </tr>
-                    ))
-                  ) : (
+                <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-100 dark:divide-gray-700">
+                  {(selectedMethod === 'Todos'
+                    ? activeShiftSales
+                    : activeShiftSales.filter((sale) => translatePaymentMethod(sale.payment_method) === selectedMethod)
+                  ).map((sale) => (
+                    <tr key={sale.id} className="hover:bg-indigo-50 dark:hover:bg-indigo-900/20">
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600 dark:text-gray-400">
+                        {new Date(sale.timestamp).toLocaleTimeString()}
+                      </td>
+                      <td className="px-6 py-4 text-sm text-gray-700 dark:text-gray-300">
+                        <ul className="space-y-1">
+                          {sale.sale_items.map((item, i) => (
+                            <li key={i} className="text-xs">
+                              {item.quantity}× {(item.products_master?.name ?? item.products?.name) ?? "–"} – {formatCurrency(item.total)}
+                            </li>
+                          ))}
+                        </ul>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm">
+                        <span className={`px-2 py-1 rounded-full text-xs font-semibold border ${getPaymentMethodClass(sale.paymentMethod)}`}>
+                          {translatePaymentMethod(sale.payment_method)}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900 dark:text-white">
+                        {formatCurrency(sale.total)}
+                      </td>
+                    </tr>
+                  ))}
+                  {activeShiftSales.length === 0 && (
                     <tr>
                       <td colSpan={4} className="px-6 py-4 text-center text-sm text-gray-500 dark:text-gray-400">
                         No hay ventas registradas en este turno.
@@ -710,6 +796,7 @@ export default function EmployeeDashboard() {
               </table>
             </div>
           </div>
+          {/* Sale list end */}
         </div>
       )}
       {showStartShiftModal && (
