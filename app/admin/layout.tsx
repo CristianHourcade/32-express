@@ -11,10 +11,10 @@ export default function AdminLayout({
     <ProtectedRoute requiredRole="admin">
       <div className="min-h-screen bg-gray-100 dark:bg-gray-900">
         <AdminNavbar />
-        <div className="md:pl-64 flex flex-col">
+        <div className="md:pl-[80px] flex flex-col">
           <main className="flex-1">
             {/* Aumentamos significativamente el padding superior */}
-            <div className="pt-20 md:pt-6 px-4 md:px-8">{children}</div>
+            <div className="pt-20 md:pt-6 px-4 md:px-32">{children}</div>
           </main>
         </div>
       </div>

@@ -4,6 +4,7 @@ import { Inter } from "next/font/google"
 import "./globals.css"
 import { ReduxProvider } from "@/lib/redux/provider"
 import AuthProvider from "@/components/AuthProvider"
+import { Montserrat } from "next/font/google";
 
 const inter = Inter({ subsets: ["latin"] })
 
@@ -22,13 +23,19 @@ export const metadata: Metadata = {
   },
 }
 
+const montserrat = Montserrat({
+  subsets: ["latin"],
+  weight: ["300", "400", "500", "600", "700"],
+  variable: "--font-montserrat",
+});
+
 export default function RootLayout({
   children,
 }: {
   children: React.ReactNode
 }) {
   return (
-    <html lang="es">
+    <html lang="es" className={montserrat.variable}>
       {/* Build Info: ${buildTimestamp} */}
       <body className={inter.className}>
         <ReduxProvider>

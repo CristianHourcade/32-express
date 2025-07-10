@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { Banknote, Building2, CalendarDays, ChevronLeft, ChevronRight, CreditCard, Flame, Wallet } from "lucide-react";
 
 /* ========= HELPERS DE FECHA ========= */
 function monthRange(offset = 0) {
@@ -18,18 +18,29 @@ function monthRange(offset = 0) {
   return { start, end };
 }
 
+const paymentColors = {
+  Efectivo: "bg-emerald-100/70 text-emerald-900 dark:bg-emerald-900/40 dark:text-emerald-100",
+  Tarjeta: "bg-indigo-100/70 text-indigo-900 dark:bg-indigo-900/40 dark:text-indigo-100",
+  Rappi: "bg-orange-100/70 text-orange-900 dark:bg-orange-900/40 dark:text-orange-100",
+  Transferencia: "bg-yellow-100/70 text-yellow-900 dark:bg-yellow-900/40 dark:text-yellow-100",
+};
+
+const formatPrice = (n: number) =>
+  n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const Stat = ({
   label,
   value,
   accent = "",
+  className = "",
 }: {
   label: string;
   value: string | number;
   accent?: string;
+  className?: string;
 }) => (
   <div className="mb-2">
     <p className="text-sm text-slate-500 dark:text-slate-400">{label}</p>
-    <p className={`font-medium ${accent} dark:text-white`}>{value}</p>
+    <p className={`${accent} ${className}`}>{value}</p>
   </div>
 );
 
@@ -94,6 +105,92 @@ function MultiSelectDropdown({
     </div>
   );
 }
+
+function BusinessCard({ b }: { b: any }) {
+  const profitColor = b.profit >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400";
+
+  const paymentMethods = [
+    { label: "Efectivo", value: b.paymentMethods.cash, icon: <Wallet className="w-4 h-4" /> },
+    { label: "Tarjeta", value: b.paymentMethods.card, icon: <CreditCard className="w-4 h-4" /> },
+    { label: "Rappi", value: b.paymentMethods.rappi, icon: <Flame className="w-4 h-4" /> },
+    {
+      label: "Transferencia",
+      value: (b.paymentMethods.transfer ?? 0) + (b.paymentMethods.mercadopago ?? 0),
+      icon: <Banknote className="w-4 h-4" />,
+    },
+  ];
+
+  return (
+    <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl p-5 shadow-sm hover:shadow-lg transition-shadow space-y-4 flex flex-col justify-between min-h-[360px]">
+      {/* Header */}
+      <div className="flex items-center gap-3 mb-1">
+        <Building2 className="w-5 h-5 text-indigo-500" />
+        <h3 className="text-lg font-semibold text-gray-900 dark:text-white tracking-tight">{b.name}</h3>
+      </div>
+
+      {/* Datos financieros */}
+      <div className="grid grid-cols-2 gap-4 text-sm">
+        <div className="space-y-1">
+          <p className="text-slate-500">Total Ventas</p>
+          <p className="text-[15px] font-bold text-gray-800 dark:text-white tabular-nums">
+            $ {formatPrice(b.totalAmount)}
+          </p>
+        </div>
+        <div className="space-y-1">
+          <p className="text-slate-500">Gastos</p>
+          <p className="text-[15px] font-bold text-red-500 tabular-nums">
+            $ {formatPrice(b.totalExpense)}
+          </p>
+        </div>
+        <div className="space-y-1">
+          <p className="text-slate-500">Profit</p>
+          <p className={`text-[15px] font-bold ${profitColor} tabular-nums`}>
+            $ {formatPrice(b.profit)}
+          </p>
+        </div>
+        <div className="space-y-1">
+          <p className="text-slate-500">Ticket Promedio</p>
+          <p className="text-[15px] font-medium text-gray-700 dark:text-gray-300 tabular-nums">
+            $ {formatPrice(b.avgTicket)}
+          </p>
+        </div>
+      </div>
+
+      <hr className="my-2 border-slate-200 dark:border-slate-700" />
+
+      {/* Métodos de Pago */}
+      <div>
+        <div>
+          <p className="text-sm text-slate-500 mb-2">Métodos de Pago</p>
+          <div className="grid grid-cols-2 gap-2">
+            {paymentMethods.map(({ label, value, icon }) => {
+              return (
+                <div
+                  key={label}
+                  className={`flex flex-col justify-center p-3 rounded-xl shadow-sm 
+            border border-gray-200 dark:border-gray-700 
+            ${paymentColors[label as keyof typeof paymentColors]} `}
+                >
+                  <div className="flex items-center gap-2 mb-1 text-gray-700 dark:text-gray-200 font-medium text-sm">
+                    {icon}
+                    <span>{label}</span>
+                  </div>
+                  <div className="text-right text-[15px] font-bold tabular-nums text-gray-900 dark:text-white">
+                    $ {formatPrice(value)}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+      </div>
+
+
+    </div>
+  );
+}
+
 
 /* ========= FETCH HELPERS ========= */
 async function fetchAllPaginated(
@@ -239,8 +336,7 @@ export default function AdminDashboard() {
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
   const [isLoading, setIsLoading] = useState(true);
 
-  const formatPrice = (n: number) =>
-    n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
 
   /* -------- CARGA GLOBAL DEL MES -------- */
   useEffect(() => {
@@ -450,12 +546,13 @@ export default function AdminDashboard() {
 
   const pmClass = (m: string) =>
   ({
-    cash: "bg-green-100 dark:bg-green-900 p-2 rounded",
-    card: "bg-blue-100 dark:bg-blue-900 p-2 rounded",
-    transfer: "bg-purple-100 dark:bg-purple-900 p-2 rounded",
-    mercadopago: "bg-sky-100 dark:bg-sky-900 p-2 rounded",
-    rappi: "bg-orange-100 dark:bg-orange-900 p-2 rounded",
-  }[m] || "bg-gray-100 dark:bg-gray-700 p-2 rounded");
+    cash: "bg-emerald-50 dark:bg-emerald-900/30 rounded-md",
+    card: "bg-indigo-50 dark:bg-indigo-900/30 rounded-md",
+    transfer: "bg-yellow-50 dark:bg-yellow-900/30 rounded-md",
+    mercadopago: "bg-sky-50 dark:bg-sky-900/30 rounded-md",
+    rappi: "bg-orange-50 dark:bg-orange-900/30 rounded-md",
+  }[m] || "bg-gray-50 dark:bg-gray-800 rounded-md");
+
 
   const selectBase =
     "appearance-none bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-full px-3 py-1.5 text-xs shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 max-w-full";
@@ -493,57 +590,65 @@ export default function AdminDashboard() {
     month: "long",
     year: "numeric",
   });
+
+
+
   return (
     <div className="space-y-6 p-4">
       {/* =========== NEGOCIOS =========== */}
 
       <section className="mt-8">
+
         {/* —— Navegación de meses —— */}
-        <header className="flex items-center gap-4 flex-wrap">
-          <button
-            aria-label="Mes anterior"
-            className="p-2 rounded-full hover:bg-slate-200 dark:hover:bg-slate-700 disabled:opacity-40 transition-colors"
-            onClick={() => setMonthOffset((o) => o - 1)}
-            disabled={isLoading}
-          >
-            {/* Flecha IZQ en SVG puro */}
-            <svg
-              viewBox="0 0 24 24"
-              className="w-5 h-5"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <polyline points="15 18 9 12 15 6" />
-            </svg>
-          </button>
+        <header className="flex items-center justify-between flex-wrap gap-4 mb-6">
+          <div className="mb-8 flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <h1 className="text-2xl md:text-3xl font-bold tracking-tight text-slate-800 dark:text-white">
+                Resumen financiero
+              </h1>
+              <p className="text-sm text-slate-500 dark:text-slate-400">
+                Ventas, gastos y rentabilidad de cada sucursal este mes.
+              </p>
+            </div>
 
-          <h1 className="text-[clamp(1.5rem,2.5vw,2rem)] font-bold capitalize">
-            {monthLabel}
-          </h1>
+            <div className="items-center gap-2">
+              <button
+                aria-label="Mes anterior"
+                className="p-2 rounded-full hover:bg-slate-200 dark:hover:bg-slate-700 disabled:opacity-40 transition-colors"
+                onClick={() => setMonthOffset((o) => o - 1)}
+                disabled={isLoading}
+              >
+                <svg viewBox="0 0 24 24" className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="15 18 9 12 15 6" />
+                </svg>
+              </button>
 
-          <button
-            aria-label="Mes siguiente"
-            className="p-2 rounded-full hover:bg-slate-200 dark:hover:bg-slate-700 disabled:opacity-40 transition-colors"
-            onClick={() => setMonthOffset((o) => o + 1)}
-            disabled={isLoading}
-          >
-            {/* Flecha DER en SVG puro */}
-            <svg
-              viewBox="0 0 24 24"
-              className="w-5 h-5"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <polyline points="9 18 15 12 9 6" />
-            </svg>
-          </button>
+              <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
+                <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+                  <line x1="16" y1="2" x2="16" y2="6" />
+                  <line x1="8" y1="2" x2="8" y2="6" />
+                  <line x1="3" y1="10" x2="21" y2="10" />
+                </svg>
+                {monthLabel}
+              </span>
+
+              <button
+                aria-label="Mes siguiente"
+                className="p-2 rounded-full hover:bg-slate-200 dark:hover:bg-slate-700 disabled:opacity-40 transition-colors"
+                onClick={() => setMonthOffset((o) => o + 1)}
+                disabled={isLoading}
+              >
+                <svg viewBox="0 0 24 24" className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="9 18 15 12 9 6" />
+                </svg>
+              </button>
+            </div>
+          </div>
+
         </header>
+
+
 
         {/* —— Grid de negocios —— */}
         {isLoading ? (
@@ -557,86 +662,7 @@ export default function AdminDashboard() {
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 mt-8">
-            {businessesWithMonthlyData.map((b) => (
-              <div
-                key={b.id}
-                className="rounded-2xl bg-white/70 dark:bg-slate-800/60 backdrop-blur p-6 border border-slate-200 dark:border-slate-700
-                         transform-gpu transition-all duration-200 hover:-translate-y-1 hover:shadow-xl"
-              >
-                {/* ——— Header negocio ——— */}
-                <h3 className="text-lg font-semibold mb-4 flex items-center gap-2 dark:text-white">
-                  {/* Edificio simple en SVG */}
-                  <svg
-                    viewBox="0 0 24 24"
-                    className="w-5 h-5 text-indigo-500"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
-                    <path d="M9 22v-4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v4" />
-                    <line x1="8" y1="10" x2="16" y2="10" />
-                    <line x1="8" y1="14" x2="16" y2="14" />
-                    <line x1="8" y1="6" x2="16" y2="6" />
-                  </svg>
-                  <span className="truncate">{b.name}</span>
-                </h3>
-
-                {/* ——— Métricas ——— */}
-                <Stat label="Ventas realizadas" value={formatNumberAbbrev(b.transactions)} />
-                <Stat label="Venta acumulada" value={`$ ${formatPrice(b.totalAmount)}`} />
-                <Stat
-                  label="Gasto acumulado"
-                  value={`$ ${formatPrice(b.totalExpense)}`}
-                  accent="text-red-500"
-                />
-                <Stat
-                  label="Profit"
-                  value={`$ ${formatPrice(b.profit)}`}
-                  accent="text-green-600 dark:text-green-400 font-bold text-lg"
-                />
-                <Stat label="Ticket Promedio" value={`$ ${formatPrice(b.avgTicket)}`} />
-
-                <hr className="border-slate-300 dark:border-slate-600 my-4" />
-
-                {/* ——— Métodos de pago ——— */}
-                <p className="text-sm text-slate-500 dark:text-slate-400 mb-2">
-                  Métodos de Pago
-                </p>
-
-                {(() => {
-                  // ► nuevo total transferencia = transferencia + mercadopago
-                  const transferTotal =
-                    (b.paymentMethods.mercadopago ?? 0) + (b.paymentMethods.transfer ?? 0);
-
-                  return (
-                    <div className="grid grid-cols-2 gap-2">
-                      {(
-                        ["cash", "card", "rappi", "transfer"] as const // sin mercadopago
-                      ).map((m) => (
-                        <div
-                          key={m}
-                          className={`${pmStyle[m]} rounded-lg p-2 flex flex-col`}
-                        >
-                          <span className="text-xs capitalize text-slate-700 dark:text-slate-300">
-                            {m === "transfer" ? "transferencia" : m}
-                          </span>
-                          <span className="font-semibold text-slate-800 dark:text-slate-50">
-                            {m === "cash"
-                              ? `$ ${b.paymentMethods.cash.toLocaleString("en-US")}`
-                              : m === "transfer"
-                                ? `$ ${formatNumberAbbrev(transferTotal)}`
-                                : `$ ${formatNumberAbbrev(b.paymentMethods[m])}`}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  );
-                })()}
-              </div>
-            ))}
+            {businessesWithMonthlyData.map((b) => <BusinessCard b={b} />)}
           </div>
         )}
       </section>
@@ -659,84 +685,70 @@ export default function AdminDashboard() {
             return (
               <div
                 key={sh.id}
-                className="rounded-2xl bg-white/70 dark:bg-slate-800/60 backdrop-blur p-6 border border-slate-200 dark:border-slate-700
-                     transform-gpu transition-all duration-200 hover:-translate-y-1 hover:shadow-xl"
+                className="rounded-2xl bg-white dark:bg-slate-900 p-6 border border-slate-200 dark:border-slate-700 shadow-sm hover:shadow-md transition-all duration-200 flex flex-col gap-4 min-h-[260px]"
               >
                 {/* — Header — */}
-                <div className="flex justify-between items-start mb-4">
-                  <div>
-                    <h3 className="text-lg font-semibold truncate">
+                <div className="flex items-start justify-between">
+                  <div className="flex flex-col">
+                    <h3 className="text-base font-semibold text-gray-900 dark:text-white">
                       {emp?.name || sh.employee_id}
                     </h3>
-                    <p className="text-xs text-slate-500 dark:text-slate-400">
-                      {sh.business_name}
-                    </p>
+                    <p className="text-sm text-slate-500 dark:text-slate-400">{sh.business_name}</p>
                   </div>
-                  <span className="bg-emerald-100 text-emerald-800 text-[11px] font-medium px-2 py-1 rounded-full
-                             dark:bg-emerald-900 dark:text-emerald-300">
+                  <span className="px-2 py-0.5 text-[11px] font-semibold rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-300">
                     Activo
                   </span>
                 </div>
 
-                {/* — Métricas — */}
-                <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">
+                {/* — Hora de inicio — */}
+                <p className="text-xs text-slate-500 dark:text-slate-400">
                   Iniciado:{" "}
-                  <span className="font-medium">
+                  <span className="font-medium text-slate-700 dark:text-slate-200">
                     {new Date(sh.start_time).toLocaleString()}
                   </span>
                 </p>
 
-                <div className="mb-3">
-                  <p className="text-xs text-slate-500 dark:text-slate-400">
-                    Ventas totales
-                  </p>
-                  <p className="text-lg font-bold text-green-600 dark:text-green-400">
-                    $ {formatPrice(total)}
-                  </p>
-                </div>
-
-                <div className="mb-4">
-                  <p className="text-xs text-slate-500 dark:text-slate-400">
-                    Promedio / hora
-                  </p>
-                  <p className="text-lg font-bold text-indigo-600 dark:text-indigo-400">
-                    $ {formatPrice(avgHr)}
-                  </p>
+                {/* — Métricas — */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">Ventas totales</p>
+                    <p className="text-lg font-bold text-green-600 dark:text-green-400">
+                      $ {formatPrice(total)}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">Promedio / hora</p>
+                    <p className="text-lg font-bold text-indigo-600 dark:text-indigo-400">
+                      $ {formatPrice(avgHr)}
+                    </p>
+                  </div>
                 </div>
 
                 {/* — Métodos de pago — */}
-                <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">
-                  Métodos de pago
-                </p>
-
-                <div className="grid grid-cols-2 gap-3">
-                  {/* efectivo */}
-                  <div className={` ${pmClass("cash")}`}>
-                    <p className="text-[11px] text-slate-600 dark:text-slate-400">
-                      Efectivo
-                    </p>
-                    <p className="font-medium">$ {formatPrice(payments.cash)}</p>
-                  </div>
-
-                  {/* card y rappi */}
-                  {(["card", "rappi"] as const).map((m) => (
-                    <div key={m} className={pmClass(m)}>
-                      <p className="text-[11px] text-slate-600 dark:text-slate-400 capitalize">
-                        {m}
-                      </p>
-                      <p className="font-medium">$ {formatPrice(payments[m])}</p>
-                    </div>
-                  ))}
-
-                  {/* transferencia (transfer + mercadopago) */}
-                  <div className={pmClass("transfer")}>
-                    <p className="text-[11px] text-slate-600 dark:text-slate-400">
-                      Transferencia
-                    </p>
-                    <p className="font-medium">$ {formatPrice(transferTotal)}</p>
+                <div>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">Métodos de pago</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    {[
+                      { label: "Efectivo", value: payments.cash, class: pmClass("cash") },
+                      { label: "Tarjeta", value: payments.card, class: pmClass("card") },
+                      { label: "Rappi", value: payments.rappi, class: pmClass("rappi") },
+                      {
+                        label: "Transferencia",
+                        value: (payments.transfer ?? 0) + (payments.mercadopago ?? 0),
+                        class: pmClass("transfer"),
+                      },
+                    ].map(({ label, value, class: cls }) => (
+                      <div key={label} className={`${cls} flex justify-between items-center px-3 py-2 text-sm font-medium`}>
+                        <span className="text-slate-700 dark:text-slate-300">{label}</span>
+                        <span className="tabular-nums text-right text-slate-800 dark:text-white font-semibold">
+                          $ {formatPrice(value)}
+                        </span>
+                      </div>
+                    ))}
                   </div>
                 </div>
               </div>
+
             );
           })}
 

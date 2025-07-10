@@ -93,9 +93,8 @@ export default function AdminNavbar() {
                   <li key={item.name}>
                     <Link
                       href={item.href}
-                      className={`flex items-center p-3 rounded-md ${
-                        isActive ? "app-nav-link-active" : "app-nav-link-inactive"
-                      }`}
+                      className={`flex items-center p-3 rounded-md ${isActive ? "app-nav-link-active" : "app-nav-link-inactive"
+                        }`}
                       onClick={() => setIsMobileMenuOpen(false)}
                     >
                       <item.icon
@@ -122,56 +121,53 @@ export default function AdminNavbar() {
       )}
 
       {/* Sidebar de escritorio - Ajustamos el z-index */}
-      <div className="hidden md:flex md:w-64 md:flex-col md:fixed md:inset-y-0 z-30">
-        <div className="flex-1 flex flex-col min-h-0 app-sidebar">
-          <div className="flex-1 flex flex-col pt-5 pb-4 overflow-y-auto">
-            <div className="flex items-center justify-between flex-shrink-0 px-4">
-              <h1 className="text-xl font-bold text-sky-600 dark:text-sky-500">32 EXPRESS</h1>
-              <ThemeToggle />
-            </div>
-            <nav className="mt-8 flex-1 px-2 space-y-1">
-              {navItems.map((item) => {
-                const isActive = pathname === item.href
-                return (
-                  <Link
-                    key={item.name}
-                    href={item.href}
-                    className={`app-nav-link ${isActive ? "app-nav-link-active" : "app-nav-link-inactive"}`}
-                  >
-                    <item.icon
-                      className={`app-nav-icon ${isActive ? "app-nav-icon-active" : "app-nav-icon-inactive"}`}
-                    />
-                    {item.name}
-                  </Link>
-                )
-              })}
-            </nav>
+      <div className="hidden md:flex md:w-20 md:flex-col md:fixed md:inset-y-0 z-30 bg-slate-50 dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800">
+        <div className="flex-1 flex flex-col min-h-0">
+          {/* Header */}
+          <div className="flex items-center justify-center h-16">
+            <h1 className="text-lg font-bold text-sky-600 dark:text-sky-400">32</h1>
           </div>
-          <div className="flex-shrink-0 flex border-t border-slate-200 dark:border-slate-800 p-4">
-            <div className="flex-shrink-0 w-full group block">
-              <div className="flex items-center">
-                <div className="inline-block h-9 w-9 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center">
-                  <UserIcon className="h-5 w-5 text-slate-500 dark:text-slate-400" />
-                </div>
-                <div className="ml-3 flex-1">
-                  <p className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                    {user?.name || "Administrador"}
-                  </p>
-                  <p className="text-xs text-slate-500 dark:text-slate-400">{user?.email || "admin@example.com"}</p>
-                </div>
-                <button
-                  onClick={handleLogout}
-                  disabled={isLoggingOut}
-                  className="ml-2 p-1 rounded-md text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20"
-                  title="Cerrar sesión"
+
+          {/* Navegación */}
+          <nav className="flex-1 flex flex-col items-center gap-2 mt-4">
+            {navItems.map((item) => {
+              const isActive = pathname === item.href;
+              return (
+                <Link
+                  key={item.name}
+                  href={item.href}
+                  title={item.name}
+                  className={cn(
+                    "relative group flex items-center justify-center w-12 h-12 rounded-xl transition-all transform hover:scale-105",
+                    isActive
+                      ? "bg-sky-100 text-sky-600 dark:bg-sky-900 dark:text-sky-300"
+                      : "text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800"
+                  )}
                 >
-                  <LogOut className="h-5 w-5" />
-                </button>
-              </div>
-            </div>
+                  {/* barrita al costado si activo */}
+                  {isActive && (
+                    <span className="absolute left-0 top-1/2 -translate-y-1/2 h-6 w-1 rounded-r-full bg-sky-500" />
+                  )}
+                  <item.icon className="w-5 h-5" />
+                </Link>
+              );
+            })}
+          </nav>
+
+          {/* Footer con botón de logout */}
+          <div className="p-4 border-t border-slate-200 dark:border-slate-800">
+            <button
+              onClick={handleLogout}
+              disabled={isLoggingOut}
+              title="Cerrar sesión"
+              className="w-12 h-12 flex items-center justify-center rounded-xl text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20 transition-all"
+            >
+              <LogOut className="w-5 h-5" />
+            </button>
           </div>
         </div>
       </div>
+
     </>
   )
 }
