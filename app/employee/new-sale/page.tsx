@@ -767,7 +767,7 @@ export default function NewSalePage() {
           </div>
 
           {/* Panel derecho */}
-          <div className="p-6 flex flex-col justify-between">
+          <div className="p-6 flex flex-col justify-between overflow-auto">
             {/* Banner superior */}
             <div className="bg-yellow-100 text-yellow-800 border border-yellow-300 text-center py-3 px-4 rounded-xl font-semibold text-sm mb-6 flex items-center justify-center gap-2">
               🛍️ ¡Ofrece más productos y aumentá el ticket!
