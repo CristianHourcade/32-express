@@ -371,6 +371,7 @@ export default function ShiftsPage() {
                   "Ventas",
                   "Total",
                   "Métodos",
+                  "Guardado estimado",
                   "Caja",
                   "",
                 ].map((h) => (
@@ -392,6 +393,10 @@ export default function ShiftsPage() {
                     acc[method] = (acc[method] || 0) + s.total;
                     return acc;
                   }, {} as Record<string, number>);
+
+                  const efectivoVentas = paymentsByMethod["cash"] || 0;
+                  const montoGuardado = efectivoVentas + (sh.startCash || 0) - (sh.endCash || 0);
+
 
                   return (
                     <tr
@@ -434,6 +439,9 @@ export default function ShiftsPage() {
                               </div>
                             ))}
                         </div>
+                      </td>
+                      <td className="px-4 py-2 font-semibold text-sky-700 dark:text-sky-400">
+                        ${formatPrice(montoGuardado)}
                       </td>
 
                       {/* NUEVO: CAJA */}

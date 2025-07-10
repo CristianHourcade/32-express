@@ -576,10 +576,10 @@ export default function NewSalePage() {
           // ANGEL GALLARDOx
           if (businessId === "7050459b-b342-4e66-ab11-ab856b7f11f1") {
             const FacturaConFACTURADOR = {
-              ...facturaPayload,
+              apitoken: ANGEL_CRISTIAN_APITOKEN,
               usertoken: ANGEL_CRISTIAN_USERTOKEN,
               apikey: ANGEL_CRISTIAN_APIKEY,
-              apitoken: ANGEL_CRISTIAN_APITOKEN,
+              ...facturaPayload,
             }
             fetch("https://32express-factura.vercel.app/api/facturar", {
               method: "POST",
