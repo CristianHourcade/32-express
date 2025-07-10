@@ -8,7 +8,7 @@ import { getShifts, type Shift } from "@/lib/redux/slices/shiftSlice";
 import { getEmployees } from "@/lib/redux/slices/employeeSlice";
 import { fetchBusinesses } from "@/lib/redux/slices/businessSlice";
 import { getSales } from "@/lib/redux/slices/salesSlice";
-import { FileText, Search } from "lucide-react";
+import { CalendarDays, ChevronLeft, ChevronRight, FileText, Search, SearchIcon, Store } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 // helpers/case.ts
 export const toCamel = <T extends Record<string, any>>(row: T) =>
@@ -291,78 +291,87 @@ export default function ShiftsPage() {
   /* ───────────────────────────────── RETURN ───────────────────────────────── */
   return (
     <div className="space-y-8">
-      {/* header + selector mes */}
-      <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+      <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between rounded-2xl bg-white dark:bg-slate-800 px-5 py-4 shadow-md ring-1 ring-slate-200 dark:ring-slate-700">
+        {/* Título + descripción */}
         <div>
-          <h1 className="text-2xl md:text-3xl font-bold tracking-tight">Turnos</h1>
-          <p className="text-slate-600 dark:text-slate-400">
-            Control de turnos y ventas por empleado
-          </p>
+          <h1 className="text-2xl font-bold tracking-tight">Turnos</h1>
+          <p className="text-sm text-slate-500 dark:text-slate-400">Control y seguimiento de ventas por empleado</p>
         </div>
 
-        <div className="flex items-center gap-3">
-          {/* negocio */}
-          <select
-            value={selectedBusinessId}
-            onChange={handleBusinessChange}
-            className="appearance-none bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-full px-3 py-1.5 text-xs shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-          >
-            <option value="all">Todos los negocios</option>
-            {businesses.map((b) => (
-              <option key={b.id} value={b.id}>
-                {b.name}
-              </option>
-            ))}
-          </select>
-          <input
-            type="search"
-            placeholder="Buscar producto…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="rounded-full px-3 py-1.5 text-xs border bg-white dark:bg-slate-800
-             shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 w-[180px]"
-          />
-          <select
-            value={dateRangeType}
-            onChange={(e) =>
-              setDateRangeType(e.target.value === "month" ? "month" : parseInt(e.target.value))
-            }
-            className="appearance-none bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-full px-3 py-1.5 text-xs shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-          >
-            <option value="month">Este mes</option>
-            <option value="7">Últimos 7 días</option>
-            <option value="14">Últimos 14 días</option>
-            <option value="21">Últimos 21 días</option>
-            <option value="30">Últimos 30 días</option>
-          </select>
-
-          {/* navegación por mes */}
-          <div className="flex items-center gap-2">
-            <button
-              aria-label="Mes anterior"
-              onClick={() => setMonthOffset((o) => o - 1)}
-              className="p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-700"
+        {/* Controles */}
+        <div className="flex flex-wrap gap-3 items-center justify-end">
+          {/* Selector de fechas */}
+          <div className="flex items-center gap-1">
+            <CalendarDays className="h-4 w-4 text-slate-400" />
+            <select
+              value={dateRangeType}
+              onChange={(e) =>
+                setDateRangeType(e.target.value === "month" ? "month" : parseInt(e.target.value))
+              }
+              className="text-sm bg-transparent border border-slate-300 dark:border-slate-600 rounded-full px-3 py-1.5 shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
             >
-              ◀
-            </button>
-            <span className="text-sm font-semibold capitalize">{monthLabel}</span>
+              <option value="month">Este mes</option>
+              <option value="7">Últimos 7 días</option>
+              <option value="14">Últimos 14 días</option>
+              <option value="21">Últimos 21 días</option>
+              <option value="30">Últimos 30 días</option>
+            </select>
+          </div>
+
+          {/* Selector de negocio */}
+          <div className="flex items-center gap-1">
+            <Store className="h-4 w-4 text-slate-400" />
+            <select
+              value={selectedBusinessId}
+              onChange={handleBusinessChange}
+              className="text-sm bg-transparent border border-slate-300 dark:border-slate-600 rounded-full px-3 py-1.5 shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            >
+              <option value="all">Todos los negocios</option>
+              {businesses.map((b) => (
+                <option key={b.id} value={b.id}>{b.name}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Buscador */}
+          <div className="relative">
+            <SearchIcon className="absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
+            <input
+              type="search"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Buscar producto…"
+              className="pl-8 pr-3 py-1.5 text-sm rounded-full border bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-600 shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+          </div>
+
+          {/* Navegación por mes */}
+          <div className="flex items-center gap-1">
             <button
-              aria-label="Mes siguiente"
+              onClick={() => setMonthOffset((o) => o - 1)}
+              className="p-1.5 rounded-full border border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700"
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+            <span className="text-sm font-medium capitalize px-2">{monthLabel}</span>
+            <button
               onClick={() => setMonthOffset((o) => Math.min(o + 1, 0))}
               disabled={monthOffset === 0}
-              className="p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-40"
+              className="p-1.5 rounded-full border border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-40"
             >
-              ▶
+              <ChevronRight className="h-4 w-4" />
             </button>
           </div>
         </div>
       </header>
 
+
+
       {/* tabla */}
       <div className="bg-white dark:bg-slate-800 rounded-xl shadow ring-1 ring-slate-200 dark:ring-slate-700 overflow-hidden">
         <div className="overflow-x-auto">
           <table className="min-w-full text-sm">
-            <thead className="bg-slate-100 dark:bg-slate-700/70 sticky top-0 z-10 text-[11px] uppercase tracking-wide">
+            <thead className="bg-slate-50 dark:bg-slate-700/70 sticky top-0 z-10 text-[11px] text-slate-500 dark:text-slate-400 uppercase tracking-wide border-b border-slate-200 dark:border-slate-600">
               <tr>
                 {[
                   "Empleado",
@@ -375,12 +384,11 @@ export default function ShiftsPage() {
                   "Caja",
                   "",
                 ].map((h) => (
-                  <th key={h} className="px-4 py-3 text-left font-semibold">
-                    {h}
-                  </th>
+                  <th key={h} className="px-4 py-3 text-left font-semibold">{h}</th>
                 ))}
               </tr>
             </thead>
+
 
             <tbody>
               {hasFetchedData && sortedShifts.length ? (
@@ -401,63 +409,70 @@ export default function ShiftsPage() {
                   return (
                     <tr
                       key={sh.id}
-                      className="border-l-4 border-transparent hover:border-sky-500 even:bg-slate-50/60 dark:even:bg-slate-800/30"
+                      className="group border-l-4 border-transparent hover:border-sky-500 even:bg-slate-50 dark:even:bg-slate-800/40 transition-all duration-200"
                     >
-                      <td className="px-4 py-2 font-medium whitespace-nowrap">{sh.employeeName}</td>
-                      <td className="px-4 py-2 whitespace-nowrap">
+                      {/* Empleado */}
+                      <td className="px-4 py-3 font-medium text-slate-900 dark:text-slate-200 whitespace-nowrap">{sh.employeeName}</td>
+
+                      {/* Inicio */}
+                      <td className="px-4 py-3 text-slate-700 dark:text-slate-300 whitespace-nowrap">
                         {new Date(sh.startTime).toLocaleString()}
                       </td>
-                      <td className="px-4 py-2">
+
+                      {/* Estado */}
+                      <td className="px-4 py-3">
                         <span
-                          className={`inline-block px-2 py-0.5 rounded-full text-[11px] font-semibold ${sh.active
+                          className={`inline-block rounded-full px-2 py-0.5 text-[11px] font-semibold tracking-wide shadow-sm ${sh.active
                             ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300"
                             : "bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300"
                             }`}
                         >
-                          {!sh.endTime ? "Activo" : "Completado"}
+                          {sh.active ? "Activo" : "Completado"}
                         </span>
                       </td>
-                      <td className="px-4 py-2 text-center">{shiftSales.length}</td>
-                      <td className="px-4 py-2 font-semibold text-emerald-600 dark:text-emerald-400">
+
+                      {/* Cantidad de ventas */}
+                      <td className="px-4 py-3 text-center text-slate-800 dark:text-slate-200">{shiftSales.length}</td>
+
+                      {/* Total vendido */}
+                      <td className="px-4 py-3 font-semibold text-emerald-600 dark:text-emerald-400">
                         ${formatPrice(total)}
                       </td>
-                      {/* NUEVO: MÉTODOS DE PAGO */}
-                      <td className="px-4 py-2 text-xs">
-                        <div className="flex flex-wrap gap-1">
-                          {[
-                            { k: "cash", label: "Efectivo", style: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300" },
-                            { k: "transfer", label: "Transfer", style: "bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300" },
-                            { k: "card", label: "Tarjeta", style: "bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300" },
-                          ]
-                            .filter(({ k }) => paymentsByMethod[k])
-                            .map(({ k, label, style }) => (
-                              <div
-                                key={k}
-                                className={`inline-flex items-center rounded-full px-2 py-0.5 font-medium text-[11px] ${style}`}
-                              >
-                                {label}: ${formatPrice(paymentsByMethod[k])}
-                              </div>
-                            ))}
-                        </div>
+
+                      {/* Métodos de pago */}
+                      <td className="px-4 py-3 text-xs space-y-1">
+                        {Object.entries(paymentsByMethod).map(([k, amount]) => (
+                          <div
+                            key={k}
+                            className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${getPaymentMethodClass(k)}`}
+                          >
+                            {translatePaymentMethod(k)}: ${formatPrice(amount)}
+                          </div>
+                        ))}
                       </td>
-                      <td className="px-4 py-2 font-semibold text-sky-700 dark:text-sky-400">
+
+                      {/* Guardado */}
+                      <td className="px-4 py-3 font-semibold text-sky-700 dark:text-sky-400">
                         ${formatPrice(montoGuardado)}
                       </td>
 
-                      {/* NUEVO: CAJA */}
-                      <td className="px-4 py-2 text-xs leading-4">
-                        <div>Apertura: ${formatPrice(sh.startCash || 0)}</div>
-                        <div>Cierre: {sh.endCash != null ? `$${formatPrice(sh.endCash)}` : "—"}</div>
+                      {/* Caja */}
+                      <td className="px-4 py-3 text-xs leading-5 text-slate-700 dark:text-slate-300">
+                        <div>Apertura: <span className="font-medium">${formatPrice(sh.startCash || 0)}</span></div>
+                        <div>Cierre: <span className="font-medium">{sh.endCash != null ? `$${formatPrice(sh.endCash)}` : "—"}</span></div>
                       </td>
-                      <td className="px-4 py-2">
+
+                      {/* Botón detalle */}
+                      <td className="px-4 py-3">
                         <button
                           onClick={() => openDetailsModal(sh)}
-                          className="p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-700"
+                          className="p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-700 transition"
                         >
                           <FileText className="h-5 w-5 text-sky-600 dark:text-sky-400" />
                         </button>
                       </td>
                     </tr>
+
                   );
                 })
               ) : (
@@ -537,7 +552,7 @@ function DetailsModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
-      <div className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-xl bg-white/80 dark:bg-slate-800/80 shadow-xl ring-1 ring-slate-200 dark:ring-slate-700 animate-scale-in">
+      <div className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-xl bg-white dark:bg-slate-800/80 shadow-xl ring-1 ring-slate-200 dark:ring-slate-700 animate-scale-in">
         {/* header */}
         <header className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-700">
           <div>
@@ -619,39 +634,47 @@ function DetailsModal({
             </h3>
             {getShiftSales(shift.id).length ? (
               <div className="overflow-x-auto rounded-lg ring-1 ring-slate-200 dark:ring-slate-700">
-                <table className="min-w-full text-xs">
-                  <thead className="bg-slate-100 dark:bg-slate-700/70">
+                <table className="min-w-full text-sm border-separate border-spacing-0">
+                  <thead className="bg-slate-100 text-[11px] text-slate-500 uppercase tracking-wide border-y border-slate-200">
                     <tr>
                       {["Hora", "Detalle", "Método", "Total"].map((h) => (
-                        <th key={h} className="px-3 py-2 text-left font-semibold">
+                        <th
+                          key={h}
+                          className="px-4 py-3 text-left font-semibold whitespace-nowrap"
+                        >
                           {h}
                         </th>
                       ))}
                     </tr>
                   </thead>
+
                   <tbody>
                     {getShiftSales(shift.id).map((s) => (
                       <tr
                         key={s.id}
-                        className="even:bg-slate-50/60 dark:even:bg-slate-800/30"
+                        className="group transition"
                       >
-                        <td className="px-3 py-1.5 whitespace-nowrap">
+                        {/* Columna izquierda azul suave al hacer hover */}
+                        <td className="relative px-4 py-3 whitespace-nowrap font-semibold text-slate-700 bg-white align-top group-hover:before:content-[''] group-hover:before:absolute group-hover:before:inset-y-0 group-hover:before:left-0 group-hover:before:w-1 group-hover:before:bg-sky-500 ">
                           {new Date(s.timestamp).toLocaleTimeString()}
                         </td>
-                        <td className="px-3 py-1.5">
+
+                        {/* Detalle */}
+                        <td className="px-4 py-3 bg-white align-top text-slate-700 space-y-1">
                           {s.items.map((it, i) => (
                             <div key={i}>
-                              {it.quantity}× {it.productName} – $
-                              {formatPrice(it.total)} -
-                              <b>
-                                [QTY: {it?.stock == 'null' ? 'NO' : it?.stock}]
-                              </b>
+                              <span className="font-medium">{it.quantity}× {it.productName}</span>{" "}
+                              <span className="text-xs text-slate-500">
+                                – ${formatPrice(it.total)} [Stock: {it?.stock === "null" ? "NO" : it?.stock}]
+                              </span>
                             </div>
                           ))}
                         </td>
-                        <td className="px-3 py-1.5">
+
+                        {/* Método */}
+                        <td className="px-4 py-3 bg-white align-top whitespace-nowrap">
                           <span
-                            className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-medium ${getPaymentMethodClass(
+                            className={`inline-block px-2 py-0.5 rounded-full text-[11px] font-medium ${getPaymentMethodClass(
                               s.paymentMethod === "mercadopago" ? "transfer" : s.paymentMethod
                             )}`}
                           >
@@ -660,13 +683,16 @@ function DetailsModal({
                             )}
                           </span>
                         </td>
-                        <td className="px-3 py-1.5 font-medium">
+
+                        {/* Total */}
+                        <td className="px-4 py-3 bg-white align-top font-bold text-right text-slate-800 whitespace-nowrap">
                           ${formatPrice(s.total)}
                         </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
+
               </div>
             ) : (
               <p className="text-slate-600 dark:text-slate-400">Sin ventas registradas.</p>
