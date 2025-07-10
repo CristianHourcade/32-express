@@ -581,7 +581,7 @@ export default function NewSalePage() {
               apikey: ANGEL_CRISTIAN_APIKEY,
               apitoken: ANGEL_CRISTIAN_APITOKEN,
             }
-            fetch("/api/facturar", {
+            fetch("https://32express-factura.vercel.app/api/facturar", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify(FacturaConFACTURADOR),
