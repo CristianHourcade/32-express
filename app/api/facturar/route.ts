@@ -1,23 +1,30 @@
-import { NextRequest, NextResponse } from "next/server";
+export const runtime = "nodejs";
 
-export async function POST(request: NextRequest) {
-  console.log("[API] POST /api/facturar");
+import { NextResponse } from "next/server";
 
+export async function POST(req: Request) {
   try {
-    const data = await request.json();
-    return NextResponse.json({
-      ok: true,
-      received: data,
-      env: process.env.NODE_ENV,
-    });
-  } catch (err) {
-    return NextResponse.json(
-      { error: "Error procesando el body", detail: String(err) },
-      { status: 500 }
-    );
-  }
-}
+    console.log("[API] POST recibido en /api/facturar");
 
-export function GET() {
-  return NextResponse.json({ message: "GET /api/facturar funciona" });
+    const body = await req.json();
+    console.log("[API] Body recibido:", body);
+
+    const res = await fetch("https://www.tusfacturas.app/app/api/v2/facturacion/nuevo", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+
+    console.log("[API] Response status:", res.status);
+
+    const data = await res.json();
+    console.log("[API] Data recibida:", data);
+
+    return NextResponse.json(data);
+  } catch (error: any) {
+    console.error("[API ERROR]", error?.message || error);
+    return NextResponse.json({ error: "Error interno en el servidor", details: error?.message || error }, { status: 500 });
+  }
 }
