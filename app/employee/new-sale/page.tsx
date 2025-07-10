@@ -656,7 +656,7 @@ export default function NewSalePage() {
     cash: "💵 Efectivo",
     card: "💳 Tarjeta",
     transfer: "🏦 Transferencia",
-    rappi: "📲 QR / Rappi",
+    rappi: "📲 Rappi",
   };
 
 
