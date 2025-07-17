@@ -1,3 +1,7 @@
 import FaltantesPage from "@/components/pages/faltantes";
 
-export default FaltantesPage;
+const Faltantes = () => {
+    return (<FaltantesPage />)
+};
+
+export default Faltantes;
