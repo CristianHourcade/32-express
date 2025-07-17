@@ -636,6 +636,7 @@ export default function NewSalePage() {
   const scannerInputRef = useRef<HTMLInputElement>(null);
   const [scannerValue, setScannerValue] = useState("");
   const debouncedScannerValue = useDebounce(scannerValue, 250);
+  const amountGivenRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const handleBlur = () => {
@@ -872,6 +873,7 @@ export default function NewSalePage() {
 
                     {/* Input */}
                     <input
+                      ref={amountGivenRef}
                       type="number"
                       placeholder="Ej: 5000"
                       className={`w-full border px-4 py-3 rounded-lg text-lg shadow-sm focus:outline-none focus:ring-2 ${typeof change === "number" && change < 0
@@ -882,6 +884,16 @@ export default function NewSalePage() {
                       onChange={(e) => {
                         const val = parseFloat(e.target.value);
                         setAmountGiven(isNaN(val) ? "" : val);
+                      }}
+                      onFocus={() => {
+                        // ❌ Quitar foco del input del escáner
+                        scannerInputRef.current?.blur();
+                      }}
+                      onBlur={() => {
+                        // ✅ Volver a enfocar el input del escáner después de un pequeño delay
+                        setTimeout(() => {
+                          scannerInputRef.current?.focus();
+                        }, 100);
                       }}
                     />
 
