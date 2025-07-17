@@ -16,6 +16,7 @@ import {
   X,
   UserIcon,
   Activity,
+  Airplay,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 
@@ -26,9 +27,9 @@ const employeeItems = [
 ];
 
 const supervisorItems = [
-  { name: "Stock", href: "/employee/stock", icon: Save },
   { name: "Inventario", href: "/employee/productos", icon: Package2Icon },
   { name: "Actividad", href: "/employee/actividad", icon: Activity },
+  { name: "Faltantes", href: "/employee/faltantes", icon: Airplay },
 ];
 
 export default function EmployeeNavbar() {

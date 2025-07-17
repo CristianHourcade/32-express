@@ -27,6 +27,7 @@ import {
   Award,
   Save,
   Package2Icon,
+  Airplay,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
@@ -42,6 +43,7 @@ const navItems = [
   { name: "Actividad", href: "/admin/actividad", icon: Activity },
   { name: "Stock", href: "/admin/stock", icon: Award },
   { name: "Reservas", href: "/admin/savings", icon: Save },
+  { name: "Faltantes", href: "/admin/faltantes", icon: Airplay},
 ]
 
 export default function AdminNavbar() {

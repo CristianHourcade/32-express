@@ -267,3 +267,7 @@ body {
     @apply bg-orange-100 dark:bg-orange-900/30 text-orange-800 dark:text-orange-400;
   }
 }
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
