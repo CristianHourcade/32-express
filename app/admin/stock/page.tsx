@@ -1,163 +1,54 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
-import { Check, ClipboardCopy } from "lucide-react";
 
-/* ═════════════ MULTI‑SELECT ═════════════ */
-function MultiSelectDropdown({
-  options,
-  selectedOptions,
-  onChange,
-  placeholder = "Categorías",
-}: {
-  options: string[];
-  selectedOptions: string[];
-  onChange: (selected: string[]) => void;
-  placeholder?: string;
-}) {
-  const [isOpen, setIsOpen] = useState(false);
-  const toggle = (opt: string) => {
-    const next = selectedOptions.includes(opt)
-      ? selectedOptions.filter((o) => o !== opt)
-      : [...selectedOptions, opt];
-    onChange(next);
-  };
-  return (
-    <div className="relative">
-      <button
-        type="button"
-        onClick={() => setIsOpen(!isOpen)}
-        className="input min-w-[140px] rounded border shadow-sm text-xs px-2 py-1 bg-white dark:bg-slate-800"
-      >
-        {selectedOptions.length ? selectedOptions.join(", ") : placeholder}
-      </button>
-
-      {isOpen && (
-        <div className="absolute z-[9999] mt-1 w-max min-w-[180px] rounded border bg-white dark:bg-slate-800 shadow">
-          <div className="max-h-60 overflow-y-auto p-1">
-            {options.map((opt) => (
-              <label
-                key={opt}
-                className="flex items-center gap-2 px-2 py-1 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 text-sm"
-              >
-                <input
-                  type="checkbox"
-                  checked={selectedOptions.includes(opt)}
-                  onChange={() => toggle(opt)}
-                />
-                {opt}
-              </label>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-/* ═════════════ HELPERS ═════════════ */
+// Paginación genérica
 async function fetchAll(
   query: (from: number, to: number) => Promise<{ data: any[] | null; error: any }>
 ) {
   const pageSize = 1000;
-  let page = 0,
-    done = false,
-    all: any[] = [];
-  while (!done) {
+  let page = 0;
+  const all: any[] = [];
+  while (true) {
     const { data, error } = await query(page * pageSize, (page + 1) * pageSize - 1);
-    if (error) {
-      console.error(error);
-      break;
-    }
-    if (data) {
-      all = all.concat(data);
-      if (data.length < pageSize) done = true;
-      else page++;
-    } else done = true;
+    if (error || !data || data.length === 0) break;
+    all.push(...data);
+    if (data.length < pageSize) break;
+    page++;
   }
   return all;
 }
 
+// Carga negocios
 const loadBusinesses = async () => {
-  const { data, error } = await supabase.from("businesses").select("*").order("name");
-  if (error) {
-    console.error(error);
-    return [];
-  }
-  return data ?? [];
+  const { data, error } = await supabase.from("businesses").select("id,name").order("name");
+  return error ? [] : data ?? [];
 };
 
-const loadSales = async (businessId: string, days: number) => {
+// Carga ventas sin join a productos
+const loadSales = async (bizId: string, days: number) => {
   const since = new Date(Date.now() - days * 86400000).toISOString();
-
   return fetchAll((from, to) =>
     supabase
       .from("sales")
       .select(`
-        id,
-        timestamp,
         payment_method,
-        sale_items (
-          quantity,
-          promotion_id,
-          total,
-          product_id,
-          product_master_id,
-          products(name)
-        )
+        sale_items(total, product_master_id)
       `)
-      .eq("business_id", businessId)
-      .gte("timestamp", since) // FILTRA EN LA DB, no en frontend
-      .order("timestamp", { ascending: false })
+      .eq("business_id", bizId)
+      .gte("timestamp", since)
       .range(from, to)
   );
 };
 
-const loadPromotionsByIds = async (ids: string[]) => {
-  if (!ids.length) return [];
-
-  const { data, error } = await supabase
-    .from("promotions")
-    .select("id, name, price, products")
-    .in("id", ids);
-
-  if (error) {
-    console.error("Error loading promotions:", error);
-    return [];
-  }
-
-  return data ?? [];
-};
-
-const loadProductMasters = async () => {
-  return fetchAll((from, to) =>
-    supabase
-      .from("products_master")
-      .select("id, name")
-      .range(from, to)
-  );
-};
-const loadMasterStocks = async (businessId: string) =>
+// Carga maestro de productos
+const loadProductMasters = async () =>
   fetchAll((from, to) =>
-    supabase
-      .from("business_inventory")
-      .select("product_id, stock")
-      .eq("business_id", businessId)
-      .range(from, to)
+    supabase.from("products_master").select("id,name").range(from, to)
   );
 
-
-const loadProducts = async (businessId: string) =>
-  fetchAll((from, to) =>
-    supabase
-      .from("products")
-      .select("id, name, stock") // solo lo necesario
-      .eq("business_id", businessId)
-      .range(from, to)
-  );
-
-/* ═════════════ CONST ═════════════ */
+// Categorías fijas
 const CATEGORIES = [
   "ALMACEN",
   "CIGARRILLOS",
@@ -170,514 +61,195 @@ const CATEGORIES = [
   "HIGIENE",
   "ALCOHOL",
 ];
-
 function extractCategory(name: string) {
-  const parts = name.trim().split(" ");
-  const cat = parts[0].toUpperCase();
-  if (parts.length > 1 && CATEGORIES.includes(cat)) {
-    return { category: cat, baseName: parts.slice(1).join(" ") };
-  }
-  return { category: "SIN CATEGORIA", baseName: name };
+  const cat = name.trim().split(" ")[0].toUpperCase();
+  return CATEGORIES.includes(cat) ? cat : "SIN CATEGORIA";
 }
 
-const formatPrice = (n: number | null | undefined) =>
-  typeof n === "number" && !isNaN(n)
-    ? n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-    : "0.00";
+const formatPrice = (n: number) =>
+  n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-
-/* ═════════════ PAGE ═════════════ */
 export default function TopProductsPage() {
-  /* ---------- state ---------- */
-  const [businesses, setBusinesses] = useState<any[]>([]);
+  const [businesses, setBusinesses] = useState<{ id: string; name: string }[]>([]);
   const [selectedBiz, setSelectedBiz] = useState("");
   const [sales, setSales] = useState<any[]>([]);
-  const [products, setProducts] = useState<any[]>([]);
+  const [productMap, setProductMap] = useState<Map<string, string>>(new Map());
   const [daysFilter, setDaysFilter] = useState(7);
-  const [selectedCats, setSelectedCats] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
-  const [copied, setCopied] = useState(false);
-  const [sortCol, setSortCol] = useState<"qty" | "revenue" | "stock">("qty");
-  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
-  const [promotions, setPromotions] = useState<any[]>([]);
-  const [productMasterMap, setProductMasterMap] = useState<Map<string, string>>(new Map());
-  const [masterStockMap, setMasterStockMap] = useState<Map<string, number>>(new Map());
 
-  /* ---------- load data ---------- */
-  useEffect(() => {
-    (async () => setBusinesses(await loadBusinesses()))();
-  }, []);
+  // Modal top productos
+  const [showModal, setShowModal] = useState(false);
+  const [modalCategory, setModalCategory] = useState("");
+  const [modalItems, setModalItems] = useState<Array<{ name: string; revenue: number }>>([]);
 
+  // Inicial: cargar negocios
+  useEffect(() => { (async () => setBusinesses(await loadBusinesses()))(); }, []);
 
+  // Al cambiar negocio o días: cargar ventas + maestros
   useEffect(() => {
     if (!selectedBiz) return;
-
     (async () => {
       setLoading(true);
-
-      const [s, p, masters, inventory] = await Promise.all([
+      const [sals, masters] = await Promise.all([
         loadSales(selectedBiz, daysFilter),
-        loadProducts(selectedBiz),
         loadProductMasters(),
-        loadMasterStocks(selectedBiz),
       ]);
-      setSales(s);
-      setProducts(p);
-
-      const masterMap = new Map<string, string>();
-      masters.forEach((m) => masterMap.set(m.id, m.name));
-      setProductMasterMap(masterMap);
-
-      const stockMap = new Map<string, number>();
-      inventory.forEach((inv) => stockMap.set(inv.product_id, inv.stock));
-      setMasterStockMap(stockMap);
-
-      const promoIds = s
-        .flatMap((sale) => sale.sale_items ?? [])
-        .filter((item) => item.promotion_id)
-        .map((item) => item.promotion_id);
-
-      const uniquePromoIds = Array.from(new Set(promoIds));
-      const promos = await loadPromotionsByIds(uniquePromoIds);
-      setPromotions(promos);
-
+      setSales(sals);
+      const map = new Map<string, string>();
+      masters.forEach((m: any) => map.set(m.id, m.name));
+      setProductMap(map);
       setLoading(false);
     })();
   }, [selectedBiz, daysFilter]);
 
-  const categorySummary = useMemo(() => {
-    if (!sales.length) {
-      return {
-        rows: [],
-        totals: {
-          revenue: 0,
-          cash: 0,
-          transfer: 0,
-          card: 0,
-          rappi: 0,
-        },
-      };
-    }
-
-    const totalRevenue = sales.reduce((sum, sale) => {
-      const items = sale.sale_items ?? [];
-      return sum + items.reduce((s, i) => s + i.total, 0);
-    }, 0);
-
-    const summaryMap = new Map<
-      string,
-      {
-        revenue: number;
-        percent: number;
-        cash: number;
-        card: number;
-        transfer: number;
-        rappi: number;
-      }
-    >();
+  // Resumen por categoría
+  const { rows, totals } = useMemo(() => {
+    const summary = new Map<string, { revenue: number; cash: number; transfer: number; card: number }>();
+    let totalRevenue = 0;
 
     sales.forEach((sale) => {
-      const items = sale.sale_items ?? [];
       const method = sale.payment_method === "mercadopago" ? "transfer" : sale.payment_method;
-
-      items.forEach((item) => {
-        const name =
-          item.products?.name || productMasterMap.get(item.product_master_id) || "—";
-        const { category } = extractCategory(name);
-
-        if (!summaryMap.has(category)) {
-          summaryMap.set(category, {
-            revenue: 0,
-            percent: 0,
-            cash: 0,
-            card: 0,
-            transfer: 0,
-            rappi: 0,
-          });
-        }
-
-        const m = summaryMap.get(category)!;
-        m.revenue += item.total;
-        m[method] += item.total;
+      sale.sale_items?.forEach((item: any) => {
+        const name = productMap.get(item.product_master_id) ?? "—";
+        const cat = extractCategory(name);
+        const value = item.total;
+        totalRevenue += value;
+        if (!summary.has(cat)) summary.set(cat, { revenue: 0, cash: 0, transfer: 0, card: 0 });
+        const entry = summary.get(cat)!;
+        entry.revenue += value;
+        entry[method] += value;
       });
     });
 
-    const totals = {
-      revenue: 0,
-      cash: 0,
-      transfer: 0,
-      card: 0,
-      rappi: 0,
-    };
+    const resultRows = Array.from(summary.entries()).map(([category, v]) => ({
+      category,
+      ...v,
+      percent: totalRevenue ? (v.revenue / totalRevenue) * 100 : 0,
+    })).sort((a, b) => b.revenue - a.revenue);
 
-    summaryMap.forEach((v) => {
-      totals.revenue += v.revenue;
-      totals.cash += v.cash;
-      totals.transfer += v.transfer;
-      totals.card += v.card;
-      totals.rappi += v.rappi;
-    });
-
-    return {
-      rows: Array.from(summaryMap.entries())
-        .map(([category, values]) => ({
-          category,
-          ...values,
-          percent: totalRevenue ? (values.revenue / totalRevenue) * 100 : 0,
-        }))
-        .sort((a, b) => b.revenue - a.revenue),
-      totals,
-    };
-  }, [sales, productMasterMap]);
-  /* ---------- compute top ---------- */
-  const top = useMemo(() => {
-    if (!selectedBiz) return { products: [] };
-
-    const now = Date.now();
-
-    const recentSales = sales.filter(
-      (s) => (now - new Date(s.timestamp).getTime()) / 86400000 <= daysFilter
+    const total = resultRows.reduce(
+      (acc, cur) => {
+        acc.revenue += cur.revenue;
+        acc.cash += cur.cash;
+        acc.transfer += cur.transfer;
+        acc.card += cur.card;
+        return acc;
+      },
+      { revenue: 0, cash: 0, transfer: 0, card: 0 }
     );
 
-    const map = new Map<
-      string,
-      { id: string; name: string; qty: number; revenue: number; stock: number | null; cat: string }
-    >();
+    return { rows: resultRows, totals: total };
+  }, [sales, productMap]);
 
-    // 🔹 1. Ventas normales
-    recentSales.forEach((sale) =>
+  // Maneja click en categoría
+  const handleCategoryClick = (category: string) => {
+    const prodSummary = new Map<string, number>();
+    sales.forEach((sale) => {
       sale.sale_items?.forEach((item: any) => {
-        if (!item.promotion_id) {
-          const key = item.product_id || item.product_master_id;
-          if (!key) return;
-
-          const prod = products.find((p) => p.id === item.product_id);
-          let stock: number | null = null;
-          if (item.product_id) {
-            stock = prod?.stock ?? null;
-          } else if (item.product_master_id) {
-            stock = masterStockMap.get(item.product_master_id) ?? null;
-          }
-          const name =
-            item.products?.name ||
-            productMasterMap.get(item.product_master_id) ||
-            prod?.name ||
-            "—";
-
-          if (!map.has(key)) {
-            const { category, baseName } = extractCategory(name);
-            map.set(key, {
-              id: key,
-              name: baseName,
-              cat: category,
-              qty: 0,
-              revenue: 0,
-              stock,
-            });
-          }
-
-          const e = map.get(key)!;
-          e.qty += item.quantity;
-          e.revenue += item.total;
+        const name = productMap.get(item.product_master_id) ?? "—";
+        if (extractCategory(name) === category) {
+          prodSummary.set(name, (prodSummary.get(name) || 0) + item.total);
         }
-      })
-    );
-
-
-
-    // 🔹 2. Promociones
-    recentSales.forEach((sale) =>
-      sale.sale_items?.forEach((item: any) => {
-        if (!item.promotion_id) return;
-
-        const promo = promotions.find((p) => p.id === item.promotion_id);
-        if (!promo?.products) return;
-
-        const totalQty = promo.products.reduce((sum, p) => sum + p.qty, 0) || 1;
-        const promoUnitValue = promo.price / totalQty;
-
-        promo.products.forEach((promoItem: any) => {
-          const key = promoItem.id;
-          const qty = promoItem.qty ?? 1;
-          const revenue = promoUnitValue * qty;
-
-          const prod = products.find((p) => p.id === key);
-          const stock =
-            prod?.stock ?? masterStockMap.get(key) ?? null;
-          const name =
-            productMasterMap.get(key) ?? prod?.name ?? "—";
-
-          if (!map.has(key)) {
-            const { category, baseName } = extractCategory(name);
-            map.set(key, {
-              id: key,
-              name: baseName,
-              cat: category,
-              qty: 0,
-              revenue: 0,
-              stock,
-            });
-          }
-
-          const e = map.get(key)!;
-          e.qty += qty;
-          e.revenue += revenue;
-        });
-      })
-    );
-
-    let arr = Array.from(map.values());
-    if (selectedCats.length) arr = arr.filter((p) => selectedCats.includes(p.cat));
-
-    arr.sort((a, b) => {
-      const diff = (a[sortCol] ?? -Infinity) - (b[sortCol] ?? -Infinity);
-      return sortDir === "asc" ? diff : -diff;
+      });
     });
-
-
-
-
-
-    return { products: arr };
-  }, [
-    sales,
-    products,
-    promotions,
-    daysFilter,
-    selectedCats,
-    selectedBiz,
-    sortCol,
-    sortDir,
-  ]);
-
-  /* ---------- copy list ---------- */
-  const copyList = () => {
-    if (!selectedBiz) return;
-    const bizName = businesses.find((b) => b.id === selectedBiz)?.name ?? "NEGOCIO";
-    const header = `*${bizName.toUpperCase()} — Ventas últimos ${daysFilter} días*`;
-
-    const grouped = new Map<string, { name: string; qty: number }[]>();
-    top.products?.forEach((p) => {
-      if (!grouped.has(p.cat)) grouped.set(p.cat, []);
-      grouped.get(p.cat)!.push({ name: p.name.toUpperCase(), qty: p.qty });
-    });
-
-    const lines: string[] = [header, ""];
-    grouped.forEach((items, cat) => {
-      lines.push(`*${cat}*`);
-      items.forEach((i) => lines.push(`• ${i.name} - *${i.qty}*`));
-      lines.push("");
-    });
-
-    navigator.clipboard.writeText(lines.join("\n"));
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    const top10 = Array.from(prodSummary.entries())
+      .map(([name, revenue]) => ({ name, revenue }))
+      .sort((a, b) => b.revenue - a.revenue)
+      .slice(0, 10);
+    setModalCategory(category);
+    setModalItems(top10);
+    setShowModal(true);
   };
-
-  /* ───────── UI ───────── */
-  const selectedBizName = businesses.find((b) => b.id === selectedBiz)?.name ?? "";
 
   return (
     <div className="p-6 space-y-8">
-      {/* ───────── Titular ───────── */}
       <header className="space-y-1">
-        <h1 className="text-2xl md:text-3xl font-bold tracking-tight">
-          Productos más vendidos
-        </h1>
-        {selectedBiz && (
-          <p className="text-lg font-semibold text-sky-600 dark:text-sky-400">
-            {selectedBizName}
-          </p>
-        )}
+        <h1 className="text-2xl font-bold">Facturación por categoría</h1>
+        {selectedBiz && <p className="text-lg text-sky-600">{businesses.find(b => b.id === selectedBiz)?.name}</p>}
       </header>
 
-      {/* ───────── Controles ───────── */}
-      <div className="flex flex-wrap gap-3 items-center">
-        <select
-          className="appearance-none bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-full px-3 py-1.5 text-xs shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 w-[160px]"
-          value={selectedBiz}
-          onChange={(e) => {
-            setSelectedBiz(e.target.value);
-            setSales([]);
-            setProducts([]);
-          }}
-        >
+      <div className="flex gap-3">
+        <select value={selectedBiz} onChange={e => setSelectedBiz(e.target.value)} className="rounded border px-3 py-1 text-xs">
           <option value="">Negocio</option>
-          {businesses.map((b) => (
-            <option key={b.id} value={b.id}>
-              {b.name}
-            </option>
-          ))}
+          {businesses.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
         </select>
-
-        <select
-          className="appearance-none bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-full px-3 py-1.5 text-xs shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 w-[140px]"
-          value={daysFilter}
-          onChange={(e) => setDaysFilter(Number(e.target.value))}
-        >
-          {[1, 2, 3, 7, 14, 30].map((d) => (
-            <option key={d} value={d}>
-              Últimos {d} días
-            </option>
-          ))}
+        <select value={daysFilter} onChange={e => setDaysFilter(+e.target.value)} className="rounded border px-3 py-1 text-xs">
+          {[1,3,7,14,30].map(d => <option key={d} value={d}>Últimos {d} días</option>)}
         </select>
-
-        <MultiSelectDropdown
-          options={[...CATEGORIES, "SIN CATEGORIA"]}
-          selectedOptions={selectedCats}
-          onChange={setSelectedCats}
-        />
-
-        <button
-          disabled={!top.products?.length}
-          onClick={copyList}
-          className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-medium rounded-full px-4 py-2 transition focus:outline-none focus:ring-2 focus:ring-indigo-500"
-        >
-          {copied ? (
-            <>
-              <Check size={16} /> Copiado
-            </>
-          ) : (
-            <>
-              <ClipboardCopy size={16} /> Copiar faltantes
-            </>
-          )}
-        </button>
       </div>
 
-      {/* ───────── Tablas ───────── */}
-      <div className="flex flex-col lg:flex-row gap-6">
-        {/* Tabla productos (60%) */}
-        <div className="w-full lg:w-[60%] bg-white dark:bg-slate-800 rounded-xl shadow ring-1 ring-slate-200 dark:ring-slate-700">
-          <div className="overflow-x-auto rounded-xl">
-            <table className="min-w-full text-sm">
-              <thead className="bg-slate-50 dark:bg-slate-700 sticky top-0 z-10 text-[11px] uppercase tracking-wide select-none">
-                <tr className="divide-x divide-slate-200 dark:divide-slate-600">
-                  <th className="px-4 py-3 text-left font-semibold">Categoría</th>
-                  <th className="px-4 py-3 text-left font-semibold">Producto</th>
-                  <th
-                    onClick={() => {
-                      if (sortCol === "qty") setSortDir(sortDir === "asc" ? "desc" : "asc");
-                      else {
-                        setSortCol("qty");
-                        setSortDir("desc");
-                      }
-                    }}
-                    className="px-4 py-3 font-semibold cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-600/30"
-                  >
-                    Unidades&nbsp;
-                    {sortCol === "qty" && (sortDir === "asc" ? "↑" : "↓")}
-                  </th>
-                  <th
-                    onClick={() => {
-                      if (sortCol === "revenue") setSortDir(sortDir === "asc" ? "desc" : "asc");
-                      else {
-                        setSortCol("revenue");
-                        setSortDir("desc");
-                      }
-                    }}
-                    className="px-4 py-3 font-semibold cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-600/30"
-                  >
-                    Facturado&nbsp;
-                    {sortCol === "revenue" && (sortDir === "asc" ? "↑" : "↓")}
-                  </th>
-                  <th
-                    onClick={() => {
-                      if (sortCol === "stock") setSortDir(sortDir === "asc" ? "desc" : "asc");
-                      else {
-                        setSortCol("stock");
-                        setSortDir("desc");
-                      }
-                    }}
-                    className="px-4 py-3 font-semibold cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-600/30"
-                  >
-                    Stock&nbsp;
-                    {sortCol === "stock" && (sortDir === "asc" ? "↑" : "↓")}
-                  </th>
+      <div className="bg-white rounded-xl shadow overflow-x-auto">
+        <table className="min-w-full text-sm">
+          <thead className="bg-slate-100 text-xs uppercase">
+            <tr>
+              <th className="px-4 py-2 text-left">Categoría</th>
+              <th className="px-4 py-2 text-right">Total</th>
+              <th className="px-4 py-2 text-right">Efectivo</th>
+              <th className="px-4 py-2 text-right">Transfer</th>
+              <th className="px-4 py-2 text-right">Tarjeta</th>
+              <th className="px-4 py-2 text-right">% Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            {loading ? (
+              <tr><td colSpan={6} className="py-4 text-center">Cargando...</td></tr>
+            ) : rows.length === 0 ? (
+              <tr><td colSpan={6} className="py-4 text-center">Sin datos</td></tr>
+            ) : (
+              rows.map(cat => (
+                <tr key={cat.category} className="hover:bg-gray-50 cursor-pointer" onClick={() => handleCategoryClick(cat.category)}>
+                  <td className="px-4 py-2">{cat.category}</td>
+                  <td className="px-4 py-2 text-right font-semibold">$ {formatPrice(cat.revenue)}</td>
+                  <td className="px-4 py-2 text-right text-green-700">$ {formatPrice(cat.cash)}</td>
+                  <td className="px-4 py-2 text-right text-purple-700">$ {formatPrice(cat.transfer)}</td>
+                  <td className="px-4 py-2 text-right text-blue-700">$ {formatPrice(cat.card)}</td>
+                  <td className="px-4 py-2 text-right">{cat.percent.toFixed(1)}%</td>
                 </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
-                {!selectedBiz ? (
+              ))
+            )}
+          </tbody>
+          <tfoot className="bg-slate-200 text-sm font-semibold">
+            <tr>
+              <td className="px-4 py-2">TOTAL</td>
+              <td className="px-4 py-2 text-right">$ {formatPrice(totals.revenue)}</td>
+              <td className="px-4 py-2 text-right text-green-700">$ {formatPrice(totals.cash)}</td>
+              <td className="px-4 py-2 text-right text-purple-700">$ {formatPrice(totals.transfer)}</td>
+              <td className="px-4 py-2 text-right text-blue-700">$ {formatPrice(totals.card)}</td>
+              <td className="px-4 py-2 text-right">100%</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+
+      {/* Modal Top 10 Productos */}
+      {showModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
+          <div className="bg-white rounded-xl p-6 w-[90%] max-w-xl">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-xl font-bold">Top 10 en {modalCategory}</h2>
+              <button onClick={() => setShowModal(false)} className="text-xl font-semibold">×</button>
+            </div>
+            <div className="overflow-y-auto max-h-80">
+              <table className="w-full text-sm">
+                <thead className="border-b mb-2">
                   <tr>
-                    <td colSpan={5} className="py-8 text-center text-slate-500 dark:text-slate-400">
-                      Seleccioná un negocio para comenzar.
-                    </td>
+                    <th className="text-left pb-2">Producto</th>
+                    <th className="text-right pb-2">Facturación</th>
                   </tr>
-                ) : loading ? (
-                  <tr>
-                    <td colSpan={5} className="py-8 text-center text-slate-500 dark:text-slate-400">
-                      Cargando…
-                    </td>
-                  </tr>
-                ) : top.products?.length === 0 ? (
-                  <tr>
-                    <td colSpan={5} className="py-8 text-center text-slate-500 dark:text-slate-400">
-                      Sin resultados para los filtros seleccionados.
-                    </td>
-                  </tr>
-                ) : (
-                  top.products?.map((p) => (
-                    <tr key={p.id}
-                      className="hover:bg-slate-50 dark:hover:bg-slate-700/40 odd:bg-slate-50/40 dark:odd:bg-slate-800/30"
-                    >
-                      <td className="px-4 py-2">{p.cat}</td>
-                      <td className="px-4 py-2 font-medium">{p.name}</td>
-                      <td className="px-4 py-2">{p.qty}</td>
-                      <td className="px-4 py-2">
-                        <span className="font-semibold text-green-700">
-                          $ {formatPrice(p.revenue)}
-                        </span>
-                      </td>
-                      <td className="px-4 py-2">{p.stock ?? "—"}</td>
+                </thead>
+                <tbody>
+                  {modalItems.map((item, i) => (
+                    <tr key={i} className="hover:bg-gray-100">
+                      <td className="py-1">{item.name}</td>
+                      <td className="py-1 text-right font-semibold">$ {formatPrice(item.revenue)}</td>
                     </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
-
-        {/* Tabla resumen (40%) */}
-        <div className="w-full lg:w-[50%] bg-white dark:bg-slate-800 rounded-xl shadow ring-1 ring-slate-200 dark:ring-slate-700 ">
-          <div className="overflow-x-auto rounded-xl">
-            <table className="min-w-full text-sm">
-              <thead className="bg-slate-100 dark:bg-slate-700 text-[11px] uppercase tracking-wide select-none">
-                <tr>
-                  <th className="px-4 py-3 text-left font-semibold">Categoría</th>
-                  <th className="px-4 py-3 text-right font-semibold">Total</th>
-                  <th className="px-4 py-3 text-right font-semibold">Efectivo</th>
-                  <th className="px-4 py-3 text-right font-semibold">Transfer</th>
-                  <th className="px-4 py-3 text-right font-semibold">Tarjeta</th>
-                  <th className="px-4 py-3 text-right font-semibold">% Total</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
-                {categorySummary?.rows?.map((cat) => (
-                  <tr key={cat.category} className="hover:bg-slate-50 dark:hover:bg-slate-700/40">
-                    <td className="px-4 py-2">{cat.category}</td>
-                    <td className="px-4 py-2 text-right font-semibold">$ {formatPrice(cat.revenue)}</td>
-                    <td className="px-4 py-2 text-right text-emerald-700">$ {formatPrice(cat.cash)}</td>
-                    <td className="px-4 py-2 text-right text-purple-700">$ {formatPrice(cat.transfer)}</td>
-                    <td className="px-4 py-2 text-right text-indigo-700">$ {formatPrice(cat.card)}</td>
-                    <td className="px-4 py-2 text-right">{cat.percent.toFixed(1)}%</td>
-                  </tr>
-                ))}
-                <tr className="bg-slate-200 dark:bg-slate-700 font-semibold">
-                  <td className="px-4 py-2">TOTAL</td>
-                  <td className="px-4 py-2 text-right">$ {formatPrice(categorySummary.totals?.revenue)}</td>
-                  <td className="px-4 py-2 text-right text-emerald-700">$ {formatPrice(categorySummary.totals?.cash)}</td>
-                  <td className="px-4 py-2 text-right text-purple-700">$ {formatPrice(categorySummary.totals?.transfer)}</td>
-                  <td className="px-4 py-2 text-right text-indigo-700">$ {formatPrice(categorySummary.totals?.card)}</td>
-                  <td className="px-4 py-2 text-right">100%</td>
-                </tr>
-              </tbody>
-
-
-            </table>
-          </div>
-        </div>
-      </div>
+      )}
     </div>
   );
-
 }
