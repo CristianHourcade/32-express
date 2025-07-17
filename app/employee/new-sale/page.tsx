@@ -429,7 +429,6 @@ export default function NewSalePage() {
     }
   };
 
-
   /* ─ Complete sale ─ */
   const handleComplete = async () => {
     if (!activeShift || !cart.length) return;
@@ -634,6 +633,48 @@ export default function NewSalePage() {
   console.log(businessId)
   /* ───────────────────────────────────── UI ───────────────────────────────────── */
   const [showManualSearch, setShowManualSearch] = useState(false);
+  const scannerInputRef = useRef<HTMLInputElement>(null);
+  const [scannerValue, setScannerValue] = useState("");
+  const debouncedScannerValue = useDebounce(scannerValue, 250);
+
+  useEffect(() => {
+    const handleBlur = () => {
+      if (!showManualSearch) {
+        setTimeout(() => {
+          scannerInputRef.current?.focus();
+        }, 10);
+      }
+    };
+
+    const input = scannerInputRef.current;
+    if (input) input.addEventListener("blur", handleBlur);
+
+    return () => {
+      if (input) input.removeEventListener("blur", handleBlur);
+    };
+  }, [showManualSearch]);
+
+  useEffect(() => {
+    if (!debouncedScannerValue || showManualSearch) return;
+
+    const match = products.find(
+      (p) => p.code?.toLowerCase() === debouncedScannerValue.toLowerCase()
+    );
+
+    if (match) {
+      addToCart(match);
+    }
+
+    // Limpio siempre el input
+    setScannerValue("");
+  }, [debouncedScannerValue, products, showManualSearch]);
+
+  useEffect(() => {
+    if (!showManualSearch) {
+      scannerInputRef.current?.focus();
+    }
+  }, [showManualSearch]);
+
   if (loadingShifts) {
     return (
       <div className="flex justify-center items-center h-64">
@@ -662,8 +703,19 @@ export default function NewSalePage() {
 
   return (
     <div className="p-6 max-w-screen-xl mx-auto">
+      <input
+        ref={scannerInputRef}
+        type="text"
+        inputMode="numeric"
+        autoFocus
+        onChange={(e) => setScannerValue(e.target.value)}
+        value={scannerValue}
+        className="absolute top-0 left-0 w-0 h-0 opacity-0 pointer-events-none"
+      />
+
       <div className="bg-white rounded-xl shadow-lg overflow-hidden">
-        <div className="grid grid-cols-1 md:grid-cols-2 h-[calc(100vh-8rem)]">
+        <div className="grid grid-cols-1 md:grid-cols-2 h-[75vh]">
+
           {/* Panel izquierdo */}
           <div className="flex flex-col border-r">
             {/* Barra superior */}
