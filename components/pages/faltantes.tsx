@@ -160,17 +160,64 @@ export default function FaltantesPage() {
   };
 
   const copyToClipboard = () => {
-    const lines = [
-      `*FALTANTES — Últimos ${daysFilter} días*`,
-      "",
-      ...sortedFaltantes
-        .filter((f) => selectedRows.has(f.id))
-        .map((f) => `• ${f.name.toUpperCase()} - *${f.faltan}*`),
-    ];
+    // Buscamos el nombre del local seleccionado
+    const currentBiz = businesses.find((b) => b.id === selectedBiz);
+    const bizName = currentBiz ? currentBiz.name : "Local";
+
+    const lines = [];
+    // Título con nombre de local
+    lines.push(`*${bizName} — FALTANTES*`, "");
+
+    // Creamos el orden de categorías
+    const categoriesOrder = [...CATEGORIES, "OTROS"];
+    categoriesOrder.forEach((categoria) => {
+      const items = grouped[categoria] || [];
+      // Solo los seleccionados en esa categoría
+      const sel = items.filter((f) => selectedRows.has(f.id));
+      if (!sel.length) return;
+
+      // Encabezado de categoría
+      lines.push(`*${categoria}*`);
+      // Lista de productos
+      sel.forEach((f) => {
+        lines.push(`- ${f.name}: *${f.faltan}*`);
+      });
+      lines.push("");
+    });
+
+    // Copiamos al portapapeles
     navigator.clipboard.writeText(lines.join("\n"));
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
+  const [copiedMissing, setCopiedMissing] = useState(false);
+
+  const copyMissingOnly = () => {
+    const currentBiz = businesses.find((b) => b.id === selectedBiz);
+    const bizName = currentBiz ? currentBiz.name : "Local";
+
+    const lines = [];
+    lines.push(`*${bizName} — REPOSICIÓN SUGERIDA*`, "");
+
+    const categoriesOrder = [...CATEGORIES, "OTROS"];
+    categoriesOrder.forEach((categoria) => {
+      const items = grouped[categoria] || [];
+      // Solo con faltan > 0
+      const sel = items.filter((f) => f.faltan > 0);
+      if (!sel.length) return;
+
+      lines.push(`*${categoria}*`);
+      sel.forEach((f) => {
+        lines.push(`- ${f.name}: *${f.faltan}*`);
+      });
+      lines.push("");
+    });
+
+    navigator.clipboard.writeText(lines.join("\n"));
+    setCopiedMissing(true);
+    setTimeout(() => setCopiedMissing(false), 2000);
+  };
+
 
   const grouped = useMemo(() => {
     const groups = {};
@@ -230,6 +277,17 @@ export default function FaltantesPage() {
               <><Check size={16} /> Copiado</>
             ) : (
               <><ClipboardCopy size={16} /> Copiar seleccionados</>
+            )}
+          </button>
+          <button
+            disabled={!faltantes.some((f) => f.faltan > 0)}
+            onClick={copyMissingOnly}
+            className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-full text-sm"
+          >
+            {copiedMissing ? (
+              <><Check size={16} /> Copiado</>
+            ) : (
+              <><ClipboardCopy size={16} /> Copiar reposición</>
             )}
           </button>
         </div>
