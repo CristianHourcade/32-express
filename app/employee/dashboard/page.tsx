@@ -13,6 +13,7 @@ import Link from "next/link"
 import { createModuleLogger } from "@/lib/clientLogger"
 import { supabase } from "@/lib/supabase";
 import LoadingSpinner from "@/components/LoadingSpinner"
+import RankingCard from "./card"
 export interface ShiftPayload {
   employeeId: string;
   businessId: string;
@@ -40,6 +41,38 @@ interface Sale {
   sale_items: SaleItem[]
 }
 
+/* ========= FETCH HELPERS ========= */
+async function fetchAllPaginated(
+  queryFn: (from: number, to: number) => Promise<{ data: any[] | null; error: any }>
+): Promise<any[]> {
+  const pageSize = 1000;
+  let page = 0;
+  let acc: any[] = [];
+  for (; ;) {
+    const from = page * pageSize;
+    const to = from + pageSize - 1;
+    const { data, error } = await queryFn(from, to);
+    if (error) {
+      console.error(error);
+      break;
+    }
+    if (!data?.length) break;
+    acc = acc.concat(data);
+    if (data.length < pageSize) break;
+    page++;
+  }
+  return acc;
+}
+const loadSalesPaginated = async (businessId: string, from: Date, to: Date) =>
+  fetchAllPaginated((lo, hi) =>
+    supabase
+      .from("sales")
+      .select("*")
+      .eq("business_id", businessId)
+      .gte("timestamp", from.toISOString())
+      .lt("timestamp", to.toISOString())
+      .range(lo, hi)
+  );
 export async function startShift({ employeeId, businessId, start_cash }: ShiftPayload) {
   const { data, error } = await supabase
     .from("shifts")
@@ -375,22 +408,11 @@ export default function EmployeeDashboard() {
       const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
       const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
 
-      const allSales: Sale[] = [];
+      let allSales: Sale[] = [];
 
       for (const business of businesses) {
-        const { data, error } = await supabase
-          .from("sales")
-          .select("id, business_id, total, timestamp")
-          .eq("business_id", business.id)
-          .gte("timestamp", startOfMonth.toISOString())
-          .lt("timestamp", endOfMonth.toISOString());
-
-        if (error) {
-          console.error(`Error cargando ventas para negocio ${business.name}`, error);
-          continue;
-        }
-
-        if (data) allSales.push(...data as Sale[]);
+        const data = await loadSalesPaginated(business.id, startOfMonth, endOfMonth);
+        allSales.push(...(data as Sale[]));
       }
 
       setMonthlySales(allSales);
@@ -405,8 +427,9 @@ export default function EmployeeDashboard() {
     monthlySales.forEach(sale => {
       const businessId = sale.business_id
       if (!businessId) return
-      rankingMap.set(businessId, (rankingMap.get(businessId) || 0) + sale.total)
+      rankingMap.set(businessId, (rankingMap.get(businessId) || 0) + Number(sale.total))
     })
+
 
     const sorted = [...rankingMap.entries()]
       .sort((a, b) => b[1] - a[1])
@@ -497,80 +520,11 @@ export default function EmployeeDashboard() {
 
       {/* Ranking */}
       {businessRanking.length > 0 && (
-        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 border border-gray-200 dark:border-gray-700">
-          <h2 className="text-2xl font-bold mb-5 text-center text-indigo-700 dark:text-indigo-400">🏆 Ranking de Locales</h2>
-          <ul className="divide-y divide-gray-200 dark:divide-gray-700">
-            {businessRanking.map((biz, index) => {
-              const isCurrent = biz.id === currentBusiness?.id
-              const placeIcon =
-                index === 0 ? "🥇" :
-                  index === 1 ? "🥈" :
-                    index === 2 ? "🥉" : `#${index + 1}`
-
-              const currentTotal = monthlySales
-                .filter(s => s.business_id === biz.id)
-                .reduce((sum, s) => sum + s.total, 0)
-
-              const prevBiz = index > 0 ? businessRanking[index - 1] : null
-              const prevTotal = prevBiz
-                ? monthlySales
-                  .filter(s => s.business_id === prevBiz.id)
-                  .reduce((sum, s) => sum + s.total, 0)
-                : null
-
-              const percentToClimb =
-                isCurrent && prevTotal && currentTotal > 0
-                  ? Math.round(((prevTotal - currentTotal) / currentTotal) * 100)
-                  : null
-
-              const progress =
-                isCurrent && prevTotal && currentTotal > 0
-                  ? Math.min(100, Math.round((currentTotal / prevTotal) * 100))
-                  : null
-
-              return (
-                <li
-                  key={biz.id}
-                  className={`py-4 px-4 flex flex-col md:flex-row justify-between items-start md:items-center rounded-md transition hover:bg-indigo-50 dark:hover:bg-indigo-900/30 ${isCurrent ? "border-2 border-green-500 bg-green-50 dark:bg-green-900/20" : ""
-                    }`}
-                >
-                  <div className="flex items-center gap-3">
-                    <span className="text-2xl">{placeIcon}</span>
-                    <span className="font-medium text-lg text-gray-800 dark:text-white">{biz.name}</span>
-                  </div>
-
-                  <div className="mt-2 md:mt-0 md:text-right w-full md:w-auto">
-                    {isCurrent && (
-                      <div className="flex flex-col items-start md:items-end gap-1 w-full">
-                        <span className="text-sm text-green-700 dark:text-green-300 font-semibold bg-green-100 dark:bg-green-800 px-2 py-1 rounded">
-                          ⭐ Tu Local
-                        </span>
-                        {percentToClimb !== null && percentToClimb > 0 && (
-                          <>
-                            <span className="text-xs text-amber-600">
-                              🔥 Estás a solo <strong>{percentToClimb}%</strong> del próximo puesto
-                            </span>
-                            <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2.5 mt-2">
-                              <div
-                                className="bg-green-500 h-2.5 rounded-full transition-all duration-500"
-                                style={{ width: `${progress}%` }}
-                              />
-                            </div>
-                          </>
-                        )}
-                        {index === 0 && (
-                          <span className="text-xs text-blue-600 mt-1">
-                            👑 ¡Estás en la cima!
-                          </span>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </li>
-              )
-            })}
-          </ul>
-        </div>
+        <RankingCard
+          businesses={businesses}
+          currentBusinessId={currentBusiness?.id}
+          monthlySales={monthlySales}
+        />
       )}
 
       {/* Error message */}
