@@ -22,9 +22,13 @@ import {
   Check,
   AlertTriangle,
   Key,
+  Tag
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import LoadingSpinner from "@/components/LoadingSpinner";
+import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
+
 const ANGEL_CRISTIAN_USERTOKEN = process.env.NEXT_PUBLIC_ANGEL_CRISTIAN_USERTOKEN;
 const ANGEL_CRISTIAN_APIKEY = process.env.NEXT_PUBLIC_ANGEL_CRISTIAN_APIKEY;
 const ANGEL_CRISTIAN_APITOKEN = process.env.NEXT_PUBLIC_ANGEL_CRISTIAN_APITOKEN;
@@ -131,6 +135,12 @@ export default function NewSalePage() {
     }
     setEmployees(data);
   };
+  // Para guardar los productos que coinciden con el mismo código
+  const [matchingProducts, setMatchingProducts] = useState<any[]>([]);
+
+  // Para controlar la visibilidad del modal de selección
+  const [showSelectModal, setShowSelectModal] = useState(false);
+
   const [loadingEmployees, setLoadingEmployees] = useState(false);
   const [shifts, setShifts] = useState<Shift[]>([]);
   const [loadingShifts, setLoadingShifts] = useState(true);
@@ -658,23 +668,77 @@ export default function NewSalePage() {
   useEffect(() => {
     if (!debouncedScannerValue || showManualSearch) return;
 
-    const match = products.find(
-      (p) => p.code?.toLowerCase() === debouncedScannerValue.toLowerCase()
+    // 1. Buscamos **todos** los productos con ese código
+    const matches = products.filter(
+      p => p.code?.toLowerCase() === debouncedScannerValue.toLowerCase()
     );
 
-    if (match) {
-      addToCart(match);
+    // 2. Limpiamos siempre el input del scanner
+    setScannerValue("");
+
+    // 3. Si sólo hay uno, lo agregamos al carrito
+    if (matches.length === 1) {
+      addToCart(matches[0]);
+
+      // 4. Si hay más de uno, abrimos el modal de selección
+    } else if (matches.length > 1) {
+      setMatchingProducts(matches);
+      setShowSelectModal(true);
     }
 
-    // Limpio siempre el input
-    setScannerValue("");
+    // 5. Dependencias: vuelve a ejecutarse en cada cambio de scanner, productos o manual search
   }, [debouncedScannerValue, products, showManualSearch]);
 
+  // Cuando el cajero elija uno de los productos duplicados:
+  const handleSelectProduct = (p: any) => {
+    // 1. Lo agregamos al carrito como siempre
+    addToCart(p);
+
+    // 2. Cerramos el modal de selección
+    setShowSelectModal(false);
+
+    // 3. Volvemos a enfocar el scanner para seguir escaneando
+    scannerInputRef.current?.focus();
+  };
+
   useEffect(() => {
-    if (!showManualSearch) {
-      scannerInputRef.current?.focus();
+    // Si **ningún** modal está abierto, enfocamos el scanner
+    if (!showManualSearch && !showSelectModal) {
+      // pequeño delay para asegurarnos de que el input ya existe
+      setTimeout(() => scannerInputRef.current?.focus(), 10);
     }
-  }, [showManualSearch]);
+  }, [showManualSearch, showSelectModal]);
+
+  useEffect(() => {
+    const input = scannerInputRef.current;
+    if (!input) return;
+
+    const handleBlur = () => {
+      // Si NO hay ningún modal abierto, refocus
+      if (!showManualSearch && !showSelectModal) {
+        // lo hacemos en un tick para no interferir con el evento actual
+        setTimeout(() => input.focus(), 0);
+      }
+    };
+
+    input.addEventListener("blur", handleBlur);
+    return () => {
+      input.removeEventListener("blur", handleBlur);
+    };
+  }, [showManualSearch, showSelectModal]);
+  useEffect(() => {
+    const handleClick = (e: MouseEvent) => {
+      // Si no hay ningún modal abierto
+      if (!showManualSearch && !showSelectModal) {
+        scannerInputRef.current?.focus();
+      }
+    };
+
+    document.addEventListener("click", handleClick);
+    return () => document.removeEventListener("click", handleClick);
+  }, [showManualSearch, showSelectModal]);
+  const changeInputRef = useRef<HTMLInputElement>(null);
+
 
   if (loadingShifts) {
     return (
@@ -1012,8 +1076,9 @@ export default function NewSalePage() {
           </div>
         </Modal>
       )}
-
-
+      {showSelectModal && (
+        <SelectProductModal matchingProducts={matchingProducts} onSelect={handleSelectProduct} onClose={() => setShowSelectModal(false)} />
+      )}
     </div>
   );
 
@@ -1052,5 +1117,63 @@ function Modal({
         <main className="px-5 py-4 text-sm">{children}</main>
       </div>
     </div>
+  );
+}
+
+
+
+export function SelectProductModal({ matchingProducts, onClose, onSelect }) {
+  const [filter, setFilter] = useState("");
+
+  const filtered = matchingProducts.filter(p =>
+    p.name.toLowerCase().includes(filter.toLowerCase())
+  );
+
+  return (
+    <Modal title="Selecciona un producto" onClose={onClose}>
+      {/* Contador */}
+      <div className="mb-4 flex justify-between items-center">
+        <p className="text-sm text-gray-600">
+          {filtered.length} producto{filtered.length !== 1 && "s"} encontrado{filtered.length !== 1 && "s"}
+        </p>
+      </div>
+
+      {/* Lista scrollable */}
+      <ul className="space-y-3 max-h-80 overflow-y-auto">
+        {filtered.map((p) => {
+          const isPromo = p.name.toUpperCase().includes("PROMO");
+          return (
+            <li key={p.id}>
+              <button
+                onClick={() => onSelect(p)}
+                className={`w-full flex items-center justify-between p-4 rounded-lg transition-shadow transform
+                  ${isPromo ? 'bg-yellow-50 border-2 border-yellow-300 hover:border-yellow-400' : 'bg-white border'}
+                  shadow-sm hover:shadow-md hover:-translate-y-0.5 cursor-pointer focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500`}
+              >
+                {/* Texto y badge */}
+                <div className="flex items-center space-x-4">
+                  <div className="flex flex-col">
+                    <span className="font-medium text-gray-800">{p.name}</span>
+                    {isPromo && (
+                      <Badge variant="outline" className="inline-flex items-center gap-1 mt-1 text-yellow-600 border-yellow-600">
+                        🎉 <span>PROMO</span>
+                      </Badge>
+                    )}
+                  </div>
+                </div>
+
+                {/* Precio + icono carrito */}
+                <div className="flex items-center space-x-2">
+                  <span className="font-semibold text-gray-900">{formatCurrency(p.default_selling)}</span>
+                </div>
+              </button>
+            </li>
+          );
+        })}
+        {filtered.length === 0 && (
+          <li className="text-center text-gray-500 py-4">No hay productos que coincidan.</li>
+        )}
+      </ul>
+    </Modal>
   );
 }
