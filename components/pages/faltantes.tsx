@@ -15,6 +15,7 @@ const CATEGORIES = [
   "TABACO",
   "HUEVOS",
   "HIGIENE",
+  "PROMO",
   "ALCOHOL",
 ];
 

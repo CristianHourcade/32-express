@@ -18,6 +18,7 @@ const categories = [
     "HUEVOS",
     "HIGIENE",
     "ALCOHOL",
+    "PROMO",
     "SIN CATEGORIA",
 ];
 
