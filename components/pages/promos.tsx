@@ -117,6 +117,119 @@ export const PromotionsAdminPage = () => {
   const addLine = () => setForm(f => ({ ...f, products: [...f.products, { id: '', qty: 1 }] }));
   const removeLine = (i: number) => setForm(f => { const a = [...f.products]; a.splice(i, 1); return { ...f, products: a } });
   const changeLine = (i: number, field: 'id' | 'qty', v: any) => setForm(f => { const a = [...f.products]; if (field === 'id') a[i].id = v; else a[i].qty = +v; return { ...f, products: a } });
+  const handlePrint = () => {
+    const htmlContent = `
+    <html>
+      <head>
+        <title>Promos Estilo Góndola</title>
+        <style>
+          @media print {
+            body {
+              margin: 0;
+              padding: 0;
+              background: white;
+            }
+          }
+
+          body {
+            font-family: 'Arial Black', sans-serif;
+            background: white;
+            padding: 1rem;
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 20px;
+          }
+
+          .promo {
+            width: 320px;
+            height: 420px;
+            background: white;
+            border: 3px solid black;
+            border-radius: 4px;
+            box-shadow: 0 3px 8px rgba(0,0,0,0.2);
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding: 20px 16px;
+            box-sizing: border-box;
+            page-break-inside: avoid;
+            position: relative;
+            text-align: center;
+          }
+
+          .promo-header {
+            font-size: 20px;
+            font-weight: bold;
+            text-transform: uppercase;
+            border-bottom: 3px dashed black;
+            padding-bottom: 8px;
+          }
+
+          .promo-name {
+            font-size: 32px;
+            font-weight: bold;
+            margin: 30px 0 20px 0;
+            text-transform: uppercase;
+            word-break: break-word;
+          }
+
+          .price-container {
+            border: 3px solid black;
+            padding: 8px 16px;
+            border-radius: 10px;
+            display: inline-block;
+            font-size: 48px;
+            font-weight: bold;
+          }
+
+          .promo-footer {
+            font-size: 14px;
+            font-weight: 600;
+            margin-top: 25px;
+            color: #000;
+            letter-spacing: 0.5px;
+            border-top: 1px solid black;
+            padding-top: 8px;
+          }
+
+          .triangulo {
+            width: 0;
+            height: 0;
+            border-left: 32px solid transparent;
+            border-right: 32px solid transparent;
+            border-top: 32px solid black;
+            position: absolute;
+            top: 0;
+            left: 50%;
+            transform: translateX(-50%);
+          }
+        </style>
+      </head>
+      <body>
+        ${filtered.map(p => `
+          <div class="promo">
+            <div class=""></div>
+            <div class="promo-header">¡PROMOO!</div>
+            <div class="promo-name">${p.name}</div>
+            <div class="price-container">$${p.price.toFixed(2)}</div>
+            ${p.code ? `<div class="promo-footer">Código: ${p.code}</div>` : ""}
+          </div>
+        `).join('')}
+        <script>window.onload = function () { window.print(); };</script>
+      </body>
+    </html>
+  `;
+
+    const printWindow = window.open("", "_blank");
+    if (printWindow) {
+      printWindow.document.write(htmlContent);
+      printWindow.document.close();
+    }
+  };
+
+
+
 
   const submit = async (e: any) => {
     e.preventDefault();
@@ -141,10 +254,23 @@ export const PromotionsAdminPage = () => {
       {/* Header */}
       <div className="flex justify-between items-center mb-4">
         <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Promociones Globales</h1>
-        <button onClick={openNew} className="flex items-center bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg">
-          <Plus className="mr-2" />Nueva Promo
-        </button>
+        <div className="flex space-x-2">
+          <button
+            onClick={handlePrint}
+            className="flex items-center bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg"
+          >
+            🖨️ Imprimir Promos
+          </button>
+          <button
+            onClick={openNew}
+            className="flex items-center bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg"
+          >
+            <Plus className="mr-2" />
+            Nueva Promo
+          </button>
+        </div>
       </div>
+
       {/* Filters */}
       <div className="flex items-center space-x-4 mb-6">
         <label className="inline-flex items-center space-x-2">
