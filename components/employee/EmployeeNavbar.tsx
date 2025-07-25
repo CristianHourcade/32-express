@@ -17,6 +17,8 @@ import {
   UserIcon,
   Activity,
   Airplay,
+  TagIcon,
+  Archive,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 
@@ -30,6 +32,7 @@ const supervisorItems = [
   { name: "Inventario", href: "/employee/productos", icon: Package2Icon },
   { name: "Actividad", href: "/employee/actividad", icon: Activity },
   { name: "Faltantes", href: "/employee/faltantes", icon: Airplay },
+  { name: "Promos", href: "/employee/promos", icon: Archive },
 ];
 
 export default function EmployeeNavbar() {

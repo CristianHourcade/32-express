@@ -23,6 +23,8 @@ import {
   X,
   Menu,
   LogOut,
+  TagIcon,
+  Archive,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
@@ -42,6 +44,7 @@ const navSections = [
       { name: "Faltantes", href: "/admin/faltantes", icon: AlertTriangle },
       { name: "Calendario", href: "/admin/provedores", icon: CalendarDays },
       { name: "Productos", href: "/admin/products", icon: Tag },
+      { name: "Promo", href: "/admin/promos", icon: Archive },
     ],
   },
   {
