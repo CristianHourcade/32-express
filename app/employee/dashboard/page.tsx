@@ -115,6 +115,25 @@ export default function EmployeeDashboard() {
   const [isEndingShift, setIsEndingShift] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [debugInfo, setDebugInfo] = useState<any>(null)
+  const [activePromos, setActivePromos] = useState<any[]>([])
+
+  useEffect(() => {
+    const fetchPromos = async () => {
+      const { data: promosRaw, error: promosError } = await supabase
+        .from("promos")
+        .select("*, promo_items (product_id, quantity)")
+        .eq("is_active", true);
+
+      if (promosError) {
+        console.error("Error al cargar promociones:", promosError)
+        return;
+      }
+
+      setActivePromos(promosRaw || [])
+    }
+
+    fetchPromos()
+  }, [])
 
   // Log de acceso a la ruta
   useEffect(() => {
@@ -289,6 +308,10 @@ export default function EmployeeDashboard() {
       stock,
       product_master_id,
       product_id,
+      promotion_id,
+      promotion:promos!promotion_id (
+        name
+      ),
       products_master:products_master!product_master_id (
         name
       ),
@@ -298,7 +321,8 @@ export default function EmployeeDashboard() {
     )
   `)
         .eq("shift_id", activeShift.id)
-        .order("timestamp", { ascending: false })
+        .order("timestamp", { ascending: false });
+
 
 
       setLoadingSales(false)
@@ -722,12 +746,25 @@ export default function EmployeeDashboard() {
                       </td>
                       <td className="px-6 py-4 text-sm text-gray-700 dark:text-gray-300">
                         <ul className="space-y-1">
-                          {sale.sale_items.map((item, i) => (
-                            <li key={i} className="text-xs">
-                              {item.quantity}× {(item.products_master?.name ?? item.products?.name) ?? "–"} – {formatCurrency(item.total)}
-                            </li>
-                          ))}
+                          {sale.sale_items.map((item, i) => {
+                            const isPromo = !!item.promotion?.name;
+
+                            const name = item.promotion?.name ?? item.products_master?.name ?? item.products?.name ?? "–";
+
+                            return (
+                              <li key={i} className="text-xs flex items-center gap-2">
+                                {isPromo && (
+                                  <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200">
+                                    PROMO
+                                  </span>
+                                )}
+                                <span>{item.quantity}× {name} – {formatCurrency(item.total)}</span>
+                              </li>
+                            );
+                          })}
                         </ul>
+
+
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm">
                         <span className={`px-2 py-1 rounded-full text-xs font-semibold border ${getPaymentMethodClass(sale.paymentMethod)}`}>

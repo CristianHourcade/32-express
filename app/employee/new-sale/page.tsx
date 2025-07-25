@@ -170,11 +170,13 @@ export default function NewSalePage() {
   /* ─────────────── useEffect de carga inicial ─────────────── */
   useEffect(() => {
     if (!businessId) return;
+
     (async () => {
       setProductsLoading(true);
       try {
-        // 1. Traigo stock del negocio paginado
         const stockMap: Record<string, number> = {};
+
+        // 1. Cargar stock actual
         const pageSize = 1000;
         let page = 0;
         let done = false;
@@ -200,13 +202,10 @@ export default function NewSalePage() {
           page++;
         }
 
-        console.log("📦 Inventario cargado:", stockMap);
-
-        // 2. Traigo todos los productos master en páginas de 1000
-        let acc: any[] = [];
+        // 2. Cargar productos master
         page = 0;
         done = false;
-
+        let acc: any[] = [];
         while (!done) {
           const { from, to } = {
             from: page * pageSize,
@@ -222,36 +221,42 @@ export default function NewSalePage() {
           page++;
         }
 
-        // 3. Mapeo stock en cada producto master
         const prodsWithStock = acc.map((p) => ({
           ...p,
           stock: stockMap[p.id.toString()] ?? 0,
         }));
 
-        // 4. Traigo promociones y les asigno stock "ilimitado"
-        // const { data: promos } = await supabase
-        //   .from("promotions")
-        //   .select("*")
-        //   .eq("businesses_id", businessId);
-        // const promoRows =
-        //   promos?.map((p) => ({
-        //     ...p,
-        //     code: "PROMO",
-        //     default_selling: p.price,
-        //     products: p.products,
-        //     stock: 999,
-        //   })) ?? [];
-        // console.log(promos)
-        // 5. Seteo productos con stock + promos
-        setProducts([...prodsWithStock]);
+        // 3. Cargar promociones activas
+        const { data: promosRaw, error: promosError } = await supabase
+          .from("promos")
+          .select("*, promo_items (product_id, quantity)")
+          .eq("is_active", true);
+
+        if (promosError) throw promosError;
+
+        const promosFormatted = (promosRaw ?? []).map((promo) => ({
+          ...promo,
+          code: promo.code,
+          name: promo.name,
+          default_selling: promo.promo_price,
+          stock: 999,
+          products: promo.promo_items.map((pi) => ({
+            id: pi.product_id,
+            qty: pi.quantity,
+          })),
+        }));
+
+        // 4. Guardar ambos
+        setProducts([...promosFormatted, ...prodsWithStock]);
       } catch (err) {
-        console.error(err);
+        console.error("❌ Error al cargar productos + promos:", err);
         setProducts([]);
       } finally {
         setProductsLoading(false);
       }
     })();
   }, [businessId]);
+
 
 
   /* ─ Shifts ─ */
@@ -445,7 +450,7 @@ export default function NewSalePage() {
     setProcessing(true);
 
     try {
-      // 1. Armo los datos de la venta
+      // 1. Armar datos de la venta
       const saleData = {
         businessId: businessId!,
         businessName: activeShift.businessName,
@@ -458,11 +463,11 @@ export default function NewSalePage() {
         shiftId: activeShift.id,
       };
 
-      // 2. Registro la venta en Redux / backend
+      // 2. Registrar venta
       const saleResult = await dispatch(createSale(saleData)).unwrap();
       if (!saleResult) throw new Error("No se pudo registrar la venta.");
 
-      // 3. Traigo stock actual paginado desde business_inventory
+      // 3. Traer stock actual del negocio
       const stockMap: Record<string, number> = {};
       const pageSize = 1000;
       let page = 0;
@@ -490,7 +495,7 @@ export default function NewSalePage() {
         page++;
       }
 
-      // 4. Agrupo cantidades a descontar por productId
+      // 4. Agrupar cantidades a descontar por producto
       const stockToUpdate: Record<string, number> = {};
       for (const it of cart) {
         if (Array.isArray(it.listID) && it.listID.length > 0) {
@@ -505,7 +510,7 @@ export default function NewSalePage() {
         }
       }
 
-      // 5. Actualizo stock en business_inventory
+      // 5. Actualizar stock
       for (const productId in stockToUpdate) {
         const qtyToDiscount = stockToUpdate[productId] ?? 0;
         const currentStock = stockMap[productId] ?? 0;
@@ -520,12 +525,13 @@ export default function NewSalePage() {
         if (error) throw error;
       }
 
-      // 6. Refresco productos (trae nuevamente stock + promos)
+      // 6. Refrescar productos
       await loadProducts();
 
+      // 7. Facturación (solo tarjeta o transferencia)
       if (paymentMethod === "card" || paymentMethod === "transfer") {
         try {
-          const formatDate = (date) => {
+          const formatDate = (date: Date) => {
             const d = new Date(date);
             const day = String(d.getDate()).padStart(2, '0');
             const month = String(d.getMonth() + 1).padStart(2, '0');
@@ -538,19 +544,19 @@ export default function NewSalePage() {
           dueDate.setDate(today.getDate() + 2);
 
           const facturaPayload = {
-            "cliente": {
-              "documento_tipo": "OTRO",
-              "condicion_iva": "CF",
-              "condicion_iva_operacion": "CF",
-              "domicilio": "No especifica",
-              "condicion_pago": "201",
-              "documento_nro": "0",
-              "reclama_deuda": "N",
-              "razon_social": "Consumidor final",
-              "provincia": "2",
-              "email": "email@dominio.com",
-              "envia_por_mail": "N",
-              "rg5329": "N"
+            cliente: {
+              documento_tipo: "OTRO",
+              condicion_iva: "CF",
+              condicion_iva_operacion: "CF",
+              domicilio: "No especifica",
+              condicion_pago: "201",
+              documento_nro: "0",
+              reclama_deuda: "N",
+              razon_social: "Consumidor final",
+              provincia: "2",
+              email: "email@dominio.com",
+              envia_por_mail: "N",
+              rg5329: "N"
             },
             comprobante: {
               tipo: "FACTURA C",
@@ -582,14 +588,13 @@ export default function NewSalePage() {
             }
           };
 
-          // ANGEL GALLARDOx
           if (businessId === "7050459b-b342-4e66-ab11-ab856b7f11f1") {
             const FacturaConFACTURADOR = {
               apitoken: ANGEL_CRISTIAN_APITOKEN,
               usertoken: ANGEL_CRISTIAN_USERTOKEN,
               apikey: ANGEL_CRISTIAN_APIKEY,
               ...facturaPayload,
-            }
+            };
             fetch("https://32express-factura.vercel.app/api/facturar", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
@@ -597,12 +602,11 @@ export default function NewSalePage() {
             });
           }
         } catch (err) {
-          console.error("Error al facturar:", err);
+          console.error("❌ Error al facturar:", err);
         }
-
       }
 
-      // 7. Éxito: limpio carrito, cierro modal, muestro toast
+      // 8. Limpiar y mostrar éxito
       setToast("Venta registrada ✔︎");
       setCart([]);
       setConfirm(false);
@@ -610,13 +614,14 @@ export default function NewSalePage() {
       setSearch("");
       setTimeout(() => setToast(""), 3000);
     } catch (err: any) {
-      console.error("Error al completar venta:", err);
+      console.error("❌ Error al completar venta:", err);
       setToast("❌ Error: " + (err.message || "algo salió mal"));
       setTimeout(() => setToast(""), 4000);
     } finally {
       setProcessing(false);
     }
   };
+
 
 
   useEffect(() => {
@@ -775,6 +780,7 @@ export default function NewSalePage() {
         autoFocus
         onChange={(e) => setScannerValue(e.target.value)}
         value={scannerValue}
+        // className=""
         className="absolute top-0 left-0 w-0 h-0 opacity-0 pointer-events-none"
       />
 
@@ -815,16 +821,44 @@ export default function NewSalePage() {
               ) : (
                 cart.map((item, idx) => {
                   const product = products.find(p => p.id === item.productId);
+                  const isPromo = Array.isArray(item.listID) && item.listID.length > 0;
+
                   return (
                     <div
                       key={item.productId}
-                      className="bg-white rounded-xl border shadow-sm mb-3 px-4 py-2 hover:ring-2 hover:ring-indigo-200 transition"
+                      className={`rounded-xl border shadow-sm mb-3 px-4 py-2 transition
+    ${isPromo ? "bg-yellow-50 border-yellow-300 hover:ring-yellow-200" : "bg-white hover:ring-indigo-200"}
+    hover:ring-2`}
                     >
                       {/* Nombre + Código */}
                       <div className="flex items-start justify-between">
                         <div>
-                          <p className="text-lg font-semibold  leading-tight">{item.productName}</p>
+                          <p className="text-lg font-semibold  leading-tight flex items-center gap-2">
+                            {item.productName}
+                            {isPromo && (
+                              <Badge variant="outline" className="text-yellow-600 border-yellow-400">
+                                🎉 PROMO
+                              </Badge>
+                            )}
+                          </p>
+
                           <p className="text-xs text-gray-400 mb-1">{product?.code || "–"}</p>
+                          {isPromo && item.listID && (
+                            <div className="mt-1 ml-1 text-sm text-yellow-800">
+                              <p className="font-semibold mb-1">Incluye:</p>
+                              <ul className="list-disc list-inside space-y-0.5">
+                                {item.listID.map((pi: any, i: number) => {
+                                  const prod = products.find(p => p.id === pi.id);
+                                  return (
+                                    <li key={i}>
+                                      {pi.qty} × {prod?.name || "Producto eliminado"}
+                                    </li>
+                                  );
+                                })}
+                              </ul>
+                            </div>
+                          )}
+
                         </div>
                         <button
                           onClick={() => removeIdx(idx)}
@@ -1087,15 +1121,6 @@ export default function NewSalePage() {
 
 /* ───────────────────── small components ───────────────────── */
 
-const Circle = (props: React.ButtonHTMLAttributes<HTMLButtonElement>) => (
-  <button
-    {...props}
-    className={`p-1 rounded-full bg-slate-200 dark:bg-slate-600 hover:bg-slate-300 dark:hover:bg-slate-500 ${props.className ?? ""
-      }`}
-    type="button"
-  />
-);
-
 function Modal({
   title,
   children,
@@ -1125,12 +1150,17 @@ function Modal({
 export function SelectProductModal({ matchingProducts, onClose, onSelect }) {
   const [filter, setFilter] = useState("");
 
-  const filtered = matchingProducts.filter(p =>
-    p.name.toLowerCase().includes(filter.toLowerCase())
-  );
+  const filtered = matchingProducts
+    .filter(p => p.name.toLowerCase().includes(filter.toLowerCase()))
+    .sort((a, b) => {
+      const aIsPromo = Array.isArray(a.products) && a.products.length > 0;
+      const bIsPromo = Array.isArray(b.products) && b.products.length > 0;
+      return bIsPromo - aIsPromo; // Promo arriba
+    });
+
 
   return (
-    <Modal title="Selecciona un producto" onClose={onClose}>
+    <Modal title="👀 Ese código tiene una promo, ¡ofrecela!" onClose={onClose}>
       {/* Contador */}
       <div className="mb-4 flex justify-between items-center">
         <p className="text-sm text-gray-600">
@@ -1139,24 +1169,27 @@ export function SelectProductModal({ matchingProducts, onClose, onSelect }) {
       </div>
 
       {/* Lista scrollable */}
-      <ul className="space-y-3 max-h-80 overflow-y-auto">
+      <ul className="space-y-3 h-[25vh] overflow-y-auto pr-1 will-change-transform overflow-anchor-none mx-3">
         {filtered.map((p) => {
-          const isPromo = p.name.toUpperCase().includes("PROMO");
+          const isPromo = Array.isArray(p.products) && p.products.length > 0;
           return (
             <li key={p.id}>
               <button
                 onClick={() => onSelect(p)}
-                className={`w-full flex items-center justify-between p-4 rounded-lg transition-shadow transform
-                  ${isPromo ? 'bg-yellow-50 border-2 border-yellow-300 hover:border-yellow-400' : 'bg-white border'}
-                  shadow-sm hover:shadow-md hover:-translate-y-0.5 cursor-pointer focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500`}
+                className={`w-full h-[10vh] flex items-center justify-between p-4 rounded-lg transition-transform transform
+  ${isPromo
+                    ? "bg-yellow-100 border-2 border-yellow-500 shadow-[0_0_0_2px_rgba(234,179,8,0.6)] hover:shadow-yellow-400 hover:scale-[1.015]"
+                    : "bg-white border hover:shadow-md hover:scale-[1.01]"}
+  cursor-pointer focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500`}
+
               >
                 {/* Texto y badge */}
                 <div className="flex items-center space-x-4">
                   <div className="flex flex-col">
                     <span className="font-medium text-gray-800">{p.name}</span>
                     {isPromo && (
-                      <Badge variant="outline" className="inline-flex items-center gap-1 mt-1 text-yellow-600 border-yellow-600">
-                        🎉 <span>PROMO</span>
+                      <Badge className="bg-yellow-500 text-white font-bold px-2 py-1 rounded-full mt-2 text-xs shadow">
+                        🎯 PROMO DESTACADA
                       </Badge>
                     )}
                   </div>
