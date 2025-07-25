@@ -138,7 +138,7 @@ export const PromotionsAdminPage = () => {
             display: flex;
             flex-wrap: wrap;
             justify-content: center;
-            gap: 20px;
+
           }
 
           .promo {
@@ -210,7 +210,7 @@ export const PromotionsAdminPage = () => {
         ${filtered.map(p => `
           <div class="promo">
             <div class=""></div>
-            <div class="promo-header">¡PROMOO!</div>
+            <div class="promo-header">¡PROMO!</div>
             <div class="promo-name">${p.name}</div>
             <div class="price-container">$${p.price.toFixed(2)}</div>
             ${p.code ? `<div class="promo-footer">Código: ${p.code}</div>` : ""}
