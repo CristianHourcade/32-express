@@ -96,6 +96,9 @@ export default function ShiftsPage() {
               products_master (
                 name
               )
+              promotion:promos (
+                name
+              )
             )
           `)
         .gte("timestamp", from.toISOString())
@@ -115,15 +118,23 @@ export default function ShiftsPage() {
           total,
           payment_method,
           shift_id,
-          sale_items (
-            quantity,
-            total,
-            stock,
-            product_id,
-            product_master_id,
-            products ( name ),
-            products_master ( name )
+         sale_items (
+          quantity,
+          total,
+          stock,
+          product_id,
+          product_master_id,
+          promotion_id,
+          promotion:promos (
+            name
+          ),
+          products (
+            name
+          ),
+          products_master (
+            name
           )
+        )
         `)
         .eq("shift_id", shiftId);
 
@@ -217,8 +228,9 @@ export default function ShiftsPage() {
           quantity: it.quantity,
           total: it.total,
           stock: it.stock,
-          productName: it.products?.name ?? it.products_master?.name ?? "—",
-        })),
+          isPromo: !!it.promotion,
+          name: it.promotion?.name ?? it.products?.name ?? it.products_master?.name ?? "—",
+        }))
       }));
 
       setShifts(shiftsFixed);
@@ -647,7 +659,6 @@ function DetailsModal({
                       ))}
                     </tr>
                   </thead>
-
                   <tbody>
                     {getShiftSales(shift.id).map((s) => (
                       <tr
@@ -663,7 +674,10 @@ function DetailsModal({
                         <td className="px-4 py-3 bg-white align-top text-slate-700 space-y-1">
                           {s.items.map((it, i) => (
                             <div key={i}>
-                              <span className="font-medium">{it.quantity}× {it.productName}</span>{" "}
+                              <span className="font-medium">
+                                {it.quantity}× {it.name}
+                                {it.isPromo && <span className="ml-1 text-[10px] bg-sky-100 text-sky-800 dark:bg-sky-900/30 dark:text-sky-300 px-1.5 py-0.5 rounded-full">PROMO</span>}
+                              </span>{" "}
                               <span className="text-xs text-slate-500">
                                 – ${formatPrice(it.total)} [Stock: {it?.stock === "null" ? "NO" : it?.stock}]
                               </span>
