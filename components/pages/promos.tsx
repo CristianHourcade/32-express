@@ -123,100 +123,90 @@ export const PromotionsAdminPage = () => {
       <head>
         <title>Promos Estilo Góndola</title>
         <style>
+          @page {
+            size: A4;
+            margin: 0;
+          }
+
           @media print {
-            body {
+            html, body {
               margin: 0;
               padding: 0;
-              background: white;
+              width: 210mm;
+              height: 297mm;
+              -webkit-print-color-adjust: exact !important;
+              print-color-adjust: exact !important;
             }
           }
 
           body {
             font-family: 'Arial Black', sans-serif;
             background: white;
-            padding: 1rem;
-            display: flex;
-            flex-wrap: wrap;
-            justify-content: center;
-
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            grid-template-rows: repeat(4, 1fr);
+            gap: 0;
+            width: 210mm;
+            height: 297mm;
+            box-sizing: border-box;
+            padding: 0;
           }
 
           .promo {
-            width: 320px;
-            height: 420px;
+            box-sizing: border-box;
+            width: 105mm;
+            height: 74.25mm;
+            border: 5mm solid #FF3333;
             background: white;
-            border: 3px solid black;
-            border-radius: 4px;
-            box-shadow: 0 3px 8px rgba(0,0,0,0.2);
+            position: relative;
             display: flex;
             flex-direction: column;
-            justify-content: space-between;
-            padding: 20px 16px;
-            box-sizing: border-box;
-            page-break-inside: avoid;
-            position: relative;
-            text-align: center;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            padding: 10mm 6mm 6mm;
           }
 
           .promo-header {
-            font-size: 20px;
-            font-weight: bold;
-            text-transform: uppercase;
-            border-bottom: 3px dashed black;
-            padding-bottom: 8px;
-          }
+  position: absolute;
+  top: -3mm;
+  left: 50%;
+  transform: translateX(-50%);
+  background-color: #FF3333;
+  color: white;
+  font-size: 15pt;
+  font-weight: bold;
+  padding: 3mm 8mm;
+  text-transform: uppercase;
+  line-height: 1.2;
+  z-index: 2;
+  border-radius: 0mm 0mm 6mm 6mm;
+  text-align: center;
+  width: 80mm;       /* ← clave para cortar en varias líneas */
+  word-break: break-word; /* ← evita desbordes si hay palabras largas */
+}
 
-          .promo-name {
-            font-size: 32px;
-            font-weight: bold;
-            margin: 30px 0 20px 0;
-            text-transform: uppercase;
-            word-break: break-word;
-          }
+          .promo-price {
+  margin-top: 0mm;
+  font-weight: bold;
+  color: black;
+  text-align: center;
+  font-size: clamp(28pt, 7vw, 60pt); /* escala entre 28 y 60pt */
+  max-width: 90mm;
+  word-break: break-word;
+  line-height: 1.1;
+}
 
-          .price-container {
-            border: 3px solid black;
-            padding: 8px 16px;
-            border-radius: 10px;
-            display: inline-block;
-            font-size: 48px;
-            font-weight: bold;
-          }
-
-          .promo-footer {
-            font-size: 14px;
-            font-weight: 600;
-            margin-top: 25px;
-            color: #000;
-            letter-spacing: 0.5px;
-            border-top: 1px solid black;
-            padding-top: 8px;
-          }
-
-          .triangulo {
-            width: 0;
-            height: 0;
-            border-left: 32px solid transparent;
-            border-right: 32px solid transparent;
-            border-top: 32px solid black;
-            position: absolute;
-            top: 0;
-            left: 50%;
-            transform: translateX(-50%);
-          }
         </style>
       </head>
       <body>
         ${filtered.map(p => `
           <div class="promo">
-            <div class=""></div>
-            <div class="promo-header">¡PROMO!</div>
-            <div class="promo-name">${p.name}</div>
-            <div class="price-container">$${p.price.toFixed(2)}</div>
-            ${p.code ? `<div class="promo-footer">Código: ${p.code}</div>` : ""}
+            <div class="promo-header">${p.name}</div>
+            <div class="promo-price">$${p.price.toLocaleString("es-AR", { minimumFractionDigits: 0 })}</div>
           </div>
         `).join('')}
-        <script>window.onload = function () { window.print(); };</script>
+        <script>window.onload = () => window.print();</script>
       </body>
     </html>
   `;
