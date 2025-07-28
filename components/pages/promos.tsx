@@ -165,47 +165,71 @@ export const PromotionsAdminPage = () => {
             justify-content: center;
             overflow: hidden;
             padding: 10mm 6mm 6mm;
+            box-shadow: inset 0 0 0 2mm rgba(0, 0, 0, 0.04);
           }
 
           .promo-header {
-  position: absolute;
-  top: -3mm;
-  left: 50%;
-  transform: translateX(-50%);
-  background-color: #FF3333;
-  color: white;
-  font-size: 15pt;
-  font-weight: bold;
-  padding: 3mm 8mm;
-  text-transform: uppercase;
-  line-height: 1.2;
-  z-index: 2;
-  border-radius: 0mm 0mm 6mm 6mm;
-  text-align: center;
-  width: 80mm;       /* ← clave para cortar en varias líneas */
-  word-break: break-word; /* ← evita desbordes si hay palabras largas */
-}
+            position: absolute;
+            top: -3mm;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: #FF3333;
+            color: white;
+            font-size: 15pt;
+            font-weight: bold;
+            padding: 3mm 8mm;
+            text-transform: uppercase;
+            line-height: 1.2;
+            z-index: 2;
+            border-radius: 0mm 0mm 6mm 6mm;
+            text-align: center;
+            width: 80mm;
+            word-break: break-word;
+          }
+
+          .badge {
+            position: absolute;
+            bottom: 1mm;
+            right: 1mm;
+            background: gold;
+            color: black;
+            font-size: 14pt;
+            font-weight: bold;
+            padding: 1mm 4mm;
+            border-radius: 6mm;
+            box-shadow: 0 1mm 2mm rgba(0,0,0,0.2);
+            z-index: 993;
+          }
+
+          .price-before {
+            font-size: 14pt;
+            color: #999;
+            text-decoration: line-through;
+            margin-bottom: 1mm;
+          }
 
           .promo-price {
-  margin-top: 0mm;
-  font-weight: bold;
-  color: black;
-  text-align: center;
-  font-size: clamp(28pt, 7vw, 60pt); /* escala entre 28 y 60pt */
-  max-width: 90mm;
-  word-break: break-word;
-  line-height: 1.1;
-}
-
+            margin-top: 0mm;
+            font-weight: bold;
+            color: black;
+            text-align: center;
+            font-size: clamp(28pt, 7vw, 60pt);
+            max-width: 90mm;
+            word-break: break-word;
+            line-height: 1.1;
+          }
         </style>
       </head>
       <body>
-        ${filtered.map(p => `
-          <div class="promo">
-            <div class="promo-header">${p.name}</div>
-            <div class="promo-price">$${p.price.toLocaleString("es-AR", { minimumFractionDigits: 0 })}</div>
-          </div>
-        `).join('')}
+        ${filtered.map(p => {
+      return `
+            <div class="promo">
+              <div class="promo-header">${p.name}</div>
+              <div class="promo-price">$${p.price.toLocaleString("es-AR", { minimumFractionDigits: 0 })}</div>
+              <div class="badge">🔥 OFERTA</div>
+            </div>
+          `;
+    }).join('')}
         <script>window.onload = () => window.print();</script>
       </body>
     </html>
@@ -217,6 +241,8 @@ export const PromotionsAdminPage = () => {
       printWindow.document.close();
     }
   };
+
+
 
 
 
