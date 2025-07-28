@@ -25,6 +25,7 @@ import {
   LogOut,
   TagIcon,
   Archive,
+  LucideTags,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
@@ -36,6 +37,7 @@ const navSections = [
       { name: "Dashboard", href: "/admin/dashboard", icon: Gauge },
       { name: "Estadísticas", href: "/admin/estadistica", icon: ChartIcon },
       { name: "Actividad", href: "/admin/actividad", icon: Activity },
+      { name: "Categorias", href: "/admin/stock", icon: LucideTags },
     ],
   },
   {
