@@ -18,6 +18,13 @@ const CATEGORIES = [
   "PROMO",
   "ALCOHOL",
 ];
+const loadPromotions = async () =>
+  fetchAll((from, to) =>
+    supabase
+      .from("promos")
+      .select("id, products") // 'products' es un array con { id, qty }
+      .range(from, to)
+  );
 
 async function fetchAll(query) {
   const pageSize = 1000;
@@ -84,28 +91,43 @@ export default function FaltantesPage() {
         Date.now() - daysFilter * 86400000
       ).toISOString();
 
-      const [sales, masters, inventory] = await Promise.all([
+      const [sales, masters, inventory, promos] = await Promise.all([
         fetchAll((from, to) =>
           supabase
             .from("sales")
-            .select("sale_items(quantity, product_master_id)")
+            .select("sale_items(quantity, product_master_id, promotion_id)")
             .eq("business_id", selectedBiz)
             .gte("timestamp", since)
             .range(from, to)
         ),
         loadProductMasters(),
         loadMasterStocks(selectedBiz),
+        loadPromotions(), // ⬅️ nuevo
       ]);
 
       const ventaMap = new Map();
       sales?.forEach((s) => {
+        // Crear mapa rápido de promociones
+        const promoMap = new Map();
+        promos.forEach((p) => promoMap.set(p.id, p.products)); // id -> [{ id, qty }]
+
         s.sale_items?.forEach((item) => {
-          if (!item.product_master_id) return;
-          ventaMap.set(
-            item.product_master_id,
-            (ventaMap.get(item.product_master_id) ?? 0) + item.quantity
-          );
+          if (item.product_master_id) {
+            // Venta directa
+            ventaMap.set(
+              item.product_master_id,
+              (ventaMap.get(item.product_master_id) ?? 0) + item.quantity
+            );
+          } else if (item.promotion_id) {
+            // Venta por promo: hay que distribuir las cantidades
+            const promoProducts = promoMap.get(item.promotion_id) ?? [];
+            promoProducts.forEach(({ id, qty }) => {
+              const totalQty = qty * item.quantity;
+              ventaMap.set(id, (ventaMap.get(id) ?? 0) + totalQty);
+            });
+          }
         });
+
       });
 
       const stockMap = new Map(

@@ -110,47 +110,72 @@ function BusinessCard({ b }: { b: any }) {
   const profitColor = b.profit >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400";
 
   const paymentMethods = [
-    { label: "Efectivo", value: b.paymentMethods.cash, icon: <Wallet className="w-4 h-4" /> },
-    { label: "Tarjeta", value: b.paymentMethods.card, icon: <CreditCard className="w-4 h-4" /> },
-    { label: "Rappi", value: b.paymentMethods.rappi, icon: <Flame className="w-4 h-4" /> },
+    {
+      label: "Efectivo",
+      key: "cash",
+      value: b.paymentMethods.cash,
+      expense: b.expensesByMethod?.cash ?? 0,
+      icon: <Wallet className="w-4 h-4" />,
+    },
+    {
+      label: "Tarjeta",
+      key: "card",
+      value: b.paymentMethods.card,
+      expense: b.expensesByMethod?.card ?? 0,
+      icon: <CreditCard className="w-4 h-4" />,
+    },
+    {
+      label: "Rappi",
+      key: "rappi",
+      value: b.paymentMethods.rappi,
+      expense: b.expensesByMethod?.rappi ?? 0,
+      icon: <Flame className="w-4 h-4" />,
+    },
     {
       label: "Transferencia",
+      key: "transfer",
       value: (b.paymentMethods.transfer ?? 0) + (b.paymentMethods.mercadopago ?? 0),
+      expense:
+        (b.expensesByMethod?.transfer ?? 0) + (b.expensesByMethod?.mercadopago ?? 0),
       icon: <Banknote className="w-4 h-4" />,
     },
   ];
 
+
   return (
-    <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl p-5 shadow-sm hover:shadow-lg transition-shadow space-y-4 flex flex-col justify-between min-h-[360px]">
+    <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl p-6 shadow-md hover:shadow-lg transition-shadow space-y-5 flex flex-col justify-between min-h-[400px]">
+
       {/* Header */}
-      <div className="flex items-center gap-3 mb-1">
+      <div className="flex items-center gap-3">
         <Building2 className="w-5 h-5 text-indigo-500" />
-        <h3 className="text-lg font-semibold text-gray-900 dark:text-white tracking-tight">{b.name}</h3>
+        <h3 className="text-xl font-semibold text-gray-900 dark:text-white tracking-tight">
+          {b.name}
+        </h3>
       </div>
 
       {/* Datos financieros */}
       <div className="grid grid-cols-2 gap-4 text-sm">
         <div className="space-y-1">
-          <p className="text-slate-500">Total Ventas</p>
-          <p className="text-[15px] font-bold text-gray-800 dark:text-white tabular-nums">
+          <p className="text-slate-500 flex items-center gap-1">💰 Total Ventas</p>
+          <p className="text-lg font-bold text-gray-800 dark:text-white tabular-nums">
             $ {formatPrice(b.totalAmount)}
           </p>
         </div>
         <div className="space-y-1">
-          <p className="text-slate-500">Gastos</p>
-          <p className="text-[15px] font-bold text-red-500 tabular-nums">
+          <p className="text-slate-500 flex items-center gap-1">💸 Gastos</p>
+          <p className="text-lg font-bold text-red-500 tabular-nums">
             $ {formatPrice(b.totalExpense)}
           </p>
         </div>
         <div className="space-y-1">
-          <p className="text-slate-500">Profit</p>
-          <p className={`text-[15px] font-bold ${profitColor} tabular-nums`}>
+          <p className="text-slate-500 flex items-center gap-1">📈 Profit</p>
+          <p className={`text-lg font-bold ${profitColor} tabular-nums`}>
             $ {formatPrice(b.profit)}
           </p>
         </div>
         <div className="space-y-1">
-          <p className="text-slate-500">Ticket Promedio</p>
-          <p className="text-[15px] font-medium text-gray-700 dark:text-gray-300 tabular-nums">
+          <p className="text-slate-500 flex items-center gap-1">🎟️ Ticket Promedio</p>
+          <p className="text-lg font-medium text-gray-700 dark:text-gray-300 tabular-nums">
             $ {formatPrice(b.avgTicket)}
           </p>
         </div>
@@ -159,36 +184,56 @@ function BusinessCard({ b }: { b: any }) {
       <hr className="my-2 border-slate-200 dark:border-slate-700" />
 
       {/* Métodos de Pago */}
-      <div>
-        <div>
-          <p className="text-sm text-slate-500 mb-2">Métodos de Pago</p>
-          <div className="grid grid-cols-2 gap-2">
-            {paymentMethods.map(({ label, value, icon }) => {
-              return (
-                <div
-                  key={label}
-                  className={`flex flex-col justify-center p-3 rounded-xl shadow-sm 
-            border border-gray-200 dark:border-gray-700 
-            ${paymentColors[label as keyof typeof paymentColors]} `}
-                >
-                  <div className="flex items-center gap-2 mb-1 text-gray-700 dark:text-gray-200 font-medium text-sm">
+      <div className="space-y-2">
+        <p className="text-sm text-slate-500 mb-1">💳 Distribución por método</p>
+        <div className="grid grid-cols-2 gap-3">
+          {paymentMethods.map(({ label, key, value, expense, icon }) => {
+            const profit = value - expense;
+            const profitColor = profit >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400";
+            const bgClass = {
+              cash: "bg-emerald-100/70 dark:bg-emerald-900/40",
+              card: "bg-indigo-100/70 dark:bg-indigo-900/40",
+              rappi: "bg-orange-100/70 dark:bg-orange-900/40",
+              transfer: "bg-yellow-100/70 dark:bg-yellow-900/40",
+            }[key as keyof typeof paymentColors] || "bg-gray-100 dark:bg-slate-800/40";
+
+
+            return (
+              <div
+                key={label}
+                className={`flex flex-col justify-between p-4 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 bg-gradient-to-br ${bgClass} hover:shadow-md transition-all duration-200`}
+              >
+                <div className="flex items-center gap-2 mb-3">
+                  <div className="p-2 bg-white/80 dark:bg-slate-800/40 rounded-full shadow">
                     {icon}
-                    <span>{label}</span>
                   </div>
-                  <div className="text-right text-[15px] font-bold tabular-nums text-gray-900 dark:text-white">
-                    $ {formatPrice(value)}
+                  <span className="text-sm font-semibold text-gray-800 dark:text-white">
+                    {label}
+                  </span>
+                </div>
+
+                <div className="space-y-1 text-right tabular-nums text-[13px]">
+                  <div className="flex justify-between text-gray-700 dark:text-gray-300">
+                    <span className="text-xs">Ventas</span>
+                    <span className="font-medium">$ {formatPrice(value)}</span>
+                  </div>
+                  <div className="flex justify-between text-red-600 dark:text-red-400">
+                    <span className="text-xs">Gastos</span>
+                    <span className="font-medium">– $ {formatPrice(expense)}</span>
+                  </div>
+                  <div className={`flex justify-between font-semibold ${profitColor}`}>
+                    <span className="text-xs">Profit</span>
+                    <span>= $ {formatPrice(profit)}</span>
                   </div>
                 </div>
-              );
-            })}
-          </div>
+              </div>
+            );
+          })}
         </div>
-
       </div>
-
-
     </div>
   );
+
 }
 
 
@@ -495,16 +540,20 @@ export default function AdminDashboard() {
         amount: number;
         expense: number;
         payments: Record<"cash" | "card" | "transfer" | "mercadopago" | "rappi", number>;
+        expensesByMethod: Record<"cash" | "card" | "transfer" | "mercadopago" | "rappi", number>;
       }
     >();
+
     businesses.forEach((b) =>
       base.set(b.id, {
         tx: 0,
         amount: 0,
         expense: 0,
         payments: { cash: 0, card: 0, transfer: 0, mercadopago: 0, rappi: 0 },
+        expensesByMethod: { cash: 0, card: 0, transfer: 0, mercadopago: 0, rappi: 0 },
       })
     );
+
 
     sales.forEach((s) => {
       const d = base.get(s.business_id);
@@ -517,6 +566,10 @@ export default function AdminDashboard() {
     expenses.forEach((e) => {
       const d = base.get(e.business_id);
       if (d) d.expense += e.amount;
+
+      if (e.method && e.method in d.expensesByMethod)
+        d.expensesByMethod[e.method] += e.amount;
+
     });
 
     return businesses.map((b) => {
@@ -529,6 +582,7 @@ export default function AdminDashboard() {
         profit: d.amount - d.expense,
         avgTicket: d.tx ? d.amount / d.tx : 0,
         paymentMethods: d.payments,
+        expensesByMethod: d.expensesByMethod,
       };
     });
   }, [businesses, sales, expenses]);

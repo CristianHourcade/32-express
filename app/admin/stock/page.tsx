@@ -26,6 +26,14 @@ const loadBusinesses = async () => {
   return error ? [] : data ?? [];
 };
 
+// Carga maestro de promociones
+const loadPromotions = async () => {
+  return fetchAll((from, to) =>
+    supabase.from("promos").select("id,name").range(from, to)
+  );
+}
+
+
 // Carga ventas sin join a productos
 const loadSales = async (bizId: string, days: number) => {
   const since = new Date(Date.now() - days * 86400000).toISOString();
@@ -76,6 +84,7 @@ export default function TopProductsPage() {
   const [productMap, setProductMap] = useState<Map<string, string>>(new Map());
   const [daysFilter, setDaysFilter] = useState(7);
   const [loading, setLoading] = useState(false);
+  const [promotionMap, setPromotionMap] = useState<Map<string, string>>(new Map());
 
   // Modal top productos
   const [showModal, setShowModal] = useState(false);
@@ -88,19 +97,30 @@ export default function TopProductsPage() {
   // Al cambiar negocio o días: cargar ventas + maestros
   useEffect(() => {
     if (!selectedBiz) return;
+
     (async () => {
       setLoading(true);
-      const [sals, masters] = await Promise.all([
+
+      const [sals, masters, promos] = await Promise.all([
         loadSales(selectedBiz, daysFilter),
         loadProductMasters(),
+        loadPromotions(), // ✅ nuevo
       ]);
+
       setSales(sals);
-      const map = new Map<string, string>();
-      masters.forEach((m: any) => map.set(m.id, m.name));
-      setProductMap(map);
+
+      const productMapTemp = new Map<string, string>();
+      masters.forEach((m: any) => productMapTemp.set(m.id, m.name));
+      setProductMap(productMapTemp);
+
+      const promoMapTemp = new Map<string, string>();
+      promos.forEach((p: any) => promoMapTemp.set(p.id, p.name));
+      setPromotionMap(promoMapTemp); // ✅ nuevo
+
       setLoading(false);
     })();
   }, [selectedBiz, daysFilter]);
+
 
   // Resumen por categoría
   const { rows, totals } = useMemo(() => {
@@ -109,23 +129,45 @@ export default function TopProductsPage() {
 
     sales.forEach((sale) => {
       const method = sale.payment_method === "mercadopago" ? "transfer" : sale.payment_method;
+
       sale.sale_items?.forEach((item: any) => {
-        const name = productMap.get(item.product_master_id) ?? "—";
-        const cat = extractCategory(name);
+        let name: string;
+        let cat: string;
+
+        if (item.promotion_id) {
+          // 🟡 Es una promoción
+          name = promotionMap.get(item.promotion_id) ?? "[PROMO]";
+          cat = "PROMO";
+        } else {
+          // 🔵 Producto normal
+          name = productMap.get(item.product_master_id) ?? "—";
+          cat = extractCategory(name);
+        }
+
         const value = item.total;
         totalRevenue += value;
-        if (!summary.has(cat)) summary.set(cat, { revenue: 0, cash: 0, transfer: 0, card: 0 });
+
+        if (!summary.has(cat)) {
+          summary.set(cat, { revenue: 0, cash: 0, transfer: 0, card: 0 });
+        }
+
         const entry = summary.get(cat)!;
         entry.revenue += value;
         entry[method] += value;
       });
     });
 
-    const resultRows = Array.from(summary.entries()).map(([category, v]) => ({
-      category,
-      ...v,
-      percent: totalRevenue ? (v.revenue / totalRevenue) * 100 : 0,
-    })).sort((a, b) => b.revenue - a.revenue);
+    if (!summary.has("PROMO")) {
+      summary.set("PROMO", { revenue: 0, cash: 0, transfer: 0, card: 0 });
+    }
+
+    const resultRows = Array.from(summary.entries())
+      .map(([category, v]) => ({
+        category,
+        ...v,
+        percent: totalRevenue ? (v.revenue / totalRevenue) * 100 : 0,
+      }))
+      .sort((a, b) => b.revenue - a.revenue);
 
     const total = resultRows.reduce(
       (acc, cur) => {
@@ -137,29 +179,47 @@ export default function TopProductsPage() {
       },
       { revenue: 0, cash: 0, transfer: 0, card: 0 }
     );
+    // Asegurar que la categoría PROMO siempre esté, incluso si está en 0
 
     return { rows: resultRows, totals: total };
-  }, [sales, productMap]);
+  }, [sales, productMap, promotionMap]); // 🔁 Acordate de agregar promotionMap como dependencia
+
 
   // Maneja click en categoría
   const handleCategoryClick = (category: string) => {
     const prodSummary = new Map<string, number>();
+
     sales.forEach((sale) => {
       sale.sale_items?.forEach((item: any) => {
-        const name = productMap.get(item.product_master_id) ?? "—";
-        if (extractCategory(name) === category) {
+        let name: string;
+        let isMatch = false;
+
+        if (item.promotion_id) {
+          // 🟡 Promo
+          name = promotionMap.get(item.promotion_id) ?? "[PROMO]";
+          isMatch = category === "PROMO";
+        } else {
+          // 🔵 Producto
+          name = productMap.get(item.product_master_id) ?? "—";
+          isMatch = extractCategory(name) === category;
+        }
+
+        if (isMatch) {
           prodSummary.set(name, (prodSummary.get(name) || 0) + item.total);
         }
       });
     });
+
     const top10 = Array.from(prodSummary.entries())
       .map(([name, revenue]) => ({ name, revenue }))
       .sort((a, b) => b.revenue - a.revenue)
       .slice(0, 10);
+
     setModalCategory(category);
     setModalItems(top10);
     setShowModal(true);
   };
+
 
   return (
     <div className="p-6 space-y-8">
@@ -174,7 +234,7 @@ export default function TopProductsPage() {
           {businesses.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
         </select>
         <select value={daysFilter} onChange={e => setDaysFilter(+e.target.value)} className="rounded border px-3 py-1 text-xs">
-          {[1,3,7,14,30].map(d => <option key={d} value={d}>Últimos {d} días</option>)}
+          {[1, 3, 7, 14, 30].map(d => <option key={d} value={d}>Últimos {d} días</option>)}
         </select>
       </div>
 
