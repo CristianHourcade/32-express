@@ -420,22 +420,26 @@ export default function NewSalePage() {
       }));
 
       // 4. Promos
-      const { data: promos } = await supabase
-        .from("promotions")
-        .select("*")
-        .eq("businesses_id", businessId);
-      const promoRows =
-        promos?.map((p) => ({
-          ...p,
-          code: "PROMO",
-          default_selling: p.price,
-          products: p.products,
-          stock: 999,
-        })) ?? [];
+      const { data: promosRaw, error: promosError } = await supabase
+        .from("promos")
+        .select("*, promo_items (product_id, quantity)")
+        .eq("is_active", true);
 
-      console.log("TEST", promoRows)
-      // 5. Seteo todo
-      setProducts([...promoRows, ...prodsWithStock]);
+      if (promosError) throw promosError;
+
+      const promosFormatted = (promosRaw ?? []).map((promo) => ({
+        ...promo,
+        code: promo.code,
+        name: promo.name,
+        default_selling: promo.promo_price,
+        stock: 999,
+        products: promo.promo_items.map((pi) => ({
+          id: pi.product_id,
+          qty: pi.quantity,
+        })),
+      }));
+
+      setProducts([...promosFormatted, ...prodsWithStock]);
     } catch (err) {
       console.error("Error al cargar productos:", err);
       setProducts([]);
