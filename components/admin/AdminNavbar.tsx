@@ -26,6 +26,7 @@ import {
   TagIcon,
   Archive,
   LucideTags,
+  LucideGhost,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
@@ -38,6 +39,7 @@ const navSections = [
       { name: "Estadísticas", href: "/admin/estadistica", icon: ChartIcon },
       { name: "Actividad", href: "/admin/actividad", icon: Activity },
       { name: "Categorias", href: "/admin/stock", icon: LucideTags },
+      { name: "Perdidas", href: "/admin/perdidas", icon: LucideGhost },
     ],
   },
   {
