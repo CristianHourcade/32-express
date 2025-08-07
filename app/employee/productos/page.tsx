@@ -50,6 +50,7 @@ export default function InventoryPage() {
     const { user } = useSelector((s: RootState) => s.auth);
 
     // Estados
+    const [stockModalReason, setStockModalReason] = useState<"Perdida" | "Actualizacion">("Actualizacion");
     const [searchTerm, setSearchTerm] = useState("");
     const [inventory, setInventory] = useState<InventoryItem[]>([]);
     const [loading, setLoading] = useState(false);
@@ -58,6 +59,8 @@ export default function InventoryPage() {
     const [salePrice, setSalePrice] = useState<number>(0);
     const [drawerCategory, setDrawerCategory] = useState<string>("SIN CATEGORIA");
     const [drawerBase, setDrawerBase] = useState<string>("");
+    const [stockChangeReasons, setStockChangeReasons] = useState<Record<string, "Perdida" | "Actualizacion">>({});
+
     const [selectedCategory, setSelectedCategory] = useState<string>("");
     async function fetchAllMasters() {
         const step = 1000;
@@ -324,6 +327,12 @@ export default function InventoryPage() {
         for (const [business_id, newStock] of Object.entries(editableStocks)) {
             const oldStock = oldStocks[business_id] ?? 0;
             if (oldStock !== newStock) {
+                const motivo = stockChangeReasons[business_id] || "Actualizacion";
+                const qtyLost = motivo === "Perdida" && newStock < oldStock ? oldStock - newStock : 0;
+                const lost_cash = motivo === "Perdida" && qtyLost > 0
+                    ? qtyLost * (drawerProduct?.default_selling ?? 0)
+                    : null;
+
                 const biz = businesses.find(b => b.id === business_id);
                 const bizName = biz ? biz.name : business_id;
                 const details = user?.name
@@ -333,7 +342,10 @@ export default function InventoryPage() {
                 try {
                     await supabase.from("activities").insert({
                         business_id,
+                        product_id: prodId, // <-- acá se suma!
                         details,
+                        motivo,
+                        lost_cash,
                         created_at: new Date().toISOString(),
                     });
                 } catch (logErr) {
@@ -341,6 +353,8 @@ export default function InventoryPage() {
                 }
             }
         }
+
+
 
         // 7) Finalizar
         setIsSaving(false);
@@ -674,6 +688,20 @@ export default function InventoryPage() {
                                 onChange={e => setStockModalAmount(Number(e.target.value))}
                                 className="w-full border rounded-md p-2 bg-white dark:bg-slate-900"
                             />
+                            {stockModalAction === "remove" && (
+                                <div>
+                                    <label className="block text-sm mb-1">Motivo</label>
+                                    <select
+                                        value={stockModalReason}
+                                        onChange={e => setStockModalReason(e.target.value as "Perdida" | "Actualizacion")}
+                                        className="w-full border rounded-md p-2 bg-white dark:bg-slate-900"
+                                    >
+                                        <option value="Perdida">Pérdida</option>
+                                        <option value="Actualizacion">Actualización</option>
+                                    </select>
+                                </div>
+                            )}
+
                             <div className="flex justify-end gap-2">
                                 <button
                                     onClick={() => setIsStockModalOpen(false)}
@@ -691,6 +719,10 @@ export default function InventoryPage() {
                                                     : Math.max(0, current - stockModalAmount);
                                             return { ...prev, [stockModalBusiness]: newValue };
                                         });
+                                        setStockChangeReasons(prev => ({
+                                            ...prev,
+                                            [stockModalBusiness!]: stockModalAction === "remove" ? stockModalReason : "Actualizacion",
+                                        }));
                                         setIsStockModalOpen(false);
                                     }}
                                     className="px-4 py-2 rounded-md bg-green-600 text-white hover:bg-green-700"
