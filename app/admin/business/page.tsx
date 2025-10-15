@@ -10,6 +10,7 @@ type BusinessRow = {
   alquiler: number | null;
   expensas: number | null;
   servicios: number | null;
+  supervisor: number | null; // NUEVO
   updated_at: string | null;
 };
 
@@ -50,6 +51,7 @@ export default function BusinessMainTable() {
     alquiler: "",
     expensas: "",
     servicios: "",
+    supervisor: "", // NUEVO
   });
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const nameInputRef = useRef<HTMLInputElement>(null);
@@ -59,7 +61,10 @@ export default function BusinessMainTable() {
     (async () => {
       setLoading(true);
       const [businessRes, empRes] = await Promise.all([
-        supabase.from("businesses").select("id, name, alquiler, expensas, servicios, updated_at"),
+        // NUEVO: incluir supervisor en el select
+        supabase
+          .from("businesses")
+          .select("id, name, alquiler, expensas, servicios, supervisor, updated_at"),
         supabase.from("employees").select("business_id, sueldo").eq("status", true),
       ]);
 
@@ -72,6 +77,7 @@ export default function BusinessMainTable() {
           alquiler: parseMoney(r.alquiler),
           expensas: parseMoney(r.expensas),
           servicios: parseMoney(r.servicios),
+          supervisor: parseMoney(r.supervisor), // NUEVO
           updated_at: r.updated_at ?? null,
         }));
         setRows(mapped);
@@ -101,7 +107,7 @@ export default function BusinessMainTable() {
   function openCreate() {
     setModal("create");
     setDraft({ name: "" });
-    setMoneyDraft({ alquiler: "", expensas: "", servicios: "" });
+    setMoneyDraft({ alquiler: "", expensas: "", servicios: "", supervisor: "" });
     setTimeout(() => nameInputRef.current?.focus(), 50);
   }
 
@@ -113,6 +119,7 @@ export default function BusinessMainTable() {
       alquiler: (row.alquiler ?? "").toString(),
       expensas: (row.expensas ?? "").toString(),
       servicios: (row.servicios ?? "").toString(),
+      supervisor: (row.supervisor ?? "").toString(), // NUEVO
     });
     setTimeout(() => nameInputRef.current?.focus(), 50);
   }
@@ -123,12 +130,20 @@ export default function BusinessMainTable() {
       alquiler: parseMoney(moneyDraft.alquiler),
       expensas: parseMoney(moneyDraft.expensas),
       servicios: parseMoney(moneyDraft.servicios),
+      supervisor: parseMoney(moneyDraft.supervisor), // NUEVO
     };
 
     if (modal === "create") {
       const { data, error } = await supabase.from("businesses").insert(payload).select("*").single();
       if (error) return setError(error.message);
-      setRows((prev) => [...prev, data]);
+      const patched = {
+        ...data,
+        alquiler: parseMoney(data.alquiler),
+        expensas: parseMoney(data.expensas),
+        servicios: parseMoney(data.servicios),
+        supervisor: parseMoney(data.supervisor),
+      };
+      setRows((prev) => [...prev, patched]);
     }
 
     if (modal === "edit" && selectedId) {
@@ -138,7 +153,7 @@ export default function BusinessMainTable() {
         .eq("id", selectedId)
         .select()
         .single();
-    
+
       if (error) return setError(error.message);
       if (data) {
         const patched = {
@@ -146,11 +161,11 @@ export default function BusinessMainTable() {
           alquiler: parseMoney(data.alquiler),
           expensas: parseMoney(data.expensas),
           servicios: parseMoney(data.servicios),
+          supervisor: parseMoney(data.supervisor),
         };
         setRows((prev) => prev.map((r) => (r.id === selectedId ? patched : r)));
       }
     }
-    
 
     closeModal();
   }
@@ -195,7 +210,11 @@ export default function BusinessMainTable() {
           filtered.map((r) => {
             const gastoEmpleados = gastosEmpleados[r.id] || 0;
             const total =
-              (r.alquiler || 0) + (r.expensas || 0) + (r.servicios || 0) + gastoEmpleados;
+              (r.alquiler || 0) +
+              (r.expensas || 0) +
+              (r.servicios || 0) +
+              (r.supervisor || 0) + // NUEVO
+              gastoEmpleados;
 
             return (
               <div
@@ -233,7 +252,7 @@ export default function BusinessMainTable() {
                 </div>
 
                 {/* DESGLOSE DE GASTOS */}
-                <div className="mt-3 ml-12 grid grid-cols-1 sm:grid-cols-4 gap-3 text-sm">
+                <div className="mt-3 ml-12 grid grid-cols-1 sm:grid-cols-5 gap-3 text-sm">
                   <div className="flex items-center justify-between bg-blue-50 px-3 py-2 rounded-lg">
                     <span className="text-blue-600 font-medium">Alquiler</span>
                     <span className="text-slate-700">{formatMoney(r.alquiler)}</span>
@@ -245,6 +264,10 @@ export default function BusinessMainTable() {
                   <div className="flex items-center justify-between bg-green-50 px-3 py-2 rounded-lg">
                     <span className="text-green-600 font-medium">Servicios</span>
                     <span className="text-slate-700">{formatMoney(r.servicios)}</span>
+                  </div>
+                  <div className="flex items-center justify-between bg-fuchsia-50 px-3 py-2 rounded-lg">
+                    <span className="text-fuchsia-600 font-medium">Supervisor</span>
+                    <span className="text-slate-700">{formatMoney(r.supervisor)}</span>
                   </div>
                   <div className="flex items-center justify-between bg-indigo-50 px-3 py-2 rounded-lg">
                     <span className="text-indigo-600 font-medium flex items-center gap-1">
@@ -262,7 +285,7 @@ export default function BusinessMainTable() {
       {/* MODAL CUSTOM */}
       {modal && (
         <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
-          <div className="bg-white rounded-2xl w-full max-w-md shadow-xl p-6">
+          <div className="bg-white rounded-2xl w/full max-w-md shadow-xl p-6">
             <h2 className="text-lg font-semibold text-slate-800 mb-4">
               {modal === "create" ? "Crear nuevo local" : "Editar local"}
             </h2>
@@ -280,8 +303,8 @@ export default function BusinessMainTable() {
                 />
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                {["alquiler", "expensas", "servicios"].map((key) => (
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                {["alquiler", "expensas", "servicios", "supervisor"].map((key) => (
                   <div key={key}>
                     <label className="text-sm text-slate-600 capitalize">{key}</label>
                     <div className="relative mt-1">
