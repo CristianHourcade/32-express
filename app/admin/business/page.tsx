@@ -1,420 +1,327 @@
-"use client"
+"use client";
 
-import { useEffect, useState, useMemo } from "react"
-import { useDispatch, useSelector } from "react-redux"
-import type { AppDispatch, RootState } from "@/lib/redux/store"
-import {
-  fetchBusinesses,
-  addBusiness,
-  editBusiness,
-  removeBusiness,
-} from "@/lib/redux/slices/businessSlice"
-import { getProducts } from "@/lib/redux/slices/productSlice"
-import { Button } from "@/components/ui/button"
-import { PlusCircle, Search, Edit, Trash2, Building2 } from "lucide-react"
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import BusinessForm from "@/components/admin/BusinessForm"
-import type { Business, CreateBusinessData, UpdateBusinessData } from "@/services/types"
-import { supabase } from "@/lib/supabase"
+import { useEffect, useMemo, useState, useRef } from "react";
+import { supabase } from "@/lib/supabase";
+import { Building2, PlusCircle, Edit, Trash2, Save, Search, Users } from "lucide-react";
 
-// Función para formatear números
-function formatNumber(num: number) {
-  return new Intl.NumberFormat("en-US", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(num)
-}
-const CATEGORIES = [
-  "ALMACEN",
-  "CIGARRILLOS",
-  "GOLOSINAS",
-  "BEBIDA",
-  "CERVEZA",
-  "FIAMBRES",
-  "TABACO",
-  "HUEVOS",
-  "HIGIENE",
-  "ALCOHOL",
-]
+type BusinessRow = {
+  id: string;
+  name: string;
+  alquiler: number | null;
+  expensas: number | null;
+  servicios: number | null;
+  updated_at: string | null;
+};
 
-function extractCategory(name: string) {
-  const parts = name.trim().split(" ")
-  const cat = parts[0].toUpperCase()
-  return CATEGORIES.includes(cat) ? cat : "SIN CATEGORIA"
+type EmployeeRow = {
+  business_id: string;
+  sueldo: number | null;
+};
+
+const currencyFmt = new Intl.NumberFormat("es-AR", {
+  style: "currency",
+  currency: "ARS",
+  maximumFractionDigits: 0,
+});
+
+function parseMoney(v: string | number | null | undefined): number {
+  if (v === null || v === undefined) return 0;
+  if (typeof v === "number") return isFinite(v) ? v : 0;
+  const clean = v.toString().replace(/[^0-9\-]/g, "");
+  const n = Number(clean);
+  return isNaN(n) ? 0 : n;
 }
 
-export default function BusinessPage() {
-  const dispatch = useDispatch<AppDispatch>()
-  const { businesses, loading, error } = useSelector((state: RootState) => state.businesses)
-  // Aunque aquí no usamos products del store para los cálculos, aún queremos mostrarlos globalmente (si es necesario)
-  const productsLoading = false; // ya no usamos este estado
+function formatMoney(n: number | null | undefined) {
+  const v = typeof n === "number" ? n : 0;
+  return currencyFmt.format(v);
+}
 
-  const [searchQuery, setSearchQuery] = useState("")
-  const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false)
-  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
-  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
-  const [selectedBusiness, setSelectedBusiness] = useState<Business | null>(null)
+export default function BusinessMainTable() {
+  const [rows, setRows] = useState<BusinessRow[]>([]);
+  const [empleados, setEmpleados] = useState<EmployeeRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [q, setQ] = useState("");
 
-  // Este estado almacenará, para cada negocio (key: business.id), la lista completa de productos
-  const [productsByBusiness, setProductsByBusiness] = useState<Map<string, any[]>>(new Map())
+  const [modal, setModal] = useState<"create" | "edit" | null>(null);
+  const [draft, setDraft] = useState<Partial<BusinessRow>>({});
+  const [moneyDraft, setMoneyDraft] = useState({
+    alquiler: "",
+    expensas: "",
+    servicios: "",
+  });
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const nameInputRef = useRef<HTMLInputElement>(null);
 
+  // === CARGA DE DATOS ===
   useEffect(() => {
-    dispatch(fetchBusinesses())
-  }, [dispatch])
+    (async () => {
+      setLoading(true);
+      const [businessRes, empRes] = await Promise.all([
+        supabase.from("businesses").select("id, name, alquiler, expensas, servicios, updated_at"),
+        supabase.from("employees").select("business_id, sueldo").eq("status", true),
+      ]);
 
-  // Cada vez que cambien los negocios, hacemos una petición por cada negocio para obtener sus productos completos
-  useEffect(() => {
-    async function fetchProductsWithInventory() {
-      const step = 1000;
-      let from = 0;
-      let allMasters: any[] = [];
-      let allInventory: any[] = [];
-
-      // Traer todos los productos de products_master (paginado)
-      while (true) {
-        const { data, error } = await supabase
-          .from("products_master")
-          .select("id, name, code, default_purchase, default_selling, inventario")
-          .range(from, from + step - 1);
-
-        if (error) {
-          console.error("Error fetching products_master:", error);
-          break;
-        }
-
-        allMasters = allMasters.concat(data || []);
-        if (!data || data.length < step) break;
-        from += step;
+      if (businessRes.error) setError(businessRes.error.message);
+      else if (empRes.error) setError(empRes.error.message);
+      else {
+        const mapped: BusinessRow[] = (businessRes.data || []).map((r: any) => ({
+          id: r.id,
+          name: r.name,
+          alquiler: parseMoney(r.alquiler),
+          expensas: parseMoney(r.expensas),
+          servicios: parseMoney(r.servicios),
+          updated_at: r.updated_at ?? null,
+        }));
+        setRows(mapped);
+        setEmpleados(empRes.data || []);
       }
+      setLoading(false);
+    })();
+  }, []);
 
-      // Traer todo el inventario desde business_inventory (paginado)
-      from = 0;
-      while (true) {
-        const { data, error } = await supabase
-          .from("business_inventory")
-          .select("product_id, business_id, stock")
-          .range(from, from + step - 1);
-
-        if (error) {
-          console.error("Error fetching business_inventory:", error);
-          break;
-        }
-
-        allInventory = allInventory.concat(data || []);
-        if (!data || data.length < step) break;
-        from += step;
-      }
-
-      // Filtramos solo productos con inventario activo (inventario !== false)
-      const masters = allMasters.filter(p => p.inventario !== false);
-
-      // Creamos el map con productos por negocio
-      const map = new Map<string, any[]>();
-
-      for (const biz of businesses) {
-        const productos = masters.map(p => {
-          const inv = allInventory.find(i => i.product_id === p.id && i.business_id === biz.id);
-          const stock = inv?.stock ?? 0;
-
-          return {
-            id: p.id,
-            name: p.name,
-            code: p.code,
-            purchase_price: p.default_purchase,
-            selling_price: p.default_selling,
-            stock,
-          };
-        });
-
-        map.set(biz.id, productos);
-      }
-
-      setProductsByBusiness(map);
+  // === GASTOS DE EMPLEADOS AGRUPADOS POR LOCAL ===
+  const gastosEmpleados = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const e of empleados) {
+      if (!e.business_id) continue;
+      if (!map[e.business_id]) map[e.business_id] = 0;
+      map[e.business_id] += e.sueldo || 0;
     }
-
-    if (businesses.length > 0) {
-      fetchProductsWithInventory();
-    }
-  }, [businesses]);
-
-  // Filtrar negocios según la búsqueda
-  const filteredBusinesses = businesses.filter((business) =>
-    business.name.toLowerCase().includes(searchQuery.toLowerCase()),
-  )
-
-  // Calcula para cada negocio:
-  // - Mercadería Invertida: suma de (purchasePrice * stock) de los productos obtenidos por negocio
-  // - Venta Potencial: suma de (sellingPrice * stock)
-  // - Ganancia Proyectada: Venta Potencial - Mercadería Invertida
-  const businessFinancials = useMemo(() => {
-    const map = new Map<
-      string,
-      {
-        total: number;
-        byCategory: { [cat: string]: number };
-      }
-    >();
-
-    businesses.forEach((business) => {
-      const businessProducts = productsByBusiness.get(business.id) || [];
-      const categoryTotals: { [cat: string]: number } = {};
-      let total = 0;
-
-      businessProducts.forEach((p) => {
-        const cat = extractCategory(p.name);
-        const profit = (p.selling_price - p.purchase_price) * p.stock;
-
-        categoryTotals[cat] = (categoryTotals[cat] || 0) + profit;
-        total += profit;
-      });
-
-      map.set(business.id, {
-        total,
-        byCategory: categoryTotals,
-      });
-    });
-
     return map;
-  }, [businesses, productsByBusiness]);
+  }, [empleados]);
 
+  const filtered = useMemo(
+    () => rows.filter((r) => r.name.toLowerCase().includes(q.toLowerCase())),
+    [rows, q]
+  );
 
+  // === FUNCIONES DE MODAL ===
+  function openCreate() {
+    setModal("create");
+    setDraft({ name: "" });
+    setMoneyDraft({ alquiler: "", expensas: "", servicios: "" });
+    setTimeout(() => nameInputRef.current?.focus(), 50);
+  }
 
+  function openEdit(row: BusinessRow) {
+    setModal("edit");
+    setSelectedId(row.id);
+    setDraft({ id: row.id, name: row.name });
+    setMoneyDraft({
+      alquiler: (row.alquiler ?? "").toString(),
+      expensas: (row.expensas ?? "").toString(),
+      servicios: (row.servicios ?? "").toString(),
+    });
+    setTimeout(() => nameInputRef.current?.focus(), 50);
+  }
 
-  // Handlers para creación, edición y eliminación (sin cambios)
-  const handleCreateBusiness = async (data: CreateBusinessData) => {
-    try {
-      await dispatch(addBusiness(data)).unwrap()
-      setIsCreateDialogOpen(false)
-    } catch (error) {
-      console.error("Error creating business:", error)
+  async function handleSave() {
+    const payload = {
+      name: draft.name?.trim() || "",
+      alquiler: parseMoney(moneyDraft.alquiler),
+      expensas: parseMoney(moneyDraft.expensas),
+      servicios: parseMoney(moneyDraft.servicios),
+    };
+
+    if (modal === "create") {
+      const { data, error } = await supabase.from("businesses").insert(payload).select("*").single();
+      if (error) return setError(error.message);
+      setRows((prev) => [...prev, data]);
     }
-  }
 
-  const handleEditBusiness = async (data: UpdateBusinessData) => {
-    if (!selectedBusiness) return
-    try {
-      await dispatch(editBusiness({ id: selectedBusiness.id, data })).unwrap()
-      setIsEditDialogOpen(false)
-      setSelectedBusiness(null)
-    } catch (error) {
-      console.error("Error updating business:", error)
+    if (modal === "edit" && selectedId) {
+      const { data, error } = await supabase
+        .from("businesses")
+        .update(payload)
+        .eq("id", selectedId)
+        .select()
+        .single();
+    
+      if (error) return setError(error.message);
+      if (data) {
+        const patched = {
+          ...data,
+          alquiler: parseMoney(data.alquiler),
+          expensas: parseMoney(data.expensas),
+          servicios: parseMoney(data.servicios),
+        };
+        setRows((prev) => prev.map((r) => (r.id === selectedId ? patched : r)));
+      }
     }
+    
+
+    closeModal();
   }
 
-  const handleDeleteBusiness = async () => {
-    if (!selectedBusiness) return
-    try {
-      await dispatch(removeBusiness(selectedBusiness.id)).unwrap()
-      setIsDeleteDialogOpen(false)
-      setSelectedBusiness(null)
-    } catch (error) {
-      console.error("Error deleting business:", error)
-    }
+  function closeModal() {
+    setModal(null);
+    setSelectedId(null);
   }
 
-  if (loading || productsLoading) {
-    return (
-      <div className="flex justify-center items-center h-64">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-sky-600 mx-auto"></div>
-          <p className="mt-4 text-slate-600 dark:text-slate-400">Cargando negocios...</p>
-        </div>
-      </div>
-    )
-  }
-
-  if (error) {
-    return (
-      <div className="bg-red-50 dark:bg-red-900/20 border-l-4 border-red-500 p-4 rounded">
-        <div className="flex">
-          <div className="ml-3">
-            <p className="text-sm text-red-700 dark:text-red-400">
-              Error al cargar los negocios: {error}
-            </p>
-          </div>
-        </div>
-      </div>
-    )
-  }
-
+  // === RENDER ===
   return (
-    <div className="space-y-6">
-      {/* Encabezado */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold">Gestión de Negocios</h1>
-          <p className="text-slate-600 dark:text-slate-400">
-            Administra los negocios de tu empresa
-          </p>
+    <div className="p-6 mx-auto space-y-6">
+      {/* HEADER */}
+      <div className="flex flex-col md:flex-row justify-between items-center gap-3">
+        <div className="flex items-center bg-white border rounded-xl px-3 py-2 w-full md:w-auto shadow-sm">
+          <Search className="h-4 w-4 text-slate-400" />
+          <input
+            type="text"
+            placeholder="Buscar local..."
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            className="ml-2 flex-1 outline-none text-sm"
+          />
         </div>
-        <div className="flex gap-2">
-          <div className="relative">
-            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-slate-500" />
-            <input
-              type="text"
-              placeholder="Buscar negocios..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-8 pr-4 py-2 border border-slate-300 dark:border-slate-700 rounded-md shadow-sm focus:ring-sky-500 focus:border-sky-500 dark:bg-slate-800 dark:text-white"
-            />
-          </div>
-          <Button className="flex items-center gap-1" onClick={() => setIsCreateDialogOpen(true)}>
-            <PlusCircle className="h-4 w-4" />
-            <span>Nuevo Negocio</span>
-          </Button>
-        </div>
+        <button
+          onClick={openCreate}
+          className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl"
+        >
+          <PlusCircle className="h-4 w-4" /> Nuevo local
+        </button>
       </div>
 
-      {/* Lista de Negocios */}
-      <div className="bg-white dark:bg-slate-800 shadow rounded-lg overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-slate-200 dark:divide-slate-700">
-            <thead className="bg-slate-50 dark:bg-slate-700">
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-300 uppercase tracking-wider">
-                  Nombre
-                </th>
-                {CATEGORIES.map((cat) => (
-                  <th
-                    key={cat}
-                    className="px-4 py-3 text-right text-xs font-medium text-slate-500 dark:text-slate-300 uppercase tracking-wider"
-                  >
-                    {cat}
-                  </th>
+      {/* TABLA PRINCIPAL */}
+      <div className="bg-white shadow-lg rounded-2xl divide-y divide-slate-100">
+        {loading ? (
+          <div className="p-6 text-center text-slate-500">Cargando...</div>
+        ) : error ? (
+          <div className="p-6 text-center text-red-600">Error: {error}</div>
+        ) : filtered.length === 0 ? (
+          <div className="p-6 text-center text-slate-500">No hay locales aún.</div>
+        ) : (
+          filtered.map((r) => {
+            const gastoEmpleados = gastosEmpleados[r.id] || 0;
+            const total =
+              (r.alquiler || 0) + (r.expensas || 0) + (r.servicios || 0) + gastoEmpleados;
+
+            return (
+              <div
+                key={r.id}
+                className="px-6 py-4 border-b border-slate-100 hover:bg-slate-50 transition-colors"
+              >
+                {/* HEADER DEL LOCAL */}
+                <div className="flex justify-between items-center">
+                  <div className="flex items-center gap-3">
+                    <div className="h-10 w-10 bg-indigo-50 rounded-full grid place-items-center">
+                      <Building2 className="h-5 w-5 text-indigo-600" />
+                    </div>
+                    <div>
+                      <div className="font-semibold text-slate-800">{r.name}</div>
+                      <div className="text-xs text-slate-500">
+                        Total mensual: {formatMoney(total)}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => openEdit(r)}
+                      className="border border-slate-200 hover:bg-indigo-50 px-3 py-1.5 rounded-xl"
+                    >
+                      <Edit className="h-4 w-4 text-indigo-600" />
+                    </button>
+                    <button
+                      onClick={() => alert(`Eliminar ${r.name}`)}
+                      className="border border-slate-200 hover:bg-red-50 px-3 py-1.5 rounded-xl"
+                    >
+                      <Trash2 className="h-4 w-4 text-red-600" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* DESGLOSE DE GASTOS */}
+                <div className="mt-3 ml-12 grid grid-cols-1 sm:grid-cols-4 gap-3 text-sm">
+                  <div className="flex items-center justify-between bg-blue-50 px-3 py-2 rounded-lg">
+                    <span className="text-blue-600 font-medium">Alquiler</span>
+                    <span className="text-slate-700">{formatMoney(r.alquiler)}</span>
+                  </div>
+                  <div className="flex items-center justify-between bg-amber-50 px-3 py-2 rounded-lg">
+                    <span className="text-amber-600 font-medium">Expensas</span>
+                    <span className="text-slate-700">{formatMoney(r.expensas)}</span>
+                  </div>
+                  <div className="flex items-center justify-between bg-green-50 px-3 py-2 rounded-lg">
+                    <span className="text-green-600 font-medium">Servicios</span>
+                    <span className="text-slate-700">{formatMoney(r.servicios)}</span>
+                  </div>
+                  <div className="flex items-center justify-between bg-indigo-50 px-3 py-2 rounded-lg">
+                    <span className="text-indigo-600 font-medium flex items-center gap-1">
+                      <Users className="h-4 w-4" /> Empleados
+                    </span>
+                    <span className="text-slate-700">{formatMoney(gastoEmpleados)}</span>
+                  </div>
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
+
+      {/* MODAL CUSTOM */}
+      {modal && (
+        <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl w-full max-w-md shadow-xl p-6">
+            <h2 className="text-lg font-semibold text-slate-800 mb-4">
+              {modal === "create" ? "Crear nuevo local" : "Editar local"}
+            </h2>
+
+            {/* FORM */}
+            <div className="space-y-4">
+              <div>
+                <label className="text-sm text-slate-600">Nombre</label>
+                <input
+                  ref={nameInputRef}
+                  value={draft.name || ""}
+                  onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))}
+                  placeholder="Ej: Av. Belgrano 1919"
+                  className="mt-1 w-full border border-slate-200 rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                {["alquiler", "expensas", "servicios"].map((key) => (
+                  <div key={key}>
+                    <label className="text-sm text-slate-600 capitalize">{key}</label>
+                    <div className="relative mt-1">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-slate-400">
+                        ARS
+                      </span>
+                      <input
+                        value={moneyDraft[key as keyof typeof moneyDraft]}
+                        onChange={(e) =>
+                          setMoneyDraft((d) => ({
+                            ...d,
+                            [key]: e.target.value,
+                          }))
+                        }
+                        className="pl-10 w-full border border-slate-200 rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-indigo-500"
+                      />
+                    </div>
+                  </div>
                 ))}
-                <th className="px-4 py-3 text-right text-xs font-bold text-green-700 uppercase tracking-wider">
-                  Total
-                </th>
+              </div>
+            </div>
 
-                <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 dark:text-slate-300 uppercase tracking-wider">
-                  Acciones
-                </th>
-              </tr>
-            </thead>
-            <tbody className="bg-white dark:bg-slate-800 divide-y divide-slate-200 dark:divide-slate-700">
-              {filteredBusinesses.length > 0 ? (
-                filteredBusinesses.map((business) => {
-                  const financials = businessFinancials.get(business.id) || {
-                    merchandiseInvested: 0,
-                    potentialSale: 0,
-                    projectedProfit: 0,
-                  }
-                  return (
-                    <tr key={business.id} className="hover:bg-slate-50 dark:hover:bg-slate-700/50">
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="flex items-center">
-                          <div className="flex-shrink-0 h-10 w-10 bg-slate-100 dark:bg-slate-700 rounded-full flex items-center justify-center">
-                            <Building2 className="h-5 w-5 text-slate-500 dark:text-slate-400" />
-                          </div>
-                          <div className="ml-4">
-                            <div className="text-sm font-medium text-slate-900 dark:text-white">
-                              {business.name}
-                            </div>
-                          </div>
-                        </div>
-                      </td>
-                      {CATEGORIES.map((cat) => (
-                        <td
-                          key={cat}
-                          className="px-4 py-4 whitespace-nowrap text-right text-sm text-slate-700 dark:text-slate-300"
-                        >
-                          ${formatNumber(financials.byCategory[cat] || 0)}
-                        </td>
-                      ))}
-                      <td className="px-4 py-4 whitespace-nowrap text-right text-sm font-bold text-green-600">
-                        ${formatNumber(financials.total)}
-                      </td>
-
-
-                      <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                        <div className="flex justify-end gap-2">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => {
-                              setSelectedBusiness(business)
-                              setIsEditDialogOpen(true)
-                            }}
-                          >
-                            <Edit className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="text-red-600 hover:text-red-700 dark:text-red-500 dark:hover:text-red-400"
-                            onClick={() => {
-                              setSelectedBusiness(business)
-                              setIsDeleteDialogOpen(true)
-                            }}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </td>
-                    </tr>
-                  )
-                })
-              ) : (
-                <tr>
-                  <td colSpan={5} className="px-6 py-4 text-center text-slate-500 dark:text-slate-400">
-                    No se encontraron negocios
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+            {/* FOOTER */}
+            <div className="flex justify-end gap-2 mt-6">
+              <button
+                onClick={closeModal}
+                className="px-4 py-2 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleSave}
+                className="px-4 py-2 rounded-xl bg-indigo-600 text-white hover:bg-indigo-700 flex items-center gap-1"
+              >
+                <Save className="h-4 w-4" /> Guardar
+              </button>
+            </div>
+          </div>
         </div>
-      </div>
-
-      {/* Diálogo de Creación */}
-      <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Crear Nuevo Negocio</DialogTitle>
-          </DialogHeader>
-          <BusinessForm onSubmit={handleCreateBusiness} />
-        </DialogContent>
-      </Dialog>
-
-      {/* Diálogo de Edición */}
-      <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Editar Negocio</DialogTitle>
-          </DialogHeader>
-          {selectedBusiness && (
-            <BusinessForm
-              initialData={{
-                name: selectedBusiness.name,
-              }}
-              onSubmit={handleEditBusiness}
-            />
-          )}
-        </DialogContent>
-      </Dialog>
-
-      {/* Diálogo de Eliminación */}
-      <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Confirmar Eliminación</DialogTitle>
-          </DialogHeader>
-          <div className="py-4">
-            <p className="text-slate-600 dark:text-slate-400">
-              ¿Estás seguro de que deseas eliminar el negocio <strong>{selectedBusiness?.name}</strong>? Esta acción no
-              se puede deshacer.
-            </p>
-          </div>
-          <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={() => setIsDeleteDialogOpen(false)}>
-              Cancelar
-            </Button>
-            <Button variant="destructive" onClick={handleDeleteBusiness}>
-              Eliminar
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
+      )}
     </div>
-  )
+  );
 }
