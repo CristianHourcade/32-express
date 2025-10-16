@@ -189,13 +189,15 @@ function buildReceiptHTML({
     <div>====================================</div>
     </br>
 
-    <div class="row">${padRight("Metodo: " + metodoPago.toUpperCase(), cols)}</div>
     ${pagoCon != null ? `<div class="row">${padRight("Pago con", leftCols)}${padLeft(money(pagoCon), rightCols)}</div>` : ""}
     ${vuelto != null ? `<div class="row">${padRight("Vuelto", leftCols)}${padLeft(money(vuelto), rightCols)}</div>` : ""}
 
     <div class="total-box">
       <div class="row big">${padRight("TOTAL", leftCols)}${padLeft(money(total), rightCols)}</div>
     </div>
+    <div>====================================</div>
+    </br>
+    <div class="row">${padRight("Metodo: " + metodoPago.toUpperCase(), cols)}</div>
 
     <div class="">
       <div>${footer}</div>
