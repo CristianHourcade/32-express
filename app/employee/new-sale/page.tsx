@@ -178,17 +178,17 @@ function buildReceiptHTML({
   <div class="container">
     <div class="center">
       <div class="logo">${negocio}</div>
-      ${direccion ? `<div class="muted">${direccion}</div>` : ""}
-      ${cuit ? `<div class="muted">CUIT: ${cuit}</div>` : ""}
       <div class="muted">${fecha}</div>
     </div>
+    </br>
 
+    <div>====================================</div>
     <div class="sep"></div>
-
     ${lines.map((l) => `<div class="row">${l}</div>`).join("")}
-
     <div class="sep"></div>
-    <div class="row">${padRight("Subtotal", leftCols)}${padLeft(money(subtotal), rightCols)}</div>
+    <div>====================================</div>
+    </br>
+
     <div class="row">${padRight("Metodo: " + metodoPago.toUpperCase(), cols)}</div>
     ${pagoCon != null ? `<div class="row">${padRight("Pago con", leftCols)}${padLeft(money(pagoCon), rightCols)}</div>` : ""}
     ${vuelto != null ? `<div class="row">${padRight("Vuelto", leftCols)}${padLeft(money(vuelto), rightCols)}</div>` : ""}
@@ -197,9 +197,9 @@ function buildReceiptHTML({
       <div class="row big">${padRight("TOTAL", leftCols)}${padLeft(money(total), rightCols)}</div>
     </div>
 
-    <div class="center footer">
+    <div class="">
       <div>${footer}</div>
-      <div class="pill">Instagram: @tumarca</div>
+      <div class>Instagram: @breca.cafe</div>
     </div>
   </div>
 </body>
@@ -632,7 +632,7 @@ export default function NewSalePage() {
     }));
 
     const html = buildReceiptHTML({
-      negocio: activeShift?.businessName || "Mi Negocio",
+      negocio: activeShift?.businessName || " - Breca Cafe",
       direccion: "",       // opcional
       cuit: "",            // opcional
       items,
@@ -641,7 +641,7 @@ export default function NewSalePage() {
       metodoPago: paymentMethod, // "cash" | "card" | "transfer" | "rappi"
       pagoCon: typeof amountGiven === "number" ? amountGiven : null,
       vuelto: typeof change === "number" ? change : null,
-      footer: "¡Volvé pronto!",  // personalizable
+      footer: "¡Gracias por confiar en nosotros! ♡",  // personalizable
     });
 
     await printHTMLTicket(html);
