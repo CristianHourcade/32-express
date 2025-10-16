@@ -48,6 +48,143 @@ const CATEGORIES = [
   "HIGIENE",
   "ALCOHOL",
 ];
+/* ====== Ticket Print Helpers (HTML + window.print) ====== */
+
+// Elegí "80mm" o "58mm"
+const TICKET_WIDTH_MM = 80;
+
+// arma el HTML del ticket (estético)
+function buildReceiptHTML({
+  negocio,
+  direccion,
+  cuit,
+  items,
+  subtotal,
+  total,
+  metodoPago,
+  pagoCon,
+  vuelto,
+  footer = "💛 ¡Gracias por tu compra! 💛",
+}: {
+  negocio: string;
+  direccion?: string;
+  cuit?: string;
+  items: { qty: number; name: string; total: number }[];
+  subtotal: number;
+  total: number;
+  metodoPago: string;
+  pagoCon?: number | null;
+  vuelto?: number | null;
+  footer?: string;
+}) {
+  // columnas según ancho
+  const cols = TICKET_WIDTH_MM === 80 ? 42 : 32;
+  const leftCols = TICKET_WIDTH_MM === 80 ? 28 : 22;
+  const rightCols = cols - leftCols;
+
+  // utilidades de texto fijo-ancho
+  const padRight = (s: string, n: number) =>
+    (s.length > n ? s.slice(0, n) : s + " ".repeat(n - s.length));
+  const padLeft = (s: string, n: number) =>
+    (s.length > n ? s.slice(0, n) : " ".repeat(n - s.length) + s);
+
+  const money = (n: number) =>
+    new Intl.NumberFormat("es-AR", {
+      style: "currency",
+      currency: "ARS",
+      maximumFractionDigits: 0,
+    }).format(n);
+
+  const line = "—".repeat(cols);
+
+  const lines = items.map((it) => {
+    const left = `${it.qty} × ${it.name}`.trim();
+    const right = money(it.total);
+    return `${padRight(left, leftCols)}${padLeft(right, rightCols)}`;
+  });
+
+  const now = new Date();
+  const fecha =
+    now.toLocaleDateString("es-AR") +
+    " " +
+    now.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" });
+
+  // ⚠️ Importante: @page sin márgenes y ancho exacto del rollo
+  return `
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>Ticket</title>
+<style>
+  @page { size: ${TICKET_WIDTH_MM}mm auto; margin: 0; }
+  @media print { body { margin: 0; } }
+  body {
+    width: ${TICKET_WIDTH_MM}mm;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  .container { padding: 8px 10px; }
+  .center { text-align: center; }
+  .muted { color: #555; }
+  .sep { margin: 8px 0; border-top: 1px dashed #000; }
+  .h1 { font-weight: 800; font-size: 16px; letter-spacing: .5px }
+  .row { white-space: pre; font-size: 12px; line-height: 1.25; }
+  .totals { margin-top: 6px; }
+  .big { font-weight: 800; font-size: 14px; }
+  .pill { display:inline-block; padding:2px 6px; border-radius:8px; background:#111; color:#fff; font-size:11px }
+  .footer { margin-top: 12px; font-size: 12px; }
+</style>
+</head>
+<body>
+  <div class="container">
+    <div class="center">
+      <div class="h1">${negocio}</div>
+      ${direccion ? `<div class="muted">${direccion}</div>` : ""}
+      ${cuit ? `<div class="muted">CUIT: ${cuit}</div>` : ""}
+      <div class="muted">${fecha}</div>
+    </div>
+
+    <div class="sep"></div>
+
+    ${lines.map((l) => `<div class="row">${l}</div>`).join("")}
+
+    <div class="sep"></div>
+
+    <div class="row">${padRight("Subtotal", leftCols)}${padLeft(money(subtotal), rightCols)}</div>
+    <div class="row">${padRight("Método: " + metodoPago.toUpperCase(), cols)}</div>
+    ${pagoCon != null ? `<div class="row">${padRight("Pagó", leftCols)}${padLeft(money(pagoCon), rightCols)}</div>` : ""}
+    ${vuelto != null ? `<div class="row">${padRight("Vuelto", leftCols)}${padLeft(money(vuelto), rightCols)}</div>` : ""}
+
+    <div class="row big" style="margin-top:4px;">
+      ${padRight("TOTAL", leftCols)}${padLeft(money(total), rightCols)}
+    </div>
+
+    <div class="center footer">
+      ${footer}<br/>
+      <span class="pill">Instagram: @tumarca</span>
+    </div>
+  </div>
+</body>
+</html>
+`.trim();
+}
+
+// abre una ventana y dispara la impresión
+async function printHTMLTicket(html: string) {
+  const w = window.open("", "_blank", "width=400,height=600");
+  if (!w) throw new Error("El navegador bloqueó la ventana de impresión");
+  w.document.open();
+  w.document.write(html);
+  w.document.close();
+  // esperar a que renderice
+  await new Promise((r) => setTimeout(r, 100));
+  w.focus();
+  w.print();
+  // en algunos navegadores conviene cerrar al final
+  setTimeout(() => { try { w.close(); } catch { } }, 300);
+}
 
 function NoShiftBanner() {
   return (
@@ -448,6 +585,32 @@ export default function NewSalePage() {
     }
   };
 
+  // Llama a esto cuando quieras imprimir (usa tu estado actual)
+  async function handlePrintTicket() {
+    // armo los ítems desde tu carrito
+    const items = cart.map(i => ({
+      qty: i.quantity,
+      name: i.productName,
+      total: i.total,
+    }));
+
+    const html = buildReceiptHTML({
+      negocio: activeShift?.businessName || "Mi Negocio",
+      direccion: "",       // opcional
+      cuit: "",            // opcional
+      items,
+      subtotal: cartTotal, // ajustá si tenés descuentos/IVA
+      total: cartTotal,
+      metodoPago: paymentMethod, // "cash" | "card" | "transfer" | "rappi"
+      pagoCon: typeof amountGiven === "number" ? amountGiven : null,
+      vuelto: typeof change === "number" ? change : null,
+      footer: "¡Volvé pronto!",  // personalizable
+    });
+
+    await printHTMLTicket(html);
+  }
+
+
   /* ─ Complete sale ─ */
   const handleComplete = async () => {
     if (!activeShift || !cart.length) return;
@@ -612,6 +775,12 @@ export default function NewSalePage() {
 
       // 8. Limpiar y mostrar éxito
       setToast("Venta registrada ✔︎");
+      // 👉 Imprimir ticket (no bloquea, pero esperá un tick por seguridad)
+      setTimeout(() => {
+        handlePrintTicket().catch(err => console.error("Print error:", err));
+      }, 150);
+
+      // luego tu limpieza actual:
       setCart([]);
       setConfirm(false);
       setAmountGiven("");
