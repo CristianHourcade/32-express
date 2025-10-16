@@ -64,7 +64,7 @@ function buildReceiptHTML({
   metodoPago,
   pagoCon,
   vuelto,
-  footer = "💛 ¡Gracias por tu compra! 💛",
+  footer = "Gracias por su compra!",
 }: {
   negocio: string;
   direccion?: string;
@@ -77,12 +77,10 @@ function buildReceiptHTML({
   vuelto?: number | null;
   footer?: string;
 }) {
-  // columnas según ancho
   const cols = TICKET_WIDTH_MM === 80 ? 42 : 32;
   const leftCols = TICKET_WIDTH_MM === 80 ? 28 : 22;
   const rightCols = cols - leftCols;
 
-  // utilidades de texto fijo-ancho
   const padRight = (s: string, n: number) =>
     (s.length > n ? s.slice(0, n) : s + " ".repeat(n - s.length));
   const padLeft = (s: string, n: number) =>
@@ -93,12 +91,12 @@ function buildReceiptHTML({
       style: "currency",
       currency: "ARS",
       maximumFractionDigits: 0,
-    }).format(n);
-
-  const line = "—".repeat(cols);
+    })
+      .format(n)
+      .replace("$", "ARS ");
 
   const lines = items.map((it) => {
-    const left = `${it.qty} × ${it.name}`.trim();
+    const left = `${it.qty} x ${it.name}`.trim();
     const right = money(it.total);
     return `${padRight(left, leftCols)}${padLeft(right, rightCols)}`;
   });
@@ -109,7 +107,6 @@ function buildReceiptHTML({
     " " +
     now.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" });
 
-  // ⚠️ Importante: @page sin márgenes y ancho exacto del rollo
   return `
 <!doctype html>
 <html>
@@ -121,26 +118,66 @@ function buildReceiptHTML({
   @media print { body { margin: 0; } }
   body {
     width: ${TICKET_WIDTH_MM}mm;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    font-family: monospace;
+    color: #000;
+    background: #fff;
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
   }
-  .container { padding: 8px 10px; }
+  .container { padding: 6px 10px; }
   .center { text-align: center; }
-  .muted { color: #555; }
-  .sep { margin: 8px 0; border-top: 1px dashed #000; }
-  .h1 { font-weight: 800; font-size: 16px; letter-spacing: .5px }
-  .row { white-space: pre; font-size: 12px; line-height: 1.25; }
-  .totals { margin-top: 6px; }
-  .big { font-weight: 800; font-size: 14px; }
-  .pill { display:inline-block; padding:2px 6px; border-radius:8px; background:#111; color:#fff; font-size:11px }
-  .footer { margin-top: 12px; font-size: 12px; }
+  .muted { color: #222; font-size: 11px; }
+  .sep {
+    margin: 8px 0;
+    border-top: 1px dashed #000;
+    height: 0;
+  }
+  .h1 {
+    font-weight: 900;
+    font-size: 15px;
+    text-transform: uppercase;
+    margin-bottom: 2px;
+  }
+  .row {
+    white-space: pre;
+    font-size: 12px;
+    line-height: 1.3;
+  }
+  .big {
+    font-weight: 900;
+    font-size: 13px;
+    margin-top: 5px;
+  }
+  .total-box {
+    border-top: 2px solid #000;
+    margin-top: 6px;
+    padding-top: 4px;
+  }
+  .footer {
+    margin-top: 12px;
+    font-size: 11px;
+  }
+  .pill {
+    display:inline-block;
+    padding:2px 6px;
+    border-radius:8px;
+    background:#000;
+    color:#fff;
+    font-size:10px;
+    margin-top:4px;
+  }
+  .logo {
+    font-weight: 900;
+    font-size: 18px;
+    letter-spacing: 1px;
+    margin-bottom: 4px;
+  }
 </style>
 </head>
 <body>
   <div class="container">
     <div class="center">
-      <div class="h1">${negocio}</div>
+      <div class="logo">${negocio}</div>
       ${direccion ? `<div class="muted">${direccion}</div>` : ""}
       ${cuit ? `<div class="muted">CUIT: ${cuit}</div>` : ""}
       <div class="muted">${fecha}</div>
@@ -151,25 +188,25 @@ function buildReceiptHTML({
     ${lines.map((l) => `<div class="row">${l}</div>`).join("")}
 
     <div class="sep"></div>
-
     <div class="row">${padRight("Subtotal", leftCols)}${padLeft(money(subtotal), rightCols)}</div>
-    <div class="row">${padRight("Método: " + metodoPago.toUpperCase(), cols)}</div>
-    ${pagoCon != null ? `<div class="row">${padRight("Pagó", leftCols)}${padLeft(money(pagoCon), rightCols)}</div>` : ""}
+    <div class="row">${padRight("Metodo: " + metodoPago.toUpperCase(), cols)}</div>
+    ${pagoCon != null ? `<div class="row">${padRight("Pago con", leftCols)}${padLeft(money(pagoCon), rightCols)}</div>` : ""}
     ${vuelto != null ? `<div class="row">${padRight("Vuelto", leftCols)}${padLeft(money(vuelto), rightCols)}</div>` : ""}
 
-    <div class="row big" style="margin-top:4px;">
-      ${padRight("TOTAL", leftCols)}${padLeft(money(total), rightCols)}
+    <div class="total-box">
+      <div class="row big">${padRight("TOTAL", leftCols)}${padLeft(money(total), rightCols)}</div>
     </div>
 
     <div class="center footer">
-      ${footer}<br/>
-      <span class="pill">Instagram: @tumarca</span>
+      <div>${footer}</div>
+      <div class="pill">Instagram: @tumarca</div>
     </div>
   </div>
 </body>
 </html>
-`.trim();
+  `.trim();
 }
+
 
 // abre una ventana y dispara la impresión
 async function printHTMLTicket(html: string) {
