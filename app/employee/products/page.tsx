@@ -20,6 +20,7 @@ const categories = [
   "ALCOHOL",
   "PROMO",
   "SIN CATEGORIA",
+  "BRECA",
 ];
 
 // Helper para derivar categoría y base del nombre

@@ -15,8 +15,10 @@ const CATEGORIES = [
   "TABACO",
   "HUEVOS",
   "HIGIENE",
-  "PROMO",
   "ALCOHOL",
+  "PROMO",
+  "SIN CATEGORIA",
+  "BRECA",
 ];
 const loadPromotions = async () =>
   fetchAll((from, to) =>

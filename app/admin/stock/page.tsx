@@ -13,7 +13,7 @@ function monthRange(offset = 0) {
   return { start, end };
 }
 
-const CATEGORIES = [
+const categories = [
   "ALMACEN",
   "CIGARRILLOS",
   "GOLOSINAS",
@@ -24,6 +24,9 @@ const CATEGORIES = [
   "HUEVOS",
   "HIGIENE",
   "ALCOHOL",
+  "PROMO",
+  "SIN CATEGORIA",
+  "BRECA",
 ];
 
 function extractCategory(name: string) {

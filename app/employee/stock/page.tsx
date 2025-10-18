@@ -168,6 +168,9 @@ const CATEGORIES = [
   "HUEVOS",
   "HIGIENE",
   "ALCOHOL",
+  "PROMO",
+  "SIN CATEGORIA",
+  "BRECA",
 ];
 
 function extractCategory(name: string) {
