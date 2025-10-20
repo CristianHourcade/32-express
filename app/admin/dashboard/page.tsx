@@ -91,6 +91,33 @@ function MultiSelectDropdown({
     </div>
   );
 }
+// ===== Unificación de métodos: Tarjeta = card + transfer + mercadopago =====
+const UNIFIED_KEYS = ["cash", "card", "rappi", "consumo"] as const;
+type UnifiedKey = typeof UNIFIED_KEYS[number];
+
+const unifyPayments = (pm: Record<string, number> = {}) => ({
+  cash: pm.cash ?? 0,
+  // Tarjeta incluye: tarjeta + transferencia + mercadopago
+  card: (pm.card ?? 0) + (pm.transfer ?? 0) + (pm.mercadopago ?? 0),
+  rappi: pm.rappi ?? 0,
+  consumo: pm.consumo ?? 0,
+});
+
+const unifyExpenses = (em: Record<string, number> = {}) => ({
+  cash: em.cash ?? 0,
+  // Tarjeta incluye: tarjeta + transferencia + mercadopago
+  card: (em.card ?? 0) + (em.transfer ?? 0) + (em.mercadopago ?? 0),
+  rappi: em.rappi ?? 0,
+  consumo: em.consumo ?? 0,
+});
+
+// Meta y estilos SOLO para los métodos unificados
+const METHOD_META_UNI: Record<UnifiedKey, { label: string; short: string; barClass: string; dotClass: string }> = {
+  cash: { label: "Efectivo", short: "EF", barClass: "bg-emerald-500", dotClass: "bg-emerald-500" },
+  card: { label: "Tarjeta (incl. Transfer/MP)", short: "TJ", barClass: "bg-indigo-500", dotClass: "bg-indigo-500" },
+  rappi: { label: "Rappi", short: "RP", barClass: "bg-orange-500", dotClass: "bg-orange-500" },
+  consumo: { label: "Consumo", short: "CI", barClass: "bg-slate-400", dotClass: "bg-slate-400" },
+};
 
 /* ======== Utils locales ======== */
 const fmtMoney = (n: number) => `$ ${formatPrice(n || 0)}`;
@@ -131,29 +158,19 @@ function BusinessCard({
   const ticket = b.avgTicket ?? 0;
 
   // Combinar transferencia+MP para visual principal
-  const payments = {
-    cash: b.paymentMethods?.cash ?? 0,
-    card: b.paymentMethods?.card ?? 0,
-    rappi: b.paymentMethods?.rappi ?? 0,
-    transfer: (b.paymentMethods?.transfer ?? 0) + (b.paymentMethods?.mercadopago ?? 0),
-    consumo: b.paymentMethods?.consumo ?? 0,
-  };
-  const expensesByMethod = {
-    cash: b.expensesByMethod?.cash ?? 0,
-    card: b.expensesByMethod?.card ?? 0,
-    rappi: b.expensesByMethod?.rappi ?? 0,
-    transfer: (b.expensesByMethod?.transfer ?? 0) + (b.expensesByMethod?.mercadopago ?? 0),
-    consumo: b.expensesByMethod?.consumo ?? 0,
-  };
+  // ► MONTOS UNIFICADOS (entradas y gastos)
+  const payments = unifyPayments(b.paymentMethods || {});
+  const expensesByMethod = unifyExpenses(b.expensesByMethod || {});
 
-  // Barra apilada (solo proporción de ventas)
-  const stackedKeys = ["cash", "card", "rappi", "transfer", "consumo"] as const;
+  // ► Claves/segmentos para barra y tabla (solo métodos unificados)
+  const stackedKeys = UNIFIED_KEYS;
   const segments = stackedKeys.map(k => ({
     key: k,
     value: payments[k],
     pct: clamp(pct(payments[k], total)),
-    ...METHOD_META[k],
+    ...METHOD_META_UNI[k],
   }));
+
 
   // Método top para el detalle
   const top = stackedKeys
@@ -245,6 +262,7 @@ function BusinessCard({
           <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-3">
 
             {/* Tabla mini por método */}
+            {/* Tabla mini por método */}
             <div className="sm:col-span-3 mt-1 overflow-x-auto">
               <table className="w-full text-sm">
                 <thead className="text-[11px] text-slate-500">
@@ -265,8 +283,8 @@ function BusinessCard({
                       <tr key={`row-${k}`} className="border-t border-slate-200 dark:border-slate-700">
                         <td className="py-1">
                           <span className="inline-flex items-center gap-2">
-                            <span className={`w-2 h-2 rounded ${METHOD_META[k].dotClass}`} />
-                            {METHOD_META[k].label}
+                            <span className={`w-2 h-2 rounded ${METHOD_META_UNI[k].dotClass}`} />
+                            {METHOD_META_UNI[k].label}
                           </span>
                         </td>
                         <td className="py-1 text-right tabular-nums">{fmtMoney(ventas)}</td>
@@ -276,9 +294,11 @@ function BusinessCard({
                       </tr>
                     );
                   })}
+
                 </tbody>
               </table>
             </div>
+
 
           </div>
         </div>
