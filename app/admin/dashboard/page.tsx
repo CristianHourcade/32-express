@@ -243,26 +243,6 @@ function BusinessCard({
       <div className={`grid transition-[grid-template-rows] duration-200 ease-out ${open ? "grid-rows-[1fr]" : "grid-rows-[0fr]"} mt-3`}>
         <div className="overflow-hidden">
           <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-3">
-            {/* Método destacado */}
-            <div className="sm:col-span-3 flex items-center justify-between">
-              <span className="text-xs text-slate-500">Método destacado</span>
-              <span className="text-xs font-medium">{top?.label ?? "—"}</span>
-            </div>
-
-            <div className="bg-slate-50 dark:bg-slate-800/50 rounded-lg p-2">
-              <div className="text-[11px] text-slate-500">Ventas</div>
-              <div className="font-semibold tabular-nums">{fmtMoney(top?.ventas ?? 0)}</div>
-            </div>
-            <div className="bg-slate-50 dark:bg-slate-800/50 rounded-lg p-2">
-              <div className="text-[11px] text-slate-500">Gastos</div>
-              <div className="font-semibold tabular-nums text-red-600 dark:text-red-400">{fmtMoney(top?.gastos ?? 0)}</div>
-            </div>
-            <div className="bg-slate-50 dark:bg-slate-800/50 rounded-lg p-2">
-              <div className="text-[11px] text-slate-500">Profit</div>
-              <div className={`font-semibold tabular-nums ${((top?.profit ?? 0) >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400")}`}>
-                {fmtMoney(top?.profit ?? 0)}
-              </div>
-            </div>
 
             {/* Tabla mini por método */}
             <div className="sm:col-span-3 mt-1 overflow-x-auto">
