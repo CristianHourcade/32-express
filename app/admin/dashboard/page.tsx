@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
-import { Banknote, Building2, CalendarDays, ChevronLeft, ChevronRight, CreditCard, Flame, Wallet } from "lucide-react";
+import { Banknote, Building2, CalendarDays, ChevronLeft, ChevronRight, CircleDollarSign, CreditCard, Flame, Wallet } from "lucide-react";
 
 /* ========= HELPERS DE FECHA ========= */
 function monthRange(offset = 0) {
@@ -25,24 +25,10 @@ const paymentColors = {
   Transferencia: "bg-yellow-100/70 text-yellow-900 dark:bg-yellow-900/40 dark:text-yellow-100",
 };
 
+// Reemplazá la función actual
 const formatPrice = (n: number) =>
-  n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-const Stat = ({
-  label,
-  value,
-  accent = "",
-  className = "",
-}: {
-  label: string;
-  value: string | number;
-  accent?: string;
-  className?: string;
-}) => (
-  <div className="mb-2">
-    <p className="text-sm text-slate-500 dark:text-slate-400">{label}</p>
-    <p className={`${accent} ${className}`}>{value}</p>
-  </div>
-);
+  n.toLocaleString("en-US", { maximumFractionDigits: 0 });
+
 
 // Paleta por método de pago
 const pmStyle: Record<"cash" | "card" | "rappi" | "transfer", string> = {
@@ -106,135 +92,221 @@ function MultiSelectDropdown({
   );
 }
 
-function BusinessCard({ b }: { b: any }) {
-  const profitColor = b.profit >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400";
+/* ======== Utils locales ======== */
+const fmtMoney = (n: number) => `$ ${formatPrice(n || 0)}`;
+const pct = (num: number, den: number) => (den > 0 ? (num / den) * 100 : 0);
+const clamp = (v: number) => Math.max(0, Math.min(100, v));
 
-  const paymentMethods = [
-    {
-      label: "Efectivo",
-      key: "cash",
-      value: b.paymentMethods.cash,
-      expense: b.expensesByMethod?.cash ?? 0,
-      icon: <Wallet className="w-4 h-4" />,
-    },
-    {
-      label: "Tarjeta",
-      key: "card",
-      value: b.paymentMethods.card,
-      expense: b.expensesByMethod?.card ?? 0,
-      icon: <CreditCard className="w-4 h-4" />,
-    },
-    {
-      label: "Rappi",
-      key: "rappi",
-      value: b.paymentMethods.rappi,
-      expense: b.expensesByMethod?.rappi ?? 0,
-      icon: <Flame className="w-4 h-4" />,
-    },
-    {
-      label: "Transferencia",
-      key: "transfer",
-      value: (b.paymentMethods.transfer ?? 0) + (b.paymentMethods.mercadopago ?? 0),
-      expense:
-        (b.expensesByMethod?.transfer ?? 0) + (b.expensesByMethod?.mercadopago ?? 0),
-      icon: <Banknote className="w-4 h-4" />,
-    },
-  ];
+const METHOD_META: Record<
+  "cash" | "card" | "rappi" | "transfer" | "mercadopago" | "consumo",
+  { label: string; short: string; barClass: string; dotClass: string }
+> = {
+  cash: { label: "Efectivo", short: "EF", barClass: "bg-emerald-500", dotClass: "bg-emerald-500" },
+  card: { label: "Tarjeta", short: "TJ", barClass: "bg-indigo-500", dotClass: "bg-indigo-500" },
+  rappi: { label: "Rappi", short: "RP", barClass: "bg-orange-500", dotClass: "bg-orange-500" },
+  transfer: { label: "Transfer/MP", short: "TR", barClass: "bg-yellow-500", dotClass: "bg-yellow-500" },
+  mercadopago: { label: "MP", short: "MP", barClass: "bg-sky-500", dotClass: "bg-sky-500" },
+  consumo: { label: "Consumo", short: "CI", barClass: "bg-slate-400", dotClass: "bg-slate-400" },
+};
+
+function marginSemaforo(m: number) {
+  if (m >= 40) return { pill: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300", text: "🟢 Margen" };
+  if (m >= 20) return { pill: "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300", text: "🟡 Margen" };
+  return { pill: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300", text: "🔴 Margen" };
+}
+
+/* ======== BusinessCard – Compacta + Expandible ======== */
+function BusinessCard({
+  b,
+  open,
+  onToggle,
+}: { b: any; open: boolean; onToggle: () => void }) {
+
+  // Totales
+  const total = b.totalAmount ?? 0;
+  const gastos = b.totalExpense ?? 0;
+  const profit = total - gastos;
+  const margin = total > 0 ? (profit / total) * 100 : 0;
+  const tx = b.transactions ?? 0;
+  const ticket = b.avgTicket ?? 0;
+
+  // Combinar transferencia+MP para visual principal
+  const payments = {
+    cash: b.paymentMethods?.cash ?? 0,
+    card: b.paymentMethods?.card ?? 0,
+    rappi: b.paymentMethods?.rappi ?? 0,
+    transfer: (b.paymentMethods?.transfer ?? 0) + (b.paymentMethods?.mercadopago ?? 0),
+    consumo: b.paymentMethods?.consumo ?? 0,
+  };
+  const expensesByMethod = {
+    cash: b.expensesByMethod?.cash ?? 0,
+    card: b.expensesByMethod?.card ?? 0,
+    rappi: b.expensesByMethod?.rappi ?? 0,
+    transfer: (b.expensesByMethod?.transfer ?? 0) + (b.expensesByMethod?.mercadopago ?? 0),
+    consumo: b.expensesByMethod?.consumo ?? 0,
+  };
+
+  // Barra apilada (solo proporción de ventas)
+  const stackedKeys = ["cash", "card", "rappi", "transfer", "consumo"] as const;
+  const segments = stackedKeys.map(k => ({
+    key: k,
+    value: payments[k],
+    pct: clamp(pct(payments[k], total)),
+    ...METHOD_META[k],
+  }));
+
+  // Método top para el detalle
+  const top = stackedKeys
+    .map(k => ({ k, label: METHOD_META[k].label, ventas: payments[k], gastos: expensesByMethod[k], profit: payments[k] - expensesByMethod[k] }))
+    .sort((a, b) => b.ventas - a.ventas)[0];
+
+  const profitColor = profit >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400";
+  const { pill, text } = marginSemaforo(margin);
+  /* ——— KPIs – lectura de un golpe (ANTI-COLAPSE) ——— */
+  function KPI({
+    label,
+    value,
+    className = "",
+  }: { label: string; value: React.ReactNode; className?: string }) {
+    return (
+      <div className="min-w-[150px]">
+        <div className="text-[11px] text-slate-500 leading-none">{label}</div>
+        <div className={`mt-1 text-sm font-semibold tabular-nums whitespace-nowrap leading-tight ${className}`}>
+          {value}
+        </div>
+      </div>
+    );
+  }
+
 
 
   return (
-    <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl p-6 shadow-md hover:shadow-lg transition-shadow space-y-5 flex flex-col justify-between min-h-[400px]">
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={onToggle}
+      onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && onToggle()}
+      className="group bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl p-4 shadow-sm hover:shadow-md transition-all outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
+    >
+      {/* Header compacto */}
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2 min-w-0">
+          <Building2 className="w-4 h-4 text-indigo-500 shrink-0" />
+          <h3 className="text-sm font-semibold text-gray-900 dark:text-white truncate">{b.name}</h3>
+        </div>
 
-      {/* Header */}
-      <div className="flex items-center gap-3">
-        <Building2 className="w-5 h-5 text-indigo-500" />
-        <h3 className="text-xl font-semibold text-gray-900 dark:text-white tracking-tight">
-          {b.name}
-        </h3>
-      </div>
-
-      {/* Datos financieros */}
-      <div className="grid grid-cols-2 gap-4 text-sm">
-        <div className="space-y-1">
-          <p className="text-slate-500 flex items-center gap-1">💰 Total Ventas</p>
-          <p className="text-lg font-bold text-gray-800 dark:text-white tabular-nums">
-            $ {formatPrice(b.totalAmount)}
-          </p>
-        </div>
-        <div className="space-y-1">
-          <p className="text-slate-500 flex items-center gap-1">💸 Gastos</p>
-          <p className="text-lg font-bold text-red-500 tabular-nums">
-            $ {formatPrice(b.totalExpense)}
-          </p>
-        </div>
-        <div className="space-y-1">
-          <p className="text-slate-500 flex items-center gap-1">📈 Profit</p>
-          <p className={`text-lg font-bold ${profitColor} tabular-nums`}>
-            $ {formatPrice(b.profit)}
-          </p>
-        </div>
-        <div className="space-y-1">
-          <p className="text-slate-500 flex items-center gap-1">🎟️ Ticket Promedio</p>
-          <p className="text-lg font-medium text-gray-700 dark:text-gray-300 tabular-nums">
-            $ {formatPrice(b.avgTicket)}
-          </p>
+        <div className="flex items-center gap-2">
+          <span className={`px-2 py-0.5 text-[11px] font-semibold rounded-full ${pill}`}>
+            {text} {margin.toFixed(1)}%
+          </span>
+          <svg className={`w-4 h-4 text-slate-400 transition-transform ${open ? "rotate-180" : ""}`} /* ... */>
+            <polyline points="6 9 12 15 18 9" />
+          </svg>
         </div>
       </div>
 
-      <hr className="my-2 border-slate-200 dark:border-slate-700" />
+      {/* KPIs – lectura de un golpe */}
+      <div className="mt-3 grid [grid-template-columns:repeat(auto-fit,minmax(150px,1fr))] gap-x-6 gap-y-2 items-end">
+        <KPI label="Ventas" value={fmtMoney(total)} />
+        <KPI label="Gastos" value={fmtMoney(gastos)} className="text-red-600 dark:text-red-400" />
+        <KPI label="Profit" value={fmtMoney(profit)} className={profit >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"} />
+        <KPI label="Ticket" value={fmtMoney(ticket)} className="opacity-80" />
+        <KPI label="N. Ventas" value={tx} className="opacity-80" />
+        <KPI label="Rentab." value={`${margin.toFixed(1)}%`} className="opacity-80" />
+      </div>
 
-      {/* Métodos de Pago */}
-      <div className="space-y-2">
-        <p className="text-sm text-slate-500 mb-1">💳 Distribución por método</p>
-        <div className="grid grid-cols-2 gap-3">
-          {paymentMethods.map(({ label, key, value, expense, icon }) => {
-            const profit = value - expense;
-            const profitColor = profit >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400";
-            const bgClass = {
-              cash: "bg-emerald-100/70 dark:bg-emerald-900/40",
-              card: "bg-indigo-100/70 dark:bg-indigo-900/40",
-              rappi: "bg-orange-100/70 dark:bg-orange-900/40",
-              transfer: "bg-yellow-100/70 dark:bg-yellow-900/40",
-            }[key as keyof typeof paymentColors] || "bg-gray-100 dark:bg-slate-800/40";
+      {/* Barra apilada por método */}
+      <div className="mt-4">
+        <div className="flex h-3 w-full rounded-full overflow-hidden bg-slate-100 dark:bg-slate-800">
+          {segments.map(s => s.pct > 0 && (
+            <div
+              key={s.key}
+              className={`${s.barClass} h-full`}
+              style={{ width: `${s.pct}%` }}
+              title={`${s.label}: ${fmtMoney(s.value)} (${s.pct.toFixed(0)}%)`}
+            />
+          ))}
+        </div>
 
+        {/* Leyenda mínima */}
+        <div className="mt-2 flex flex-wrap gap-2">
+          {segments.filter(s => s.value > 0).map(s => (
+            <span key={`legend-${s.key}`} className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full border border-slate-200 dark:border-slate-700">
+              <span className={`inline-block w-2 h-2 rounded ${s.dotClass}`} />
+              {s.short}: {fmtMoney(s.value)}
+            </span>
+          ))}
+        </div>
+      </div>
 
-            return (
-              <div
-                key={label}
-                className={`flex flex-col justify-between p-4 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 bg-gradient-to-br ${bgClass} hover:shadow-md transition-all duration-200`}
-              >
-                <div className="flex items-center gap-2 mb-3">
-                  <div className="p-2 bg-white/80 dark:bg-slate-800/40 rounded-full shadow">
-                    {icon}
-                  </div>
-                  <span className="text-sm font-semibold text-gray-800 dark:text-white">
-                    {label}
-                  </span>
-                </div>
+      {/* ===== Detalle expandible ===== */}
+      <div className={`grid transition-[grid-template-rows] duration-200 ease-out ${open ? "grid-rows-[1fr]" : "grid-rows-[0fr]"} mt-3`}>
+        <div className="overflow-hidden">
+          <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-3">
+            {/* Método destacado */}
+            <div className="sm:col-span-3 flex items-center justify-between">
+              <span className="text-xs text-slate-500">Método destacado</span>
+              <span className="text-xs font-medium">{top?.label ?? "—"}</span>
+            </div>
 
-                <div className="space-y-1 text-right tabular-nums text-[13px]">
-                  <div className="flex justify-between text-gray-700 dark:text-gray-300">
-                    <span className="text-xs">Ventas</span>
-                    <span className="font-medium">$ {formatPrice(value)}</span>
-                  </div>
-                  <div className="flex justify-between text-red-600 dark:text-red-400">
-                    <span className="text-xs">Gastos</span>
-                    <span className="font-medium">– $ {formatPrice(expense)}</span>
-                  </div>
-                  <div className={`flex justify-between font-semibold ${profitColor}`}>
-                    <span className="text-xs">Profit</span>
-                    <span>= $ {formatPrice(profit)}</span>
-                  </div>
-                </div>
+            <div className="bg-slate-50 dark:bg-slate-800/50 rounded-lg p-2">
+              <div className="text-[11px] text-slate-500">Ventas</div>
+              <div className="font-semibold tabular-nums">{fmtMoney(top?.ventas ?? 0)}</div>
+            </div>
+            <div className="bg-slate-50 dark:bg-slate-800/50 rounded-lg p-2">
+              <div className="text-[11px] text-slate-500">Gastos</div>
+              <div className="font-semibold tabular-nums text-red-600 dark:text-red-400">{fmtMoney(top?.gastos ?? 0)}</div>
+            </div>
+            <div className="bg-slate-50 dark:bg-slate-800/50 rounded-lg p-2">
+              <div className="text-[11px] text-slate-500">Profit</div>
+              <div className={`font-semibold tabular-nums ${((top?.profit ?? 0) >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400")}`}>
+                {fmtMoney(top?.profit ?? 0)}
               </div>
-            );
-          })}
+            </div>
+
+            {/* Tabla mini por método */}
+            <div className="sm:col-span-3 mt-1 overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="text-[11px] text-slate-500">
+                  <tr>
+                    <th className="text-left py-1">Método</th>
+                    <th className="text-right py-1">Ventas</th>
+                    <th className="text-right py-1">Gastos</th>
+                    <th className="text-right py-1">Profit</th>
+                    <th className="text-right py-1">% Part.</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {stackedKeys.map(k => {
+                    const ventas = payments[k];
+                    const egres = expensesByMethod[k];
+                    const pft = ventas - egres;
+                    return (
+                      <tr key={`row-${k}`} className="border-t border-slate-200 dark:border-slate-700">
+                        <td className="py-1">
+                          <span className="inline-flex items-center gap-2">
+                            <span className={`w-2 h-2 rounded ${METHOD_META[k].dotClass}`} />
+                            {METHOD_META[k].label}
+                          </span>
+                        </td>
+                        <td className="py-1 text-right tabular-nums">{fmtMoney(ventas)}</td>
+                        <td className="py-1 text-right tabular-nums text-red-600 dark:text-red-400">{fmtMoney(egres)}</td>
+                        <td className={`py-1 text-right tabular-nums ${pft >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>{fmtMoney(pft)}</td>
+                        <td className="py-1 text-right tabular-nums">{pct(ventas, total).toFixed(1)}%</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+          </div>
         </div>
       </div>
     </div>
   );
-
 }
+
 
 
 /* ========= FETCH HELPERS ========= */
@@ -363,6 +435,8 @@ export default function AdminDashboard() {
     () => monthRange(monthOffset),
     [monthOffset]
   );
+  // arriba, junto con otros estados
+  const [allExpanded, setAllExpanded] = useState(false);
 
   /* -------- ESTADOS -------- */
   const [businesses, setBusinesses] = useState<any[]>([]);
@@ -542,8 +616,8 @@ export default function AdminDashboard() {
         tx: number;
         amount: number;
         expense: number;
-        payments: Record<"cash" | "card" | "transfer" | "mercadopago" | "rappi", number>;
-        expensesByMethod: Record<"cash" | "card" | "transfer" | "mercadopago" | "rappi", number>;
+        payments: Record<"cash" | "card" | "transfer" | "mercadopago" | "rappi" | "consumo", number>;
+        expensesByMethod: Record<"cash" | "card" | "transfer" | "mercadopago" | "rappi" | "consumo", number>;
       }
     >();
 
@@ -552,8 +626,8 @@ export default function AdminDashboard() {
         tx: 0,
         amount: 0,
         expense: 0,
-        payments: { cash: 0, card: 0, transfer: 0, mercadopago: 0, rappi: 0 },
-        expensesByMethod: { cash: 0, card: 0, transfer: 0, mercadopago: 0, rappi: 0 },
+        payments: { cash: 0, card: 0, transfer: 0, mercadopago: 0, rappi: 0, consumo: 0 },
+        expensesByMethod: { cash: 0, card: 0, transfer: 0, mercadopago: 0, rappi: 0, consumo: 0 },
       })
     );
 
@@ -593,7 +667,7 @@ export default function AdminDashboard() {
   /* -------- TURNOS -------- */
   const calcShiftTotals = (sh: any) => {
     const ss = sales.filter((s) => s.shift_id === sh.id);
-    const pm = { cash: 0, card: 0, transfer: 0, mercadopago: 0, rappi: 0 };
+    const pm = { cash: 0, card: 0, transfer: 0, mercadopago: 0, rappi: 0, consumo: 0 };
     ss.forEach((s) => {
       if (s.payment_method in pm) pm[s.payment_method] += s.total;
     });
@@ -608,6 +682,7 @@ export default function AdminDashboard() {
     transfer: "bg-yellow-50 dark:bg-yellow-900/30 rounded-md",
     mercadopago: "bg-sky-50 dark:bg-sky-900/30 rounded-md",
     rappi: "bg-orange-50 dark:bg-orange-900/30 rounded-md",
+    consumo: "",
   }[m] || "bg-gray-50 dark:bg-gray-800 rounded-md");
 
 
@@ -718,9 +793,18 @@ export default function AdminDashboard() {
             ))}
           </div>
         ) : (
+          // grilla de negocios (agregá key y pasá props open/onToggle)
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 mt-8">
-            {businessesWithMonthlyData.map((b) => <BusinessCard b={b} />)}
+            {businessesWithMonthlyData.map((b: any) => (
+              <BusinessCard
+                key={b.id}
+                b={b}
+                open={allExpanded}
+                onToggle={() => setAllExpanded(v => !v)}
+              />
+            ))}
           </div>
+
         )}
       </section>
 
@@ -789,6 +873,7 @@ export default function AdminDashboard() {
                       { label: "Efectivo", value: payments.cash, class: pmClass("cash") },
                       { label: "Tarjeta", value: payments.card, class: pmClass("card") },
                       { label: "Rappi", value: payments.rappi, class: pmClass("rappi") },
+                      { label: "CONSUMO INTERNO", value: payments.consumo, class: pmClass("consumo") },
                       {
                         label: "Transferencia",
                         value: (payments.transfer ?? 0) + (payments.mercadopago ?? 0),

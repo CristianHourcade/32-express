@@ -47,6 +47,9 @@ const CATEGORIES = [
   "HUEVOS",
   "HIGIENE",
   "ALCOHOL",
+  "PROMO",
+  "SIN CATEGORIA",
+  "BRECA",
 ];
 /* ====== Ticket Print Helpers (HTML + window.print) ====== */
 
@@ -328,7 +331,7 @@ export default function NewSalePage() {
 
   const [cart, setCart] = useState<CartItem[]>([]);
   const [paymentMethod, setPaymentMethod] = useState<
-    "cash" | "card" | "transfer" | "mercadopago" | "rappi"
+    "cash" | "card" | "transfer" | "mercadopago" | "rappi" | "consumo"
   >("cash");
 
   const [confirm, setConfirm] = useState(false);
@@ -640,7 +643,7 @@ export default function NewSalePage() {
       items,
       subtotal: cartTotal, // ajustá si tenés descuentos/IVA
       total: cartTotal,
-      metodoPago: paymentMethod, // "cash" | "card" | "transfer" | "rappi"
+      metodoPago: paymentMethod, // "cash" | "card" | "transfer" | "rappi" "consumo"
       pagoCon: typeof amountGiven === "number" ? amountGiven : null,
       vuelto: typeof change === "number" ? change : null,
       footer: "¡Gracias por confiar en nosotros! ♡",  // personalizable
@@ -980,6 +983,7 @@ export default function NewSalePage() {
     card: "💳 Tarjeta",
     transfer: "🏦 Transferencia",
     rappi: "📲 Rappi",
+    consumo: " CONSUMO INTERNO"
   };
 
 
@@ -1141,7 +1145,7 @@ export default function NewSalePage() {
             <div>
               <h3 className="text-xl font-bold text-center mb-4">MÉTODO DE PAGO</h3>
               <div className="grid grid-cols-2 gap-4 mb-6">
-                {(["cash", "card", "transfer", "rappi"] as const).map((m) => {
+                {(["cash", "card", "transfer", "rappi", "consumo"] as const).map((m) => {
                   const isActive = paymentMethod === m;
                   return (
                     <button
