@@ -13,7 +13,7 @@ function monthRange(offset = 0) {
   return { start, end };
 }
 
-const categories = [
+const CATEGORIES = [
   "ALMACEN",
   "CIGARRILLOS",
   "GOLOSINAS",

@@ -28,6 +28,9 @@ const loadPromotions = async () =>
       .range(from, to)
   );
 
+const money = (n: number) =>
+  `$ ${Number(n || 0).toLocaleString("es-AR", { maximumFractionDigits: 0 })}`;
+
 async function fetchAll(query) {
   const pageSize = 1000;
   let page = 0,
@@ -53,8 +56,12 @@ async function fetchAll(query) {
 
 const loadProductMasters = async () =>
   fetchAll((from, to) =>
-    supabase.from("products_master").select("id, name").range(from, to)
+    supabase
+      .from("products_master")
+      .select("id, name, default_purchase") // ⬅️ agregamos costo unitario
+      .range(from, to)
   );
+
 
 const loadMasterStocks = async (businessId) =>
   fetchAll((from, to) =>
@@ -70,7 +77,9 @@ export default function FaltantesPage() {
   const [selectedBiz, setSelectedBiz] = useState("");
   const [daysFilter, setDaysFilter] = useState(7);
   const [faltantes, setFaltantes] = useState([]);
-  const [copied, setCopied] = useState(false);
+  const [copiedSelected, setCopiedSelected] = useState(false);
+  const [copiedAll, setCopiedAll] = useState(false);
+
   const [loading, setLoading] = useState(false);
   const [selectedRows, setSelectedRows] = useState(new Set());
   const [sortBy, setSortBy] = useState("stock");
@@ -87,6 +96,7 @@ export default function FaltantesPage() {
 
   useEffect(() => {
     if (!selectedBiz) return;
+
     setLoading(true);
     (async () => {
       const since = new Date(
@@ -106,6 +116,7 @@ export default function FaltantesPage() {
         loadMasterStocks(selectedBiz),
         loadPromotions(), // ⬅️ nuevo
       ]);
+      const costMap = new Map(masters.map(m => [m.id, Number(m.default_purchase ?? 0)]));
 
       const ventaMap = new Map();
       sales?.forEach((s) => {
@@ -146,6 +157,17 @@ export default function FaltantesPage() {
           const needsReplenish = vendido > stock;
           const categoria = m.name?.split(" ")[0]?.toUpperCase();
 
+          // ⬇️ NUEVO: costo de compra y costo de reposición
+          // helper por si default_purchase llega como string/vacío
+          const toNumber = (x) => {
+            const n = typeof x === "number" ? x : parseFloat(String(x).replace(",", "."));
+            return Number.isFinite(n) ? n : 0;
+          };
+
+          const unitCost = toNumber(costMap.get(m.id)); // costo unitario normalizado
+          const costoRepo = unitCost > 0 && vendido > 0 ? unitCost * vendido : 0; // costo de reponer lo vendido
+
+
           return {
             id: m.id,
             name: m.name,
@@ -155,9 +177,12 @@ export default function FaltantesPage() {
             needsInspection,
             needsReplenish,
             categoria: CATEGORIES.includes(categoria) ? categoria : "OTROS",
+            unitCost,     // ⬅️ nuevo (puede servirte después)
+            costoRepo,    // ⬅️ nuevo
           };
         })
         .filter((f) => f.vendido > 0);
+
 
       setFaltantes(faltantesCalculados);
       setLoading(false);
@@ -184,63 +209,82 @@ export default function FaltantesPage() {
     setSelectedRows(newSet);
   };
 
-  const copyToClipboard = () => {
-    // Buscamos el nombre del local seleccionado
+  const copySelectedSoldCost = () => {
+    if (!selectedRows.size) return;
+
     const currentBiz = businesses.find((b) => b.id === selectedBiz);
     const bizName = currentBiz ? currentBiz.name : "Local";
 
-    const lines = [];
-    // Título con nombre de local
-    lines.push(`*${bizName} — FALTANTES*`, "");
+    const lines: string[] = [];
+    lines.push(`*${bizName}*`, ""); // negrita en título
 
-    // Creamos el orden de categorías
+    let granTotal = 0;
     const categoriesOrder = [...CATEGORIES, "OTROS"];
-    categoriesOrder.forEach((categoria) => {
-      const items = grouped[categoria] || [];
-      // Solo los seleccionados en esa categoría
-      const sel = items.filter((f) => selectedRows.has(f.id));
-      if (!sel.length) return;
 
-      // Encabezado de categoría
-      lines.push(`*${categoria}*`);
-      // Lista de productos
-      sel.forEach((f) => {
-        lines.push(`- ${f.name}: *${f.faltan}*`);
+    categoriesOrder.forEach((categoria) => {
+      const items = (grouped[categoria] || []).filter((f) => selectedRows.has(f.id));
+      if (!items.length) return;
+
+      lines.push(`*${categoria}*`); // negrita categoría
+      let subtotal = 0;
+
+      items.forEach((f) => {
+        const costo = Number(f.costoRepo || 0);
+        subtotal += costo;
+        lines.push(`- ${f.name} · *${f.vendido}u* · ${costo > 0 ? `*${money(costo)}*` : "—"}`);
       });
-      lines.push("");
+
+      granTotal += subtotal;
+      lines.push(`_Subtotal ${categoria}: ${subtotal > 0 ? `*${money(subtotal)}*` : "—"}_`, "");
     });
 
-    // Copiamos al portapapeles
+    lines.push(`*TOTAL A REPONER: ${granTotal > 0 ? money(granTotal) : "—"}*`);
+
     navigator.clipboard.writeText(lines.join("\n"));
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    setCopiedSelected(true);
+    setTimeout(() => setCopiedSelected(false), 2000);
   };
+
+
+
+
   const [copiedMissing, setCopiedMissing] = useState(false);
 
-  const copyMissingOnly = () => {
+  const copyAllSoldCost = () => {
     const currentBiz = businesses.find((b) => b.id === selectedBiz);
     const bizName = currentBiz ? currentBiz.name : "Local";
 
-    const lines = [];
-    lines.push(`*${bizName} — REPOSICIÓN SUGERIDA*`, "");
+    const lines: string[] = [];
+    lines.push(`*${bizName}*`, "");
 
+    let granTotal = 0;
     const categoriesOrder = [...CATEGORIES, "OTROS"];
+
     categoriesOrder.forEach((categoria) => {
       const items = grouped[categoria] || [];
-      // Solo con faltan > 0
-      const sel = items.filter((f) => f.faltan > 0);
+      if (!items.length) return;
+
+      const sel = items.filter((f) => (f.vendido ?? 0) > 0);
       if (!sel.length) return;
 
       lines.push(`*${categoria}*`);
+      let subtotal = 0;
+
       sel.forEach((f) => {
-        lines.push(`- ${f.name}: *${f.faltan}*`);
+        const costo = Number(f.costoRepo || 0);
+        subtotal += costo;
+        lines.push(`- ${f.name} · *${f.vendido}u* · ${costo > 0 ? `*${money(costo)}*` : "—"}`);
       });
-      lines.push("");
+
+      granTotal += subtotal;
+      lines.push(`_Subtotal ${categoria}: ${subtotal > 0 ? `*${money(subtotal)}*` : "—"}_`, "");
     });
 
+    lines.push(`*TOTAL A REPONER: ${granTotal > 0 ? money(granTotal) : "—"}*`);
+
     navigator.clipboard.writeText(lines.join("\n"));
-    setCopiedMissing(true);
-    setTimeout(() => setCopiedMissing(false), 2000);
+    setCopiedAll(true);
+    setTimeout(() => setCopiedAll(false), 2000);
   };
 
 
@@ -295,26 +339,28 @@ export default function FaltantesPage() {
 
           <button
             disabled={!selectedRows.size}
-            onClick={copyToClipboard}
+            onClick={copySelectedSoldCost}
             className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-full text-sm"
           >
-            {copied ? (
+            {copiedSelected ? (
               <><Check size={16} /> Copiado</>
             ) : (
-              <><ClipboardCopy size={16} /> Copiar seleccionados</>
+              <><ClipboardCopy size={16} /> Copiar seleccionados (vendidos)</>
             )}
           </button>
+
           <button
-            disabled={!faltantes.some((f) => f.faltan > 0)}
-            onClick={copyMissingOnly}
+            disabled={!faltantes.length}
+            onClick={copyAllSoldCost}
             className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-full text-sm"
           >
-            {copiedMissing ? (
+            {copiedAll ? (
               <><Check size={16} /> Copiado</>
             ) : (
-              <><ClipboardCopy size={16} /> Copiar reposición</>
+              <><ClipboardCopy size={16} /> Copiar todo (vendidos)</>
             )}
           </button>
+
         </div>
       </div>
 
@@ -337,12 +383,13 @@ export default function FaltantesPage() {
               <thead className="bg-slate-100">
                 <tr>
                   <th className="text-left px-4 py-2 w-8">✓</th>
-                  <th className="text-left px-4 py-2 w-[40%]">Producto</th>
+                  <th className="text-left px-4 py-2 w-[55%]">Producto</th>
                   <th className="text-right px-4 py-2 w-[15%]">Stock</th>
                   <th className="text-right px-4 py-2 w-[15%]">Vendido</th>
-                  <th className="text-right px-4 py-2 w-[20%]">Reposición sugerida</th>
+                  <th className="text-right px-4 py-2 w-[15%]">Costo reposición</th> {/* ⬅️ NUEVO */}
                 </tr>
               </thead>
+
               <tbody>
                 {productos.map((f) => (
                   <tr
@@ -379,14 +426,37 @@ export default function FaltantesPage() {
                     </td>
                     <td className="px-4 py-2 text-right tabular-nums">{f.vendido}</td>
                     <td className="px-4 py-2 text-right tabular-nums">
-                      <span className="font-semibold text-rose-600">{f.faltan}</span>
-                      {f.needsInspection && (
-                        <span className="ml-2 px-2 py-1 text-xs rounded bg-yellow-200 text-yellow-800">INSPECCIÓN MANUAL</span>
-                      )}
+                      {f.costoRepo > 0
+                        ? `$ ${Number(f.costoRepo).toLocaleString("es-AR", { maximumFractionDigits: 0 })}`
+                        : "—"}
                     </td>
+
+
                   </tr>
                 ))}
               </tbody>
+              <tfoot>
+                {(() => {
+                  const totalVendidos = productos.reduce((a, x) => a + (x.vendido ?? 0), 0);
+                  const totalCostoVendidos = productos.reduce((a, x) => a + (x.costoRepo ?? 0), 0);
+
+                  return (
+                    <tr className="bg-slate-100 font-semibold">
+                      <td className="px-4 py-2"></td>
+                      <td className="px-4 py-2 text-right">Totales</td>
+                      <td className="px-4 py-2 text-right">—</td>
+                      <td className="px-4 py-2 text-right">{totalVendidos}</td>
+                      <td className="px-4 py-2 text-right">
+                        {totalCostoVendidos > 0
+                          ? `$ ${totalCostoVendidos.toLocaleString("es-AR", { maximumFractionDigits: 0 })}`
+                          : "—"}
+                      </td>
+                    </tr>
+                  );
+                })()}
+              </tfoot>
+
+
             </table>
           </div>
         ))
