@@ -20,6 +20,26 @@ const CATEGORIES = [
   "SIN CATEGORIA",
   "BRECA",
 ];
+// ✅ Traemos sale_items filtrando por sales (business_id, timestamp) del lado del server
+const loadSaleItems = async (businessId: string, sinceISO: string) =>
+  fetchAll((from, to) =>
+    supabase
+      .from("sale_items")
+      .select(`
+        quantity,
+        product_master_id,
+        promotion_id,
+        sale:sales!inner(
+          id,
+          business_id,
+          timestamp
+        )
+      `)
+      .eq("sale.business_id", businessId)
+      .gte("sale.timestamp", sinceISO)
+      .range(from, to)
+  );
+
 const loadPromotions = async () =>
   fetchAll((from, to) =>
     supabase
@@ -32,7 +52,7 @@ const money = (n: number) =>
   `$ ${Number(n || 0).toLocaleString("es-AR", { maximumFractionDigits: 0 })}`;
 
 async function fetchAll(query) {
-  const pageSize = 1000;
+  const pageSize = 500;
   let page = 0,
     done = false,
     all = [];
@@ -103,44 +123,40 @@ export default function FaltantesPage() {
         Date.now() - daysFilter * 86400000
       ).toISOString();
 
-      const [sales, masters, inventory, promos] = await Promise.all([
-        fetchAll((from, to) =>
-          supabase
-            .from("sales")
-            .select("sale_items(quantity, product_master_id, promotion_id)")
-            .eq("business_id", selectedBiz)
-            .gte("timestamp", since)
-            .range(from, to)
-        ),
+      const [saleItems, masters, inventory, promos] = await Promise.all([
+        loadSaleItems(selectedBiz, since),
         loadProductMasters(),
         loadMasterStocks(selectedBiz),
-        loadPromotions(), // ⬅️ nuevo
+        loadPromotions(),
       ]);
+
+
       const costMap = new Map(masters.map(m => [m.id, Number(m.default_purchase ?? 0)]));
 
-      const ventaMap = new Map();
-      sales?.forEach((s) => {
-        // Crear mapa rápido de promociones
-        const promoMap = new Map();
-        promos.forEach((p) => promoMap.set(p.id, p.products)); // id -> [{ id, qty }]
+      // construir promoMap UNA sola vez
+      const promoMap = new Map();
+      promos.forEach((p) => promoMap.set(p.id, p.products)); // id -> [{ id, qty }]
 
-        s.sale_items?.forEach((item) => {
-          if (item.product_master_id) {
-            // Venta directa
-            ventaMap.set(
-              item.product_master_id,
-              (ventaMap.get(item.product_master_id) ?? 0) + item.quantity
-            );
-          } else if (item.promotion_id) {
-            // Venta por promo: hay que distribuir las cantidades
-            const promoProducts = promoMap.get(item.promotion_id) ?? [];
-            promoProducts.forEach(({ id, qty }) => {
-              const totalQty = qty * item.quantity;
+      // mapa de ventas por product_master_id (usar string si tus IDs son uuid)
+      const ventaMap = new Map<string, number>();
+
+      // recorrer saleItems UNA sola vez (solo cantidades positivas para reposición)
+      saleItems.forEach((item) => {
+        const qty = Math.max(0, Number(item.quantity || 0));
+        if (!qty) return;
+
+        if (item.product_master_id) {
+          const pid = item.product_master_id as string;
+          ventaMap.set(pid, (ventaMap.get(pid) ?? 0) + qty);
+        } else if (item.promotion_id) {
+          const promoProducts = promoMap.get(item.promotion_id) ?? [];
+          promoProducts.forEach(({ id, qty: packQty }) => {
+            const totalQty = (Number(packQty) || 0) * qty;
+            if (totalQty > 0) {
               ventaMap.set(id, (ventaMap.get(id) ?? 0) + totalQty);
-            });
-          }
-        });
-
+            }
+          });
+        }
       });
 
       const stockMap = new Map(
@@ -150,11 +166,7 @@ export default function FaltantesPage() {
       // Solo productos con ventas > 0
       const faltantesCalculados = masters
         .map((m) => {
-          const vendido = ventaMap.get(m.id) ?? 0;
-          const stock = stockMap.get(m.id) ?? 0;
-          const faltan = Math.max(vendido - stock, 0);
-          const needsInspection = stock === 0 && vendido > 0;
-          const needsReplenish = vendido > stock;
+
           const categoria = m.name?.split(" ")[0]?.toUpperCase();
 
           // ⬇️ NUEVO: costo de compra y costo de reposición
@@ -165,8 +177,12 @@ export default function FaltantesPage() {
           };
 
           const unitCost = toNumber(costMap.get(m.id)); // costo unitario normalizado
-          const costoRepo = unitCost > 0 && vendido > 0 ? unitCost * vendido : 0; // costo de reponer lo vendido
-
+          const vendido = ventaMap.get(m.id) ?? 0;
+          const stock = stockMap.get(m.id) ?? 0;
+          const faltan = Math.max(vendido - stock, 0); // lo que realmente falta hoy
+          const costoRepo = unitCost > 0 && faltan > 0 ? unitCost * faltan : 0;
+          const needsInspection = stock === 0 && vendido > 0;
+          const needsReplenish = vendido > stock;
 
           return {
             id: m.id,
