@@ -705,7 +705,7 @@ export default function InventoryPage() {
                                     />
                                 </div>
                                 <div className="space-y-2">
-                                    <label className="block text-sm font-medium">Precio Compra</label>
+                                    <label className="block text-sm font-medium">Precio Compra - <b style={{fontSize:18}}>VERIFICAR SIEMPRE</b></label>
                                     <input
                                         type="number"
                                         value={drawerProduct?.default_purchase || ""}
@@ -716,7 +716,8 @@ export default function InventoryPage() {
                                                     : pr
                                             )
                                         }
-                                        className="w-full border rounded-lg p-3 text-sm bg-white dark:bg-slate-800"
+                                        className="w-full border rounded-lg p-3 text-sm dark:bg-slate-800"
+                                        style={{background:'#ffa2a2', border:1, borderColor: 'black', borderRadius:15}}
                                     />
                                 </div>
                                 <div className="space-y-2">
