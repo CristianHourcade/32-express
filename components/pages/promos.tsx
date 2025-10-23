@@ -305,7 +305,7 @@ export const PromotionsAdminPage = () => {
       </div>
       {/* Table */}
       <div className="bg-white dark:bg-gray-900 shadow rounded-lg overflow-hidden">
-        <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+        <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700" style={{display:'block', overflow:'auto'}}>
           <thead className="bg-gray-50 dark:bg-gray-700">
             <tr>
               {['Código', 'Nombre', 'Precio', 'Items', 'Estado', 'Acciones'].map(h =>
