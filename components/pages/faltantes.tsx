@@ -4,6 +4,10 @@ import { useEffect, useState, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
 import { ClipboardCopy, Check, AlertTriangle } from "lucide-react";
 import clsx from "clsx";
+// Validador simple de UUID v4/v1
+const isUUID = (s: any) =>
+  typeof s === "string" &&
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(s);
 
 const CATEGORIES = [
   "ALMACEN",
@@ -20,7 +24,6 @@ const CATEGORIES = [
   "SIN CATEGORIA",
   "BRECA",
 ];
-// ✅ Traemos sale_items filtrando por sales (business_id, timestamp) del lado del server
 const loadSaleItems = async (businessId: string, sinceISO: string) =>
   fetchAll((from, to) =>
     supabase
@@ -28,25 +31,51 @@ const loadSaleItems = async (businessId: string, sinceISO: string) =>
       .select(`
         quantity,
         product_master_id,
-        promotion_id,
-        sale:sales!inner(
-          id,
-          business_id,
-          timestamp
-        )
+        sale:sales!inner(id,business_id,timestamp),
+        master:products_master( id, name, default_purchase )  -- 👈 embebido
       `)
       .eq("sale.business_id", businessId)
       .gte("sale.timestamp", sinceISO)
+      .order("id", { ascending: true })
       .range(from, to)
   );
 
-const loadPromotions = async () =>
+
+const loadMasterStocks = async (businessId: string) =>
   fetchAll((from, to) =>
     supabase
-      .from("promos")
-      .select("id, products") // 'products' es un array con { id, qty }
+      .from("business_inventory")
+      .select("product_id, stock")
+      .eq("business_id", businessId)
+      .order("product_id", { ascending: true })
       .range(from, to)
   );
+
+// trae SOLO los masters necesarios por ids (evita paginar todo el catálogo)
+async function fetchMastersByIds(ids: string[]) {
+  // ✅ sanitizar una vez más (defensa en profundidad)
+  const clean = Array.from(new Set(ids.filter(isUUID)));
+  if (!clean.length) return [];
+
+  const chunkSize = 500;
+  const out: any[] = [];
+  for (let i = 0; i < clean.length; i += chunkSize) {
+    const chunk = clean.slice(i, i + chunkSize);
+    const { data, error } = await supabase
+      .from("products_master")
+      .select("id, name, default_purchase")
+      .in("id", chunk)                          // <- ya no puede contener "null"
+      .order("id", { ascending: true });
+    if (error) {
+      console.error("fetchMastersByIds error", error, { chunk });
+      continue;
+    }
+    if (data?.length) out.push(...data);
+  }
+  return out;
+}
+
+
 
 const money = (n: number) =>
   `$ ${Number(n || 0).toLocaleString("es-AR", { maximumFractionDigits: 0 })}`;
@@ -74,23 +103,6 @@ async function fetchAll(query) {
   return all;
 }
 
-const loadProductMasters = async () =>
-  fetchAll((from, to) =>
-    supabase
-      .from("products_master")
-      .select("id, name, default_purchase") // ⬅️ agregamos costo unitario
-      .range(from, to)
-  );
-
-
-const loadMasterStocks = async (businessId) =>
-  fetchAll((from, to) =>
-    supabase
-      .from("business_inventory")
-      .select("product_id, stock")
-      .eq("business_id", businessId)
-      .range(from, to)
-  );
 
 export default function FaltantesPage() {
   const [businesses, setBusinesses] = useState([]);
@@ -116,93 +128,92 @@ export default function FaltantesPage() {
 
   useEffect(() => {
     if (!selectedBiz) return;
-
     setLoading(true);
-    (async () => {
-      const since = new Date(
-        Date.now() - daysFilter * 86400000
-      ).toISOString();
 
-      const [saleItems, masters, inventory, promos] = await Promise.all([
-        loadSaleItems(selectedBiz, since),
-        loadProductMasters(),
-        loadMasterStocks(selectedBiz),
-        loadPromotions(),
+    (async () => {
+      const since = new Date(Date.now() - daysFilter * 86400000).toISOString();
+
+      const [saleItems, inventory] = await Promise.all([
+        loadSaleItems(selectedBiz, since),     // 👈 trae master embebido
+        loadMasterStocks(selectedBiz),         // product_id = products_master.id en tu esquema
       ]);
 
+      const isUUID = (s: any) =>
+        typeof s === "string" &&
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(s);
 
-      const costMap = new Map(masters.map(m => [m.id, Number(m.default_purchase ?? 0)]));
+      const toNumber = (x: any) => {
+        if (x == null || x === "") return 0;
+        if (typeof x === "number") return Number.isFinite(x) ? x : 0;
+        const n = Number(String(x).trim().replace(/\s+/g, "").replace(",", "."));
+        return Number.isFinite(n) ? n : 0;
+      };
 
-      // construir promoMap UNA sola vez
-      const promoMap = new Map();
-      promos.forEach((p) => promoMap.set(p.id, p.products)); // id -> [{ id, qty }]
-
-      // mapa de ventas por product_master_id (usar string si tus IDs son uuid)
+      // ventas por master_id
       const ventaMap = new Map<string, number>();
+      // También guardo 1 muestra del master embebido por id para nombre/costo
+      const masterSample = new Map<string, { name?: string; default_purchase?: any }>();
 
-      // recorrer saleItems UNA sola vez (solo cantidades positivas para reposición)
-      saleItems.forEach((item) => {
-        const qty = Math.max(0, Number(item.quantity || 0));
-        if (!qty) return;
+      for (const si of saleItems) {
+        const qty = Math.max(0, Number(si?.quantity ?? 0));
+        const mid = String(si?.product_master_id ?? "");
+        if (!qty || !isUUID(mid)) continue;
 
-        if (item.product_master_id) {
-          const pid = item.product_master_id as string;
-          ventaMap.set(pid, (ventaMap.get(pid) ?? 0) + qty);
-        } else if (item.promotion_id) {
-          const promoProducts = promoMap.get(item.promotion_id) ?? [];
-          promoProducts.forEach(({ id, qty: packQty }) => {
-            const totalQty = (Number(packQty) || 0) * qty;
-            if (totalQty > 0) {
-              ventaMap.set(id, (ventaMap.get(id) ?? 0) + totalQty);
-            }
-          });
+        ventaMap.set(mid, (ventaMap.get(mid) ?? 0) + qty);
+
+        const m = si?.master || {};
+        if (!masterSample.has(mid) && (m?.id === mid)) {
+          masterSample.set(mid, { name: m?.name, default_purchase: m?.default_purchase });
         }
-      });
+      }
 
-      const stockMap = new Map(
-        inventory.map((i) => [i.product_id, i.stock])
+      const ventaIds = Array.from(ventaMap.keys());
+      if (!ventaIds.length) {
+        setFaltantes([]);
+        setLoading(false);
+        return;
+      }
+
+      const stockMap = new Map<string, number>(
+        inventory.map((i: any) => [String(i.product_id), Number(i.stock || 0)])
       );
 
-      // Solo productos con ventas > 0
-      const faltantesCalculados = masters
-        .map((m) => {
+      const filas = ventaIds.map((mid) => {
+        const m = masterSample.get(mid) || {};
+        const nombre = m?.name || "(sin nombre)";
+        const categoria = (nombre.split(" ")[0] || "").toUpperCase();
 
-          const categoria = m.name?.split(" ")[0]?.toUpperCase();
+        // costo directo desde la venta embebida
+        const unitCost = toNumber(m?.default_purchase ?? 0);
 
-          // ⬇️ NUEVO: costo de compra y costo de reposición
-          // helper por si default_purchase llega como string/vacío
-          const toNumber = (x) => {
-            const n = typeof x === "number" ? x : parseFloat(String(x).replace(",", "."));
-            return Number.isFinite(n) ? n : 0;
-          };
-
-          const unitCost = toNumber(costMap.get(m.id)); // costo unitario normalizado
-          const vendido = ventaMap.get(m.id) ?? 0;
-          const stock = stockMap.get(m.id) ?? 0;
-          const faltan = Math.max(vendido - stock, 0); // lo que realmente falta hoy
-          const costoRepo = unitCost > 0 && faltan > 0 ? unitCost * faltan : 0;
-          const needsInspection = stock === 0 && vendido > 0;
-          const needsReplenish = vendido > stock;
-
-          return {
-            id: m.id,
-            name: m.name,
-            vendido,
-            stock,
-            faltan,
-            needsInspection,
-            needsReplenish,
-            categoria: CATEGORIES.includes(categoria) ? categoria : "OTROS",
-            unitCost,     // ⬅️ nuevo (puede servirte después)
-            costoRepo,    // ⬅️ nuevo
-          };
-        })
-        .filter((f) => f.vendido > 0);
+        const vendido = ventaMap.get(mid) ?? 0;
+        const stock = stockMap.get(mid) ?? 0;
+        const faltan = Math.max(vendido - stock, 0); // si querés seguir marcando alertas
+        const costoRepo = unitCost > 0 ? unitCost * vendido : 0;
 
 
-      setFaltantes(faltantesCalculados);
+
+        return {
+          id: mid,
+          name: nombre,
+          vendido,
+          stock,
+          faltan,
+          needsInspection: stock === 0 && vendido > 0,
+          needsReplenish: vendido > stock,
+          categoria: CATEGORIES.includes(categoria) ? categoria : "OTROS",
+          unitCost,
+          costoRepo,
+        };
+      }).filter(f => (f.vendido ?? 0) > 0);
+
+      setFaltantes(filas);
       setLoading(false);
-    })();
+    })().catch(e => {
+      console.error(e);
+      setFaltantes([]);
+      setLoading(false);
+    });
   }, [selectedBiz, daysFilter]);
 
   const sortedFaltantes = useMemo(() => {
