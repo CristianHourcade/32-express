@@ -1,332 +1,639 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { supabase } from "@/lib/supabase";
 import {
-    BarChart,
-    Bar,
-    XAxis,
-    YAxis,
-    Tooltip,
-    ResponsiveContainer,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  Tooltip,
+  ResponsiveContainer,
 } from "recharts";
 import {
-    format,
-    startOfWeek,
-    startOfMonth,
-    addWeeks,
-    addDays,
-    isBefore,
-    isAfter,
-    addMonths,
+  format,
+  startOfWeek,
+  startOfMonth,
+  addWeeks,
+  addDays,
+  isBefore,
+  isAfter,
+  subWeeks,
+  subMonths,
 } from "date-fns";
 
-// Devuelve un array con 4 objetos { label, start, end }
+/*********************************
+ * Constantes & helpers
+ *********************************/
+const CATEGORIES = [
+  "ALMACEN",
+  "CIGARRILLOS",
+  "GOLOSINAS",
+  "BEBIDA",
+  "CERVEZA",
+  "FIAMBRES",
+  "TABACO",
+  "HUEVOS",
+  "HIGIENE",
+  "ALCOHOL",
+  "PROMO",
+  "SIN CATEGORIA",
+  "BRECA",
+];
+const ORDER_WITH_OTHERS = [...CATEGORIES, "OTROS"];
+const money = (n) => `$ ${Number(n || 0).toLocaleString("es-AR")}`;
+
+function getCategoryFromName(name) {
+  const token = String(name || "").trim().split(/\s+/)[0]?.toUpperCase();
+  return CATEGORIES.includes(token) ? token : "OTROS";
+}
+
+// Semanas recientes (labels dd/MM–dd/MM)
 function getLastNWeeks(n, dateTo) {
-    const endDate = dateTo ? new Date(dateTo) : new Date();
-    const weeks = [];
-    let endOfCurrentWeek = startOfWeek(endDate, { weekStartsOn: 1 }); // Lunes actual
-    for (let i = n - 1; i >= 0; i--) {
-        const weekStart = addWeeks(endOfCurrentWeek, -i);
-        const weekEnd = addDays(weekStart, 6);
-        weeks.push({
-            label: `${format(weekStart, "dd/MM")}–${format(weekEnd, "dd/MM")}`,
-            start: weekStart,
-            end: weekEnd,
-        });
-    }
-    return weeks;
+  const endDate = dateTo ? new Date(dateTo) : new Date();
+  const weeks = [];
+  let endOfCurrentWeek = startOfWeek(endDate, { weekStartsOn: 1 });
+  for (let i = n - 1; i >= 0; i--) {
+    const weekStart = addWeeks(endOfCurrentWeek, -i);
+    const weekEnd = addDays(weekStart, 6);
+    weeks.push({
+      label: `${format(weekStart, "dd/MM")}–${format(weekEnd, "dd/MM")}`,
+      start: weekStart,
+      end: weekEnd,
+    });
+  }
+  return weeks;
 }
 
 function getWeeklyLossesLastN(data, dateTo) {
-    const weeks = getLastNWeeks(4, dateTo);
-    return weeks.map(({ label, start, end }) => {
-        // Sumo todo lo que cae en ese rango
-        const loss = data
-            .filter(l => {
-                const d = new Date(l.created_at);
-                return !isBefore(d, start) && !isAfter(d, end);
-            })
-            .reduce((acc, l) => acc + (l.lost_cash || 0), 0);
-        return { week: label, loss };
-    });
+  const weeks = getLastNWeeks(4, dateTo);
+  return weeks.map(({ label, start, end }) => {
+    const loss = data
+      .filter((l) => {
+        const d = new Date(l.created_at);
+        return !isBefore(d, start) && !isAfter(d, end);
+      })
+      .reduce((acc, l) => acc + (l.lost_cash || 0), 0);
+    return { week: label, loss };
+  });
 }
-// Helpers para weeks/months/top productos
-function getWeeksOfMonth(date) {
-    const first = startOfMonth(date);
-    let weeks = [];
-    for (let i = 0; i < 4; i++) {
-        weeks.push(format(addWeeks(first, i), "yyyy-MM-dd"));
-    }
-    return weeks;
-}
+
 function getMonthsOfYear(year) {
-    let months = [];
-    for (let i = 0; i < 12; i++) {
-        months.push(format(new Date(year, i, 1), "yyyy-MM"));
-    }
-    return months;
+  const months = [];
+  for (let i = 0; i < 12; i++) months.push(format(new Date(year, i, 1), "yyyy-MM"));
+  return months;
 }
-function getWeeklyLossesCompleted(data, dateTo) {
-    const now = dateTo ? new Date(dateTo) : new Date();
-    const weeks = getWeeksOfMonth(now);
-    const map = {};
-    data.forEach((l) => {
-        const week = format(
-            startOfWeek(new Date(l.created_at), { weekStartsOn: 1 }),
-            "yyyy-MM-dd"
-        );
-        map[week] = (map[week] || 0) + (l.lost_cash || 0);
-    });
-    return weeks.map((week) => ({
-        week,
-        loss: map[week] || 0,
-    }));
-}
+
 function getMonthlyLossesCompleted(data, dateTo) {
-    const now = dateTo ? new Date(dateTo) : new Date();
-    const year = now.getFullYear();
-    const months = getMonthsOfYear(year);
-    const map = {};
-    data.forEach((l) => {
-        const month = format(startOfMonth(new Date(l.created_at)), "yyyy-MM");
-        map[month] = (map[month] || 0) + (l.lost_cash || 0);
-    });
-    return months.map((month) => ({
-        month,
-        loss: map[month] || 0,
-    }));
+  const now = dateTo ? new Date(dateTo) : new Date();
+  const year = now.getFullYear();
+  const months = getMonthsOfYear(year);
+  const map = {};
+  data.forEach((l) => {
+    const month = format(startOfMonth(new Date(l.created_at)), "yyyy-MM");
+    map[month] = (map[month] || 0) + (l.lost_cash || 0);
+  });
+  return months.map((month) => ({ month, loss: map[month] || 0 }));
 }
+
 function getTopLostProducts(data) {
-    const map = {};
-    data.forEach((l) => {
-        const name = l.products_master?.name || l.product_id;
-        map[name] = (map[name] || 0) + (l.lost_cash || 0);
-    });
-    return Object.entries(map)
-        .map(([name, loss]) => ({ name, loss }))
-        .sort((a, b) => b.loss - a.loss)
-        .slice(0, 5);
+  const map = {};
+  data.forEach((l) => {
+    const name = l.products_master?.name || l.product_id;
+    map[name] = (map[name] || 0) + (l.lost_cash || 0);
+  });
+  return Object.entries(map)
+    .map(([name, loss]) => ({ name, loss }))
+    .sort((a, b) => b.loss - a.loss)
+    .slice(0, 5);
 }
 
-export default function LossesPage() {
-    const [losses, setLosses] = useState([]);
-    const [loading, setLoading] = useState(true);
+function sum(arr, sel) {
+  return arr.reduce((a, x) => a + (sel ? sel(x) : x), 0);
+}
 
-    const [businesses, setBusinesses] = useState([]);
-    const [activeBusiness, setActiveBusiness] = useState("");
-    const [dateFrom, setDateFrom] = useState("");
-    const [dateTo, setDateTo] = useState("");
+function toCSV(rows) {
+  const header = ["Fecha", "Negocio", "Producto", "Detalle", "Pérdida $", "ProductoID"]; // export extendido
+  const lines = rows.map((r) => [
+    new Date(r.created_at).toLocaleDateString(),
+    r.businesses?.name ?? r.business_id ?? "",
+    r.products_master?.name ?? r.product_id ?? "",
+    String(r.details ?? "").replaceAll("\n", " "),
+    Number(r.lost_cash || 0).toString().replace(".", ","),
+    r.product_id ?? "",
+  ]);
+  return [header, ...lines].map((line) => line.map((c) => `"${String(c).replaceAll('"', '""')}"`).join(",")).join("\n");
+}
 
-    // Traer negocios
-    useEffect(() => {
-        async function fetchBusinesses() {
-            const { data } = await supabase.from("businesses").select("id, name");
-            if (data) {
-                setBusinesses(data);
-                if (!activeBusiness && data.length > 0) setActiveBusiness(data[0].id);
-            }
-        }
-        fetchBusinesses();
-        // eslint-disable-next-line
-    }, []);
+function download(filename, text) {
+  const el = document.createElement("a");
+  el.setAttribute("href", "data:text/plain;charset=utf-8," + encodeURIComponent(text));
+  el.setAttribute("download", filename);
+  el.style.display = "none";
+  document.body.appendChild(el);
+  el.click();
+  document.body.removeChild(el);
+}
 
-    // Traer losses con join
-    useEffect(() => {
-        async function fetchLosses() {
-            setLoading(true);
-            let query = supabase
-                .from("activities")
-                .select(
-                    `
-        id,
-        business_id,
-        details,
-        motivo,
-        lost_cash,
-        created_at,
-        product_id,
-        products_master:product_id (id, name),
-        businesses:business_id (id, name)
-      `
-                )
-                .eq("motivo", "Perdida");
-            if (dateFrom) query = query.gte("created_at", dateFrom);
-            if (dateTo) query = query.lte("created_at", dateTo + "T23:59:59");
-            const { data } = await query;
-            if (data) setLosses(data);
-            setLoading(false);
-        }
-        fetchLosses();
-    }, [dateFrom, dateTo]);
+/*********************************
+ * Página principal
+ *********************************/
+export default function LossesPagePro() {
+  const [losses, setLosses] = useState([]);
+  const [loading, setLoading] = useState(true);
 
-    // Datos filtrados por sucursal activa
-    const filtered = losses.filter((l) => l.business_id === activeBusiness);
-    const totalLost = filtered.reduce(
-        (acc, curr) => acc + (curr.lost_cash ?? 0),
-        0
-    );
+  const [businesses, setBusinesses] = useState([]);
+  const [activeBusiness, setActiveBusiness] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
 
-    const weeklyData = getWeeklyLossesLastN(filtered, dateTo);
-    const monthlyData = getMonthlyLossesCompleted(filtered, dateTo);
-    const topProducts = getTopLostProducts(filtered);
+  const [search, setSearch] = useState("");
+  const [showExecutive, setShowExecutive] = useState(true);
+  const [showCharts, setShowCharts] = useState(true);
+  const [showTables, setShowTables] = useState(true);
+  const printRef = useRef(null);
 
-    return (
-        <div className="min-h-screen">
-            <div className="mx-auto">
-                <div className="bg-white rounded-3xl shadow-xl p-8 md:p-12 space-y-10 border border-slate-100">
-                    <h1 className="text-3xl font-bold mb-2 text-indigo-900 tracking-tight">Reporte de Pérdidas</h1>
+  // Cargar negocios
+  useEffect(() => {
+    (async function fetchBusinesses() {
+      const { data } = await supabase.from("businesses").select("id, name").order("name");
+      if (data) {
+        setBusinesses(data);
+        if (!activeBusiness && data.length > 0) setActiveBusiness(data[0].id);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-                    {/* Filtros y Tabs */}
-                    <div className="flex flex-col md:flex-row md:items-center gap-4 md:gap-8">
-                        <div className="flex gap-3">
-                            <div>
-                                <label className="block text-xs font-medium text-slate-600 mb-1">Desde</label>
-                                <input
-                                    type="date"
-                                    value={dateFrom}
-                                    onChange={e => setDateFrom(e.target.value)}
-                                    className="border rounded-lg px-3 py-1 text-sm bg-slate-50 shadow focus:ring-1 focus:ring-indigo-300"
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-xs font-medium text-slate-600 mb-1">Hasta</label>
-                                <input
-                                    type="date"
-                                    value={dateTo}
-                                    onChange={e => setDateTo(e.target.value)}
-                                    className="border rounded-lg px-3 py-1 text-sm bg-slate-50 shadow focus:ring-1 focus:ring-indigo-300"
-                                />
-                            </div>
-                        </div>
-                        <div className="flex flex-wrap gap-2 md:ml-auto border-b">
-                            {businesses.map(b => (
-                                <button
-                                    key={b.id}
-                                    className={`px-4 py-2 font-semibold border-b-2 rounded-t-lg transition-all duration-150 ${activeBusiness === b.id
-                                        ? "border-indigo-600 bg-indigo-50 text-indigo-700"
-                                        : "border-transparent bg-slate-100 text-slate-600 hover:bg-indigo-50"
-                                        }`}
-                                    onClick={() => setActiveBusiness(b.id)}
-                                >
-                                    {b.name}
-                                </button>
-                            ))}
-                        </div>
-                    </div>
+  // Cargar pérdidas
+  useEffect(() => {
+    (async function fetchLosses() {
+      if (!activeBusiness) return;
+      setLoading(true);
 
-                    {loading ? (
-                        <div className="text-lg mt-8 text-center text-slate-600">Cargando…</div>
-                    ) : (
-                        <div className="space-y-10">
-                            {/* MÉTRICAS */}
-                            <div className="flex flex-col md:flex-row md:items-end md:gap-10 gap-3">
-                                <div className="flex-1">
-                                    <div className="text-lg font-semibold text-slate-700">Sucursal seleccionada:</div>
-                                    <div className="text-2xl font-bold text-indigo-800 mb-1">
-                                        {businesses.find(b => b.id === activeBusiness)?.name}
-                                    </div>
-                                </div>
-                                <div className="flex gap-5">
-                                    <div className="rounded-2xl bg-slate-100 px-6 py-4 flex flex-col items-center shadow text-center">
-                                        <span className="text-xs text-slate-500">Total perdido</span>
-                                        <span className="text-2xl font-bold text-rose-600">
-                                            ${totalLost.toLocaleString("es-AR")}
-                                        </span>
-                                    </div>
-                                    <div className="rounded-2xl bg-slate-100 px-6 py-4 flex flex-col items-center shadow text-center">
-                                        <span className="text-xs text-slate-500">Registros</span>
-                                        <span className="text-2xl font-bold text-indigo-600">
-                                            {filtered.length}
-                                        </span>
-                                    </div>
-                                </div>
-                            </div>
+      let query = supabase
+        .from("activities")
+        .select(
+          `id, business_id, details, motivo, lost_cash, created_at, product_id,
+           products_master:product_id(id, name),
+           businesses:business_id(id, name)`
+        )
+        .eq("motivo", "Perdida")
+        .eq("business_id", activeBusiness);
 
-                            {/* GRÁFICOS */}
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
-                                <div className="bg-slate-50 rounded-2xl p-5 shadow-sm">
-                                    <h3 className="text-base font-semibold mb-3 text-slate-700">Pérdidas por Semana</h3>
-                                    <ResponsiveContainer width="100%" height={200}>
-                                        <BarChart data={weeklyData}>
-                                            <XAxis dataKey="week" fontSize={12} />
-                                            <YAxis fontSize={12} />
-                                            <Tooltip formatter={v => `$${v.toLocaleString("es-AR")}`} />
-                                            <Bar dataKey="loss" fill="#fb7185" radius={[8, 8, 0, 0]} />
-                                        </BarChart>
-                                    </ResponsiveContainer>
-                                </div>
-                                <div className="bg-slate-50 rounded-2xl p-5 shadow-sm">
-                                    <h3 className="text-base font-semibold mb-3 text-slate-700">Pérdidas por Mes</h3>
-                                    <ResponsiveContainer width="100%" height={200}>
-                                        <BarChart data={monthlyData}>
-                                            <XAxis dataKey="month" fontSize={12} />
-                                            <YAxis fontSize={12} />
-                                            <Tooltip formatter={v => `$${v.toLocaleString("es-AR")}`} />
-                                            <Bar dataKey="loss" fill="#6366f1" radius={[8, 8, 0, 0]} />
-                                        </BarChart>
-                                    </ResponsiveContainer>
-                                </div>
-                            </div>
+      if (dateFrom) query = query.gte("created_at", dateFrom);
+      if (dateTo) query = query.lte("created_at", dateTo + "T23:59:59");
 
-                            {/* TOP PRODUCTOS */}
-                            <div>
-                                <h3 className="text-base font-semibold mb-3 text-slate-700">Productos con más pérdidas</h3>
-                                {topProducts.length === 0 ? (
-                                    <div className="italic text-slate-400">Sin datos.</div>
-                                ) : (
-                                    <table className="min-w-[300px] text-sm bg-white rounded-xl shadow">
-                                        <thead>
-                                            <tr>
-                                                <th className="px-4 py-2 text-left">Producto</th>
-                                                <th className="px-4 py-2 text-right">Total perdido $</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {topProducts.map(p => (
-                                                <tr key={p.name}>
-                                                    <td className="px-4 py-2">{p.name}</td>
-                                                    <td className="px-4 py-2 text-right">{p.loss.toLocaleString("es-AR")}</td>
-                                                </tr>
-                                            ))}
-                                        </tbody>
-                                    </table>
-                                )}
-                            </div>
+      const { data } = await query;
+      if (data) setLosses(data);
+      setLoading(false);
+    })();
+  }, [activeBusiness, dateFrom, dateTo]);
 
-                            {/* TABLA DETALLE */}
-                            <div className="bg-slate-50 rounded-2xl p-5 shadow-sm">
-                                <h3 className="text-base font-semibold mb-3 text-slate-700">Detalle de pérdidas</h3>
-                                <div className="overflow-x-auto">
-                                    {filtered.length === 0 ? (
-                                        <div className="text-slate-400 italic">No hay registros de pérdida en este período.</div>
-                                    ) : (
-                                        <table className="min-w-full text-sm">
-                                            <thead>
-                                                <tr>
-                                                    <th className="px-4 py-2 text-left">Fecha</th>
-                                                    <th className="px-4 py-2 text-left">Producto</th>
-                                                    <th className="px-4 py-2 text-left">Detalle</th>
-                                                    <th className="px-4 py-2 text-right">Pérdida $</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody>
-                                                {filtered.map(l => (
-                                                    <tr key={l.id} className="border-b last:border-none">
-                                                        <td className="px-4 py-2">{new Date(l.created_at).toLocaleDateString()}</td>
-                                                        <td className="px-4 py-2">{l.products_master?.name || l.product_id}</td>
-                                                        <td className="px-4 py-2">{l.details}</td>
-                                                        <td className="px-4 py-2 text-right">{l.lost_cash?.toLocaleString("es-AR")}</td>
-                                                    </tr>
-                                                ))}
-                                            </tbody>
-                                        </table>
-                                    )}
-                                </div>
-                            </div>
-                        </div>
-                    )}
-                </div>
-            </div>
+  /*********************************
+   * Derivados
+   *********************************/
+  const activeName = useMemo(
+    () => businesses.find((b) => b.id === activeBusiness)?.name || "—",
+    [businesses, activeBusiness]
+  );
+
+  const base = losses; // ya viene filtrado por business
+
+  const searchQ = search.trim().toLowerCase();
+  const matchesSearch = (l) => {
+    if (!searchQ) return true;
+    const name = (l.products_master?.name || "").toLowerCase();
+    const details = String(l.details || "").toLowerCase();
+    const pid = String(l.product_id || "").toLowerCase();
+    return name.includes(searchQ) || details.includes(searchQ) || pid.includes(searchQ);
+  };
+
+  const filtered = useMemo(() => base.filter(matchesSearch), [base, searchQ]);
+  const totalLost = useMemo(() => sum(filtered, (x) => x.lost_cash || 0), [filtered]);
+
+  // Tendencias vs período anterior (semanas y meses)
+  const weeklyData = useMemo(() => getWeeklyLossesLastN(filtered, dateTo), [filtered, dateTo]);
+  const monthlyData = useMemo(() => getMonthlyLossesCompleted(filtered, dateTo), [filtered, dateTo]);
+  const topProducts = useMemo(() => getTopLostProducts(filtered), [filtered]);
+
+  // Por categoría
+  const groupedByCategory = useMemo(() => {
+    const groups = {};
+    for (const l of filtered) {
+      const cat = getCategoryFromName(l.products_master?.name);
+      if (!groups[cat]) groups[cat] = [];
+      groups[cat].push(l);
+    }
+    return groups;
+  }, [filtered]);
+
+  const categoryMetrics = useMemo(() => {
+    return ORDER_WITH_OTHERS.map((cat) => {
+      const arr = groupedByCategory[cat] || [];
+      const loss = sum(arr, (x) => x.lost_cash || 0);
+      return { cat, count: arr.length, loss };
+    }).filter((m) => m.count > 0 || m.loss > 0);
+  }, [groupedByCategory]);
+
+  // Métricas auxiliares (variación vs último período)
+  const lastWeekRange = useMemo(() => {
+    const to = dateTo ? new Date(dateTo) : new Date();
+    const end = startOfWeek(to, { weekStartsOn: 1 });
+    const start = addDays(end, -7);
+    const prevStart = addDays(start, -7);
+    const prevEnd = addDays(start, -1);
+    return { start, end: addDays(end, -1), prevStart, prevEnd };
+  }, [dateTo]);
+
+  const weekChange = useMemo(() => {
+    const cur = sum(filtered.filter((l) => {
+      const d = new Date(l.created_at);
+      return d >= lastWeekRange.start && d <= lastWeekRange.end;
+    }), (x) => x.lost_cash || 0);
+    const prev = sum(filtered.filter((l) => {
+      const d = new Date(l.created_at);
+      return d >= lastWeekRange.prevStart && d <= lastWeekRange.prevEnd;
+    }), (x) => x.lost_cash || 0);
+    const diff = cur - prev;
+    const pct = prev === 0 ? null : (diff / prev) * 100;
+    return { cur, prev, diff, pct };
+  }, [filtered, lastWeekRange]);
+
+  const lastMonthRange = useMemo(() => {
+    const to = dateTo ? new Date(dateTo) : new Date();
+    const end = startOfMonth(to);
+    const start = addDays(end, -1 * new Date(end.getFullYear(), end.getMonth(), 0).getDate()); // aprox
+    const prevStart = subMonths(start, 1);
+    const prevEnd = addDays(start, -1);
+    return { start, end: addDays(end, -1), prevStart, prevEnd };
+  }, [dateTo]);
+
+  const monthChange = useMemo(() => {
+    const cur = sum(filtered.filter((l) => {
+      const d = new Date(l.created_at);
+      return d >= lastMonthRange.start && d <= lastMonthRange.end;
+    }), (x) => x.lost_cash || 0);
+    const prev = sum(filtered.filter((l) => {
+      const d = new Date(l.created_at);
+      return d >= lastMonthRange.prevStart && d <= lastMonthRange.prevEnd;
+    }), (x) => x.lost_cash || 0);
+    const diff = cur - prev;
+    const pct = prev === 0 ? null : (diff / prev) * 100;
+    return { cur, prev, diff, pct };
+  }, [filtered, lastMonthRange]);
+
+  /*********************************
+   * Acciones (export, reportes)
+   *********************************/
+  function handleExportCSV() {
+    const csv = toCSV(filtered);
+    const filename = `perdidas_${activeName.replaceAll(" ", "_")}_${dateFrom || "ini"}_${dateTo || "hoy"}.csv`;
+    download(filename, csv);
+  }
+
+  function copySummaryToClipboard() {
+    const top = topProducts.map((p, i) => `${i + 1}. ${p.name}: ${money(p.loss)}`).join("\n");
+    const cat = categoryMetrics
+      .sort((a, b) => b.loss - a.loss)
+      .slice(0, 5)
+      .map((c, i) => `${i + 1}. ${c.cat}: ${money(c.loss)} (${c.count} regs)`) 
+      .join("\n");
+    const txt = `📍 Reporte de pérdidas — ${activeName}\nPeriodo: ${dateFrom || "(sin inicio)"} al ${dateTo || "(hoy)"}\nTotal: ${money(totalLost)}\n\nTOP productos:\n${top || "—"}\n\nTOP categorías:\n${cat || "—"}`;
+    navigator.clipboard?.writeText(txt);
+  }
+
+  function openPrintableReport() {
+    const now = new Date();
+    const rows = filtered
+      .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+      .map(
+        (l) => `
+          <tr>
+            <td>${new Date(l.created_at).toLocaleDateString()}</td>
+            <td>${(l.products_master?.name || l.product_id || "").replaceAll("<", "&lt;")}</td>
+            <td>${String(l.details || "").replaceAll("<", "&lt;")}</td>
+            <td style="text-align:right">${(l.lost_cash || 0).toLocaleString("es-AR")}</td>
+          </tr>`
+      )
+      .join("");
+
+    const body = `
+      <html>
+      <head>
+        <meta charset="utf-8" />
+        <title>Reporte de Pérdidas</title>
+        <style>
+          body { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto; margin: 32px; }
+          h1 { margin: 0 0 4px; font-size: 20px; }
+          h2 { margin: 24px 0 8px; font-size: 16px; }
+          .muted { color: #64748b; }
+          .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+          .card { background: #f8fafc; padding: 12px 14px; border-radius: 12px; border: 1px solid #e2e8f0; }
+          table { width: 100%; border-collapse: collapse; font-size: 12px; }
+          th, td { padding: 8px 10px; border-bottom: 1px solid #e2e8f0; text-align: left; }
+          tfoot td { font-weight: 700; }
+          @media print { .noprint { display: none; } }
+        </style>
+      </head>
+      <body>
+        <div class="noprint" style="text-align:right"><button onclick="window.print()">Imprimir</button></div>
+        <h1>Reporte de pérdidas — ${activeName}</h1>
+        <div class="muted">Periodo: ${dateFrom || "(sin inicio)"} al ${dateTo || "(hoy)"} · Generado: ${now.toLocaleString()}</div>
+
+        <div class="grid" style="margin:18px 0 22px">
+          <div class="card"><div class="muted">Total perdido</div><div style="font-weight:700; font-size:18px">${money(totalLost)}</div></div>
+          <div class="card"><div class="muted">Registros</div><div style="font-weight:700; font-size:18px">${filtered.length}</div></div>
+          <div class="card"><div class="muted">Top producto</div><div style="font-weight:700; font-size:14px">${topProducts[0]?.name || "—"}</div></div>
         </div>
-    );
+
+        <h2>Detalle</h2>
+        <table>
+          <thead>
+            <tr><th>Fecha</th><th>Producto</th><th>Detalle</th><th style="text-align:right">Pérdida $</th></tr>
+          </thead>
+          <tbody>
+            ${rows || ""}
+          </tbody>
+          <tfoot>
+            <tr><td></td><td></td><td style="text-align:right">TOTAL</td><td style="text-align:right">${totalLost.toLocaleString("es-AR")}</td></tr>
+          </tfoot>
+        </table>
+      </body></nhtml>`;
+
+    const w = window.open("", "_blank");
+    w?.document.write(body);
+    w?.document.close();
+  }
+
+  /*********************************
+   * Render
+   *********************************/
+  return (
+    <div className="min-h-screen p-6  from-slate-50 to-white">
+      <div className="mx-auto max-w-7xl">
+        <div className="bg-white rounded-3xl shadow-xl p-6 md:p-8 space-y-8 border border-slate-100">
+          {/* Header */}
+          <header className="flex flex-col gap-4 md:flex-row md:items-end md:gap-6">
+            <div className="flex-1 space-y-1">
+              <h1 className="text-2xl font-bold text-slate-900">Pérdidas</h1>
+              <p className="text-slate-500 text-sm">Controla pérdidas por negocio, filtra por rango de fechas y genera reportes ejecutivos.</p>
+            </div>
+
+            {/* Rango de fechas */}
+            <div className="flex gap-3">
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Desde</label>
+                <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="border rounded-lg px-3 py-1.5 text-sm bg-slate-50 shadow focus:ring-1 focus:ring-indigo-300" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Hasta</label>
+                <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="border rounded-lg px-3 py-1.5 text-sm bg-slate-50 shadow focus:ring-1 focus:ring-indigo-300" />
+              </div>
+            </div>
+          </header>
+
+          {/* Selector de negocios */}
+          <div className="flex flex-wrap gap-2">
+            {businesses.map((b) => (
+              <button
+                key={b.id}
+                onClick={() => setActiveBusiness(b.id)}
+                className={
+                  `px-4 py-2 rounded-full text-sm font-semibold transition-all duration-150 border ` +
+                  (activeBusiness === b.id
+                    ? "border-indigo-600 bg-indigo-50 text-indigo-700 shadow-sm"
+                    : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50")
+                }
+              >
+                {b.name}
+              </button>
+            ))}
+          </div>
+
+          {/* Toolbar */}
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Buscar (producto, detalle o ID)…"
+                className="pl-3 pr-3 py-2 text-sm rounded-lg border w-72 bg-slate-50"
+              />
+              <button onClick={() => { setSearch(""); }} className="px-3 py-2 rounded-lg text-sm border border-slate-200 hover:bg-slate-50">Limpiar</button>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              <button onClick={handleExportCSV} className="px-3 py-2 rounded-lg text-sm font-semibold bg-slate-900 text-white hover:opacity-90">Exportar CSV</button>
+              <button onClick={copySummaryToClipboard} className="px-3 py-2 rounded-lg text-sm font-semibold border border-slate-200 hover:bg-slate-50">Copiar resumen</button>
+              <button onClick={openPrintableReport} className="px-3 py-2 rounded-lg text-sm font-semibold bg-indigo-600 text-white hover:bg-indigo-700">Generar Reporte</button>
+            </div>
+          </div>
+
+          {loading ? (
+            <SkeletonDashboard />
+          ) : (
+            <>
+              {/* Métricas principales */}
+              <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <MetricCard label="Sucursal" value={activeName} subtle />
+                <MetricCard label="Total perdido" value={money(totalLost)} accent="rose" />
+                <MetricCard label="Registros" value={filtered.length} accent="indigo" />
+                <MetricDelta label="Vs. semana previa" value={weekChange} />
+              </section>
+
+              {/* Conmutadores de secciones */}
+              <div className="flex flex-wrap items-center gap-3">
+                <Toggle value={showExecutive} onChange={setShowExecutive} label="Resumen ejecutivo" />
+                <Toggle value={showCharts} onChange={setShowCharts} label="Gráficos" />
+                <Toggle value={showTables} onChange={setShowTables} label="Tablas por categoría" />
+              </div>
+
+              {showExecutive && (
+                <ExecutiveSummary topProducts={topProducts} categoryMetrics={categoryMetrics} totalLost={totalLost} />
+              )}
+
+              {showCharts && (
+                <section className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                  <ChartCard title="Pérdidas por Semana">
+                    <ResponsiveContainer width="100%" height={240}>
+                      <BarChart data={weeklyData}>
+                        <XAxis dataKey="week" fontSize={12} />
+                        <YAxis fontSize={12} />
+                        <Tooltip formatter={(v) => `$${Number(v).toLocaleString("es-AR")}`} />
+                        <Bar dataKey="loss" radius={[8, 8, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </ChartCard>
+                  <ChartCard title="Pérdidas por Mes">
+                    <ResponsiveContainer width="100%" height={240}>
+                      <BarChart data={monthlyData}>
+                        <XAxis dataKey="month" fontSize={12} />
+                        <YAxis fontSize={12} />
+                        <Tooltip formatter={(v) => `$${Number(v).toLocaleString("es-AR")}`} />
+                        <Bar dataKey="loss" radius={[8, 8, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </ChartCard>
+                </section>
+              )}
+
+              {showTables && (
+                <section className="space-y-6">
+                  {ORDER_WITH_OTHERS.map((cat) => {
+                    const arr = (groupedByCategory[cat] || []);
+                    if (!arr.length) return null;
+                    const subtotal = sum(arr, (x) => x.lost_cash || 0);
+                    return (
+                      <div key={cat} className="bg-slate-50 rounded-2xl p-5 shadow-sm">
+                        <div className="flex items-center justify-between mb-3">
+                          <h3 className="text-base font-semibold text-slate-700">{cat}</h3>
+                          <div className="text-sm text-slate-600">Subtotal: <span className="font-semibold">{money(subtotal)}</span></div>
+                        </div>
+                        <div className="overflow-x-auto">
+                          <table className="min-w-full text-sm">
+                            <thead>
+                              <tr>
+                                <th className="px-4 py-2 text-left">Fecha</th>
+                                <th className="px-4 py-2 text-left">Producto</th>
+                                <th className="px-4 py-2 text-left">Detalle</th>
+                                <th className="px-4 py-2 text-right">Pérdida $</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {arr.map((l) => (
+                                <tr key={l.id} className="border-b last:border-none">
+                                  <td className="px-4 py-2">{new Date(l.created_at).toLocaleDateString()}</td>
+                                  <td className="px-4 py-2">{l.products_master?.name || l.product_id}</td>
+                                  <td className="px-4 py-2">{l.details}</td>
+                                  <td className="px-4 py-2 text-right">{(l.lost_cash || 0).toLocaleString("es-AR")}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                            <tfoot>
+                              <tr>
+                                <td className="px-4 py-2"></td>
+                                <td className="px-4 py-2"></td>
+                                <td className="px-4 py-2 text-right font-semibold">Total categoría</td>
+                                <td className="px-4 py-2 text-right font-semibold">{subtotal.toLocaleString("es-AR")}</td>
+                              </tr>
+                            </tfoot>
+                          </table>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </section>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/*********************************
+ * Subcomponentes UI
+ *********************************/
+function MetricCard({ label, value, accent = "", subtle = false }) {
+  const accentMap = {
+    rose: "bg-rose-50 text-rose-700 border-rose-100",
+    indigo: "bg-indigo-50 text-indigo-700 border-indigo-100",
+  };
+  const cls = subtle
+    ? "bg-slate-50 text-slate-700 border-slate-100"
+    : accentMap[accent] || "bg-slate-100 text-slate-800 border-slate-200";
+  return (
+    <div className={`rounded-2xl px-5 py-4 flex flex-col gap-1 shadow-sm border ${cls}`}>
+      <span className="text-xs text-slate-500">{label}</span>
+      <span className="text-xl font-bold tabular-nums">{value}</span>
+    </div>
+  );
+}
+
+function MetricDelta({ label, value }) {
+  const sign = value.pct == null ? null : value.pct >= 0 ? "+" : "";
+  const color = value.pct == null ? "text-slate-600" : value.pct >= 0 ? "text-rose-600" : "text-emerald-600";
+  const text = value.pct == null ? "s/datos" : `${sign}${value.pct.toFixed(1)}%`;
+  return <MetricCard label={label} value={text} accent={value.pct == null ? "" : value.pct >= 0 ? "rose" : "indigo"} />;
+}
+
+function ChartCard({ title, children }) {
+  return (
+    <div className="bg-slate-50 rounded-2xl p-5 shadow-sm border border-slate-100">
+      <h3 className="text-base font-semibold mb-3 text-slate-700">{title}</h3>
+      {children}
+    </div>
+  );
+}
+
+function Toggle({ value, onChange, label }) {
+  return (
+    <button
+      onClick={() => onChange(!value)}
+      className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition ${
+        value ? "bg-slate-900 text-white border-slate-900" : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
+      }`}
+    >
+      {value ? `✓ ${label}` : label}
+    </button>
+  );
+}
+
+function ExecutiveSummary({ topProducts, categoryMetrics, totalLost }) {
+  const topCats = [...categoryMetrics].sort((a, b) => b.loss - a.loss).slice(0, 5);
+  return (
+    <section className="grid grid-cols-1 md:grid-cols-2 gap-8">
+      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
+        <h3 className="text-base font-semibold text-slate-700 mb-3">Top productos con pérdidas</h3>
+        {topProducts.length === 0 ? (
+          <div className="italic text-slate-400">Sin datos.</div>
+        ) : (
+          <ul className="space-y-2">
+            {topProducts.map((p, i) => (
+              <li key={p.name} className="flex items-center justify-between">
+                <div className="flex items-center gap-2"><span className="text-slate-400">#{i + 1}</span><span>{p.name}</span></div>
+                <div className="font-semibold">{money(p.loss)}</div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
+        <h3 className="text-base font-semibold text-slate-700 mb-3">Top categorías por pérdida</h3>
+        {topCats.length === 0 ? (
+          <div className="italic text-slate-400">Sin datos.</div>
+        ) : (
+          <ul className="space-y-2">
+            {topCats.map((c, i) => (
+              <li key={c.cat} className="flex items-center justify-between">
+                <div className="flex items-center gap-2"><span className="text-slate-400">#{i + 1}</span><span>{c.cat}</span></div>
+                <div className="font-semibold">{money(c.loss)} <span className="text-xs text-slate-400">({c.count})</span></div>
+              </li>
+            ))}
+          </ul>
+        )}
+        <div className="mt-4 text-sm text-slate-500">Total pérdidas del período: <span className="font-semibold text-slate-700">{money(totalLost)}</span></div>
+      </div>
+    </section>
+  );
+}
+
+function SkeletonDashboard() {
+  return (
+    <div className="animate-pulse space-y-6">
+      <div className="h-8 bg-slate-100 rounded w-1/3" />
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <div key={i} className="h-20 bg-slate-100 rounded-2xl" />
+        ))}
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+        <div className="h-64 bg-slate-100 rounded-2xl" />
+        <div className="h-64 bg-slate-100 rounded-2xl" />
+      </div>
+      <div className="h-96 bg-slate-100 rounded-2xl" />
+    </div>
+  );
 }
