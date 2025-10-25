@@ -400,10 +400,15 @@ export default function NewSalePage() {
           page++;
         }
 
+        // después de traer products_master:
         const prodsWithStock = acc.map((p) => ({
           ...p,
           stock: stockMap[p.id.toString()] ?? 0,
+          entryManual: !!(p.entryManual ?? p.entry_manual ?? false), // <- normalizo
         }));
+
+
+
 
         // 3. Cargar promociones activas
         const { data: promosRaw, error: promosError } = await supabase
@@ -413,16 +418,15 @@ export default function NewSalePage() {
 
         if (promosError) throw promosError;
 
+        // al armar promos:
         const promosFormatted = (promosRaw ?? []).map((promo) => ({
           ...promo,
           code: promo.code,
           name: promo.name,
           default_selling: promo.promo_price,
           stock: 999,
-          products: promo.promo_items.map((pi) => ({
-            id: pi.product_id,
-            qty: pi.quantity,
-          })),
+          products: promo.promo_items.map((pi) => ({ id: pi.product_id, qty: pi.quantity })),
+          entryManual: true, // <- las promos se pueden buscar manualmente
         }));
 
         // 4. Guardar ambos
@@ -480,12 +484,14 @@ export default function NewSalePage() {
   const filteredProducts = useMemo(() => {
     if (!debouncedSearch.trim()) return [];
     const q = debouncedSearch.toLowerCase();
-    return products.filter(
-      (p) =>
-        p.name?.toLowerCase().includes(q) ||
-        p.code?.toLowerCase().includes(q) ||
-        p.description?.toLowerCase().includes(q)
-    );
+
+    return products.filter((p) => {
+      const matchesText =
+        (p.name?.toLowerCase().includes(q) ?? false) ||
+        (p.code?.toLowerCase().includes(q) ?? false) ||
+        (p.description?.toLowerCase().includes(q) ?? false);
+      return matchesText && p.entryManual === true; // <- clave
+    });
   }, [debouncedSearch, products]);
 
   /* ─ Cart helpers ─ */
@@ -617,7 +623,7 @@ export default function NewSalePage() {
           qty: pi.quantity,
         })),
       }));
-
+      console.log(prodsWithStock)
       setProducts([...promosFormatted, ...prodsWithStock]);
     } catch (err) {
       console.error("Error al cargar productos:", err);
@@ -627,6 +633,7 @@ export default function NewSalePage() {
     }
   };
 
+  console.log(products)
   // Llama a esto cuando quieras imprimir (usa tu estado actual)
   async function handlePrintTicket() {
     // armo los ítems desde tu carrito
