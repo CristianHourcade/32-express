@@ -1,6 +1,6 @@
 import InventoryPage from "../products/page"
 
-export const Page = () => {
+const Page = () => {
     return (<div>
         <InventoryPage />
     </div>)
