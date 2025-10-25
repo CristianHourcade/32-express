@@ -41,7 +41,7 @@ type InventoryItem = {
   margin_percent: number;
   default_selling: number;
   stocks: Record<string, number>;
-  entryManual?: boolean; // UI; en DB es entry_manual
+  entryManual?: boolean; // UI; en DB es entryManual
 };
 
 // ¿Tiene stock en algún local?
@@ -82,7 +82,7 @@ export default function InventoryPage() {
       const { data, error } = await supabase
         .from("products_master")
         .select(
-          "id, code, name, default_purchase, margin_percent, default_selling, entry_manual"
+          "id, code, name, default_purchase, margin_percent, default_selling, entryManual"
         )
         .range(from, from + step - 1);
 
@@ -167,7 +167,7 @@ export default function InventoryPage() {
           margin_percent: m.margin_percent,
           default_selling: m.default_selling,
           stocks: map[m.id] || {},
-          entryManual: !!(m.entry_manual ?? m.entryManual ?? false), // normalizo camel
+          entryManual: !!(m.entryManual ?? m.entryManual ?? false), // normalizo camel
         }))
       );
 
@@ -252,7 +252,7 @@ export default function InventoryPage() {
         .insert({
           code: drawerProduct.code,
           name: newName,
-          entry_manual: !!drawerProduct.entryManual, // snake en DB
+          entryManual: !!drawerProduct.entryManual, // snake en DB
           default_purchase: drawerProduct.default_purchase,
           margin_percent: drawerProduct.margin_percent,
           default_selling: salePrice,
@@ -272,7 +272,7 @@ export default function InventoryPage() {
           name: newName,
           default_purchase: drawerProduct.default_purchase,
           margin_percent: drawerProduct.margin_percent,
-          entry_manual: !!drawerProduct.entryManual, // snake en DB
+          entryManual: !!drawerProduct.entryManual, // snake en DB
           default_selling: salePrice,
         })
         .eq("id", prodId);

@@ -1,4 +1,5 @@
 "use client";
-import InventoryPage from "../products/page"
+
+import InventoryPage from "@/components/pages/productos";
 
 export default () => <InventoryPage/>;
