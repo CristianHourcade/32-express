@@ -528,7 +528,6 @@ function Info({ label, value }: { label: string; value: React.ReactNode }) {
     </div>
   );
 }
-
 /* ───────── modal extraído ───────── */
 function DetailsModal({
   shift,
@@ -545,7 +544,7 @@ function DetailsModal({
   getPaymentMethodClass: (m: string) => string;
   formatPrice: (n: number) => string;
 }) {
-  /* fusionamos mercadopago en transfer */
+  /* totales por método (fusionamos mercadopago en transfer) */
   const totals = useMemo(() => {
     return getShiftSales(shift.id).reduce((acc, s) => {
       const k = s.paymentMethod === "mercadopago" ? "transfer" : s.paymentMethod;
@@ -554,23 +553,37 @@ function DetailsModal({
     }, {} as Record<string, number>);
   }, [getShiftSales, shift.id]);
 
+  /* 🔎 RESUMEN DE PRODUCTOS: suma cantidades por nombre (incluye promos) */
+  const productSummary = useMemo(() => {
+    const map = new Map<string, { name: string; qty: number }>();
+    for (const sale of getShiftSales(shift.id)) {
+      for (const it of sale.items || []) {
+        const name: string = it?.name ?? "—";
+        const prev = map.get(name);
+        const nextQty = (prev?.qty || 0) + Number(it?.quantity || 0);
+        map.set(name, { name, qty: nextQty });
+      }
+    }
+    // ordenar por mayor cantidad
+    return Array.from(map.values()).sort((a, b) => b.qty - a.qty);
+  }, [getShiftSales, shift.id]);
+
   const tiles = [
     { k: "cash", l: "Efectivo", cls: "bg-emerald" },
     { k: "card", l: "Tarjeta", cls: "bg-indigo" },
     { k: "transfer", l: "Transferencia", cls: "bg-purple" },
     { k: "rappi", l: "Rappi", cls: "bg-orange" },
   ];
-  console.log(getShiftSales(shift.id))
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
-      <div className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-xl bg-white dark:bg-slate-800/80 shadow-xl ring-1 ring-slate-200 dark:ring-slate-700 animate-scale-in">
+      <div className="w-full max-w-3xl max-h-[90vh] overflow-y-auto rounded-xl bg-white dark:bg-slate-800/80 shadow-xl ring-1 ring-slate-200 dark:ring-slate-700 animate-scale-in">
         {/* header */}
         <header className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-700">
           <div>
             <h2 className="text-lg font-semibold">Detalles del turno</h2>
             <p className="text-xs text-slate-600 dark:text-slate-400">
-              {shift.employeeName} — {shift.businessName}
+              {shift.employeeName} — {shift.businessName}
             </p>
           </div>
           <button
@@ -615,16 +628,11 @@ function DetailsModal({
             <Info label="Caja Inicial" value={`$${formatPrice(shift.startCash || 0)}`} />
             <Info
               label="Caja Final"
-              value={
-                shift.endCash != null
-                  ? `$${formatPrice(shift.endCash)}`
-                  : "$0.00"
-              }
+              value={shift.endCash != null ? `$${formatPrice(shift.endCash)}` : "$0.00"}
             />
           </div>
 
-
-          {/* totales */}
+          {/* totales por método */}
           <section>
             <h3 className="text-sm font-semibold mb-2 uppercase tracking-wide">
               Métodos de pago
@@ -639,7 +647,38 @@ function DetailsModal({
             </div>
           </section>
 
-          {/* ventas */}
+          {/* 🔵 RESUMEN DE PRODUCTOS DEL TURNO */}
+          <section>
+            <h3 className="text-sm font-semibold mb-2 uppercase tracking-wide">
+              Productos vendidos (resumen)
+            </h3>
+            {productSummary.length ? (
+              <div className="overflow-x-auto rounded-lg ring-1 ring-slate-200 dark:ring-slate-700">
+                <table className="min-w-full text-sm border-separate border-spacing-0">
+                  <thead className="bg-slate-100 text-[11px] text-slate-500 uppercase tracking-wide border-y border-slate-200">
+                    <tr>
+                      <th className="px-4 py-3 text-left font-semibold">Producto</th>
+                      <th className="px-4 py-3 text-right font-semibold">Cantidad</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {productSummary.map((row) => (
+                      <tr key={row.name} className="group transition">
+                        <td className="px-4 py-3 bg-white text-slate-700">{row.name}</td>
+                        <td className="px-4 py-3 bg-white text-right font-semibold text-slate-900">
+                          {row.qty}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <p className="text-slate-600 dark:text-slate-400">Sin productos en este turno.</p>
+            )}
+          </section>
+
+          {/* detalle de ventas */}
           <section>
             <h3 className="text-sm font-semibold mb-2 uppercase tracking-wide">
               Ventas del turno
@@ -650,10 +689,7 @@ function DetailsModal({
                   <thead className="bg-slate-100 text-[11px] text-slate-500 uppercase tracking-wide border-y border-slate-200">
                     <tr>
                       {["Hora", "Detalle", "Método", "Total"].map((h) => (
-                        <th
-                          key={h}
-                          className="px-4 py-3 text-left font-semibold whitespace-nowrap"
-                        >
+                        <th key={h} className="px-4 py-3 text-left font-semibold whitespace-nowrap">
                           {h}
                         </th>
                       ))}
@@ -661,22 +697,23 @@ function DetailsModal({
                   </thead>
                   <tbody>
                     {getShiftSales(shift.id).map((s) => (
-                      <tr
-                        key={s.id}
-                        className="group transition"
-                      >
-                        {/* Columna izquierda azul suave al hacer hover */}
+                      <tr key={s.id} className="group transition">
+                        {/* Hora */}
                         <td className="relative px-4 py-3 whitespace-nowrap font-semibold text-slate-700 bg-white align-top group-hover:before:content-[''] group-hover:before:absolute group-hover:before:inset-y-0 group-hover:before:left-0 group-hover:before:w-1 group-hover:before:bg-sky-500 ">
                           {new Date(s.timestamp).toLocaleTimeString()}
                         </td>
 
                         {/* Detalle */}
                         <td className="px-4 py-3 bg-white align-top text-slate-700 space-y-1">
-                          {s.items.map((it, i) => (
+                          {s.items.map((it: any, i: number) => (
                             <div key={i}>
                               <span className="font-medium">
                                 {it.quantity}× {it.name}
-                                {it.isPromo && <span className="ml-1 text-[10px] bg-sky-100 text-sky-800 dark:bg-sky-900/30 dark:text-sky-300 px-1.5 py-0.5 rounded-full">PROMO</span>}
+                                {it.isPromo && (
+                                  <span className="ml-1 text-[10px] bg-sky-100 text-sky-800 dark:bg-sky-900/30 dark:text-sky-300 px-1.5 py-0.5 rounded-full">
+                                    PROMO
+                                  </span>
+                                )}
                               </span>{" "}
                               <span className="text-xs text-slate-500">
                                 – ${formatPrice(it.total)} [Stock: {it?.stock === "null" ? "NO" : it?.stock}]
@@ -706,7 +743,6 @@ function DetailsModal({
                     ))}
                   </tbody>
                 </table>
-
               </div>
             ) : (
               <p className="text-slate-600 dark:text-slate-400">Sin ventas registradas.</p>
