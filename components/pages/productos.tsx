@@ -73,6 +73,10 @@ export default function InventoryPage() {
   >({});
   const [selectedCategory, setSelectedCategory] = useState<string>("");
 
+  // 🧭 Paginación (10 por página)
+  const PAGE_SIZE = 10;
+  const [page, setPage] = useState(1);
+
   async function fetchAllMasters() {
     const step = 1000;
     let from = 0;
@@ -214,6 +218,22 @@ export default function InventoryPage() {
 
     return list;
   }, [inventory, selectedCategory, searchTerm, sortOrder]);
+
+  // 🔄 Resetear página cuando cambian filtros/orden/datos
+  useEffect(() => {
+    setPage(1);
+  }, [searchTerm, selectedCategory, sortOrder, inventory.length]);
+
+  // Derivar paginado
+  const totalItems = filtered.length;
+  const totalPages = Math.max(1, Math.ceil(totalItems / PAGE_SIZE));
+  const startIndex = (page - 1) * PAGE_SIZE;
+  const endIndex = Math.min(startIndex + PAGE_SIZE, totalItems);
+
+  const paginated = useMemo(
+    () => filtered.slice(startIndex, endIndex),
+    [filtered, startIndex, endIndex]
+  );
 
   const isBusy = loading || businessesLoading;
 
@@ -414,7 +434,7 @@ export default function InventoryPage() {
   }
 
   const productRows = useMemo(() => {
-    return filtered.map((item) => {
+    return paginated.map((item) => {
       const showNoStockBadge = searchTerm.trim() && !hasAnyStock(item);
 
       return (
@@ -527,7 +547,7 @@ export default function InventoryPage() {
         </tr>
       );
     });
-  }, [filtered, businesses, searchTerm, sortOrder]);
+  }, [paginated, businesses, searchTerm, sortOrder]);
 
   // --- Modal de stock ---
   const [isStockModalOpen, setIsStockModalOpen] = useState(false);
@@ -605,6 +625,10 @@ export default function InventoryPage() {
     }
   }
 
+  function categoryColorFooter() {
+    return null;
+  }
+
   return (
     <div className="space-y-6 p-6">
       <header className="flex flex-col md:flex-row justify-between items-center gap-4">
@@ -629,7 +653,7 @@ export default function InventoryPage() {
         </select>
       </header>
 
-      <div className="w-full">
+      <div className="flex">
         <input
           type="text"
           placeholder="Buscar por nombre o código"
@@ -637,6 +661,9 @@ export default function InventoryPage() {
           onChange={(e) => setSearchTerm(e.target.value)}
           className="w-full  border rounded-md p-2 text-sm bg-white dark:bg-slate-800"
         />
+        <button style={{backgroundColor:'red', color:'white', padding:'0 20px'}} onClick={() => setSearchTerm('')}>
+          Limpiar
+        </button>
       </div>
 
       <div className="overflow-x-auto bg-white dark:bg-slate-800 rounded-2xl shadow-lg p-6">
@@ -664,6 +691,43 @@ export default function InventoryPage() {
                 )}
               </tbody>
             </table>
+          </div>
+
+          {/* Footer de paginación */}
+          <div className="flex flex-col md:flex-row items-center justify-between gap-3 mt-3 px-4 py-3">
+            <span className="text-sm text-gray-600">
+              Mostrando{" "}
+              <b>{totalItems === 0 ? 0 : startIndex + 1}</b>–<b>{endIndex}</b> de{" "}
+              <b>{totalItems}</b>
+            </span>
+
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={page <= 1}
+                className={`px-3 py-1 rounded-md border ${
+                  page <= 1
+                    ? "opacity-50 cursor-not-allowed"
+                    : "hover:bg-gray-100 dark:hover:bg-slate-700"
+                }`}
+              >
+                Anterior
+              </button>
+              <span className="text-sm">
+                Página <b>{page}</b> / {totalPages}
+              </span>
+              <button
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                disabled={page >= totalPages}
+                className={`px-3 py-1 rounded-md border ${
+                  page >= totalPages
+                    ? "opacity-50 cursor-not-allowed"
+                    : "hover:bg-gray-100 dark:hover:bg-slate-700"
+                }`}
+              >
+                Siguiente
+              </button>
+            </div>
           </div>
         </div>
       </div>
