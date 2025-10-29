@@ -362,7 +362,17 @@ const loadSaleItemsPorSaleIds = async (saleIds: string[]) => {
     batches.push(
       supabase
         .from("sale_items")
-        .select("*, products(name)")
+        .select(`
+            quantity,
+            total,
+            stock,
+            product_id,
+            product_master_id,
+            promotion_id,
+            products ( name ),
+            products_master ( name ),
+            promotion:promos ( name )
+          `)
         .in("sale_id", batchIds)
     );
   }
@@ -370,6 +380,7 @@ const loadSaleItemsPorSaleIds = async (saleIds: string[]) => {
   const results = await Promise.all(batches);
   return results.flatMap((r) => r.data || []);
 };
+
 
 const loadProducts = async (businessId: string) =>
   fetchAllPaginated((lo, hi) =>
@@ -429,6 +440,80 @@ function extractCategory(name: string) {
 
 /* ========= DASHBOARD ========= */
 export default function AdminDashboard() {
+  // ===== Modal productos por turno =====
+  const [shiftModalOpen, setShiftModalOpen] = useState(false);
+  const [shiftModalRows, setShiftModalRows] = useState<Array<{ name: string; qty: number; unit: number; total: number }>>([]);
+  const [shiftModalLoading, setShiftModalLoading] = useState(false);
+  const [shiftModalMeta, setShiftModalMeta] = useState<{ employee: string; business: string; startedAt: string; total: number }>({ employee: "", business: "", startedAt: "", total: 0 });
+
+  const openShiftProducts = async (sh: any) => {
+    setShiftModalOpen(true);
+    setShiftModalLoading(true);
+
+    // meta
+    const emp = employees.find((e) => e.id === sh.employee_id);
+    const empName = emp?.name || sh.employee_id;
+    const businessName = sh.business_name;
+    const startedAt = sh.start_time;
+
+    // ventas de ese turno
+    const turnSales = sales.filter((s) => s.shift_id === sh.id);
+    const totalTurn = turnSales.reduce((a, s) => a + (s.total ?? 0), 0);
+    const saleIds = turnSales.map((s) => s.id);
+
+    // items con joins (products / products_master / promos)
+    const items = saleIds.length ? await loadSaleItemsPorSaleIds(saleIds) : [];
+
+    // ---- Agrupar por categoría (usando tu extractCategory) ----
+    type Row = { name: string; qty: number; unit: number; total: number };
+    const grouped = new Map<string, Row[]>();
+
+    for (const it of items) {
+      const name =
+        it?.promotion?.name ??
+        it?.products?.name ??
+        it?.products_master?.name ??
+        "—";
+
+      const { category } = extractCategory(name);
+      const cat = category || "SIN CATEGORIA";
+
+      const qty = Number(it?.quantity ?? 0);
+      const tot = Number(it?.total ?? 0);
+      const unit = qty > 0 ? tot / qty : 0;
+
+      const list = grouped.get(cat) || [];
+      // si el mismo nombre aparece varias veces, acumulamos
+      const found = list.find((x) => x.name === name);
+      if (found) {
+        found.qty += qty;
+        found.total += tot;
+        found.unit = found.qty > 0 ? found.total / found.qty : 0;
+      } else {
+        list.push({ name, qty, unit, total: tot });
+      }
+      grouped.set(cat, list);
+    }
+
+    // a array y ordenados por qty desc dentro de cada categoría
+    const rows = Array.from(grouped.entries())
+      .map(([category, items]) => ({
+        category,
+        items: items.sort((a, b) => b.qty - a.qty),
+      }))
+      // categorías con más cantidad total primero
+      .sort((a, b) => {
+        const qa = a.items.reduce((s, r) => s + r.qty, 0);
+        const qb = b.items.reduce((s, r) => s + r.qty, 0);
+        return qb - qa;
+      });
+
+    setShiftModalMeta({ employee: empName, business: businessName, startedAt, total: totalTurn });
+    setShiftModalRows(rows as any); // el modal ya espera grupos por categoría
+    setShiftModalLoading(false);
+  };
+
+
   /* -------- MES SELECCIONADO -------- */
   const [monthOffset, setMonthOffset] = useState(0);
   const { start: monthStart, end: monthEnd } = useMemo(
@@ -819,78 +904,18 @@ export default function AdminDashboard() {
             const hours = (Date.now() - new Date(sh.start_time).getTime()) / 36e5;
             const avgHr = hours > 0 ? total / hours : 0;
 
-            // ► transfer + mercadopago
-            const transferTotal =
-              (payments.transfer ?? 0) + (payments.mercadopago ?? 0);
-
             return (
-              <div
+              <ShiftCard
                 key={sh.id}
-                className="rounded-2xl bg-white dark:bg-slate-900 p-6 border border-slate-200 dark:border-slate-700 shadow-sm hover:shadow-md transition-all duration-200 flex flex-col gap-4 min-h-[260px]"
-              >
-                {/* — Header — */}
-                <div className="flex items-start justify-between">
-                  <div className="flex flex-col">
-                    <h3 className="text-base font-semibold text-gray-900 dark:text-white">
-                      {emp?.name || sh.employee_id}
-                    </h3>
-                    <p className="text-sm text-slate-500 dark:text-slate-400">{sh.business_name}</p>
-                  </div>
-                  <span className="px-2 py-0.5 text-[11px] font-semibold rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-300">
-                    Activo
-                  </span>
-                </div>
-
-                {/* — Hora de inicio — */}
-                <p className="text-xs text-slate-500 dark:text-slate-400">
-                  Iniciado:{" "}
-                  <span className="font-medium text-slate-700 dark:text-slate-200">
-                    {new Date(sh.start_time).toLocaleString()}
-                  </span>
-                </p>
-
-                {/* — Métricas — */}
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <p className="text-xs text-slate-500 dark:text-slate-400">Ventas totales</p>
-                    <p className="text-lg font-bold text-green-600 dark:text-green-400">
-                      $ {formatPrice(total)}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-slate-500 dark:text-slate-400">Promedio / hora</p>
-                    <p className="text-lg font-bold text-indigo-600 dark:text-indigo-400">
-                      $ {formatPrice(avgHr)}
-                    </p>
-                  </div>
-                </div>
-
-                {/* — Métodos de pago — */}
-                <div>
-                  <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">Métodos de pago</p>
-                  <div className="grid grid-cols-2 gap-2">
-                    {[
-                      { label: "Efectivo", value: payments.cash, class: pmClass("cash") },
-                      { label: "Tarjeta", value: payments.card, class: pmClass("card") },
-                      { label: "Rappi", value: payments.rappi, class: pmClass("rappi") },
-                      { label: "CONSUMO INTERNO", value: payments.consumo, class: pmClass("consumo") },
-                      {
-                        label: "Transferencia",
-                        value: (payments.transfer ?? 0) + (payments.mercadopago ?? 0),
-                        class: pmClass("transfer"),
-                      },
-                    ].map(({ label, value, class: cls }) => (
-                      <div key={label} className={`${cls} flex justify-between items-center px-3 py-2 text-sm font-medium`}>
-                        <span className="text-slate-700 dark:text-slate-300">{label}</span>
-                        <span className="tabular-nums text-right text-slate-800 dark:text-white font-semibold">
-                          $ {formatPrice(value)}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-
+                sh={sh}
+                empName={emp?.name || sh.employee_id}
+                businessName={sh.business_name}
+                payments={payments}
+                total={total}
+                avgHr={avgHr}
+                startTime={sh.start_time}
+                onOpenDetails={() => openShiftProducts(sh)}
+              />
             );
           })}
 
@@ -902,7 +927,297 @@ export default function AdminDashboard() {
             </div>
           )}
         </div>
+
       </section>
+      <ShiftProductsModal
+        open={shiftModalOpen}
+        onClose={() => setShiftModalOpen(false)}
+        employee={shiftModalMeta.employee}
+        business={shiftModalMeta.business}
+        startedAt={shiftModalMeta.startedAt}
+        rows={shiftModalRows}
+        loading={shiftModalLoading}
+        total={shiftModalMeta.total}
+      />
+
+    </div>
+  );
+}
+
+
+/* ========= SHIFT CARD (UI mejorada) ========= */
+function ShiftCard({
+  sh,
+  empName,
+  businessName,
+  payments,
+  total,
+  avgHr,
+  onOpenDetails,
+  startTime,
+}: {
+  sh: any;
+  empName: string;
+  businessName: string;
+  payments: Record<"cash" | "card" | "transfer" | "mercadopago" | "rappi" | "consumo", number>;
+  total: number;
+  avgHr: number;
+  onOpenDetails: any;
+  startTime: string;
+}) {
+  // Unificar transferencia + MP para lectura rápida
+  const unified = {
+    cash: payments.cash ?? 0,
+    card: payments.card ?? 0,
+    transfer: (payments.transfer ?? 0) + (payments.mercadopago ?? 0),
+    rappi: payments.rappi ?? 0,
+    consumo: payments.consumo ?? 0,
+  };
+
+  const items = [
+    { key: "cash", label: "Efectivo", icon: Banknote, value: unified.cash, dot: "bg-emerald-500", pill: "bg-emerald-50 dark:bg-emerald-900/30" },
+    { key: "card", label: "Tarjeta", icon: CreditCard, value: unified.card, dot: "bg-indigo-500", pill: "bg-indigo-50 dark:bg-indigo-900/30" },
+    { key: "transfer", label: "Transfer/MP", icon: Wallet, value: unified.transfer, dot: "bg-yellow-500", pill: "bg-yellow-50 dark:bg-yellow-900/30" },
+    { key: "rappi", label: "Rappi", icon: Flame, value: unified.rappi, dot: "bg-orange-500", pill: "bg-orange-50 dark:bg-orange-900/30" },
+    { key: "consumo", label: "Consumo", icon: Building2, value: unified.consumo, dot: "bg-slate-400", pill: "bg-slate-50 dark:bg-slate-800/40" },
+  ] as const;
+
+  const pct = (n: number) => (total > 0 ? Math.max(0, Math.min(100, (n / total) * 100)) : 0);
+  const fmt = (n: number) => `$ ${formatPrice(n || 0)}`;
+
+  // Avatar con iniciales
+  const initials = (empName || "—")
+    .split(" ")
+    .filter(Boolean)
+    .slice(0, 2)
+    .map(w => w[0]?.toUpperCase())
+    .join("");
+
+  // Tiempo transcurrido
+  const started = new Date(startTime);
+  const hours = Math.max(0, (Date.now() - started.getTime()) / 36e5);
+  const hh = Math.floor(hours);
+  const mm = Math.floor((hours - hh) * 60);
+
+  return (
+    <div className="group relative overflow-hidden rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-sm hover:shadow-md transition-all" onClick={onOpenDetails}
+      onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && onOpenDetails?.()}>
+      {/* Sutil gradiente decorativo */}
+      <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-indigo-50/40 via-transparent to-emerald-50/40 dark:from-indigo-900/10 dark:to-emerald-900/10" />
+
+      {/* Header */}
+      <div className="relative flex items-center justify-between gap-3 p-5">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="grid place-items-center w-10 h-10 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 font-semibold">
+            {initials || "?"}
+          </div>
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <h3 className="text-sm font-semibold text-slate-900 dark:text-white truncate">
+                {empName || sh.employee_id}
+              </h3>
+              <span className="px-2 py-0.5 text-[11px] font-semibold rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300">
+                Activo
+              </span>
+            </div>
+            <p className="text-xs text-slate-500 dark:text-slate-400 truncate">{businessName}</p>
+          </div>
+        </div>
+
+        <div className="text-right">
+          <div className="text-[11px] text-slate-500">Iniciado</div>
+          <div className="text-xs font-medium text-slate-800 dark:text-slate-200">
+            {started.toLocaleString()}
+          </div>
+        </div>
+      </div>
+
+      {/* KPIs */}
+      <div className="relative px-5 pb-4">
+        <div className="grid grid-cols-3 gap-3">
+          <div className="rounded-xl bg-slate-50 dark:bg-slate-800/50 p-3">
+            <div className="text-[11px] text-slate-500">Ventas</div>
+            <div className="mt-0.5 text-lg font-bold text-green-600 dark:text-green-400 tabular-nums">
+              {fmt(total)}
+            </div>
+          </div>
+          <div className="rounded-xl bg-slate-50 dark:bg-slate-800/50 p-3">
+            <div className="text-[11px] text-slate-500">Prom. / hora</div>
+            <div className="mt-0.5 text-lg font-bold text-indigo-600 dark:text-indigo-400 tabular-nums">
+              {fmt(avgHr)}
+            </div>
+          </div>
+          <div className="rounded-xl bg-slate-50 dark:bg-slate-800/50 p-3">
+            <div className="text-[11px] text-slate-500">Tiempo activo</div>
+            <div className="mt-0.5 text-lg font-bold text-slate-800 dark:text-slate-200 tabular-nums">
+              {hh}h {mm}m
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Barra apilada por método */}
+      <div className="relative px-5">
+        <div className="flex h-3 w-full rounded-full overflow-hidden bg-slate-100 dark:bg-slate-800">
+          {items.map(
+            it =>
+              it.value > 0 && (
+                <div
+                  key={it.key}
+                  className={`${it.dot.replace("bg-", "bg-")} h-full`}
+                  style={{ width: `${pct(it.value)}%` }}
+                  title={`${it.label}: ${fmt(it.value)} (${pct(it.value).toFixed(0)}%)`}
+                />
+              )
+          )}
+        </div>
+
+        {/* Chips de métodos */}
+        {/* Chips de métodos – altura fija */}
+        <div className="mt-3 grid grid-cols-2 gap-2 min-h-[92px]">
+          {items.map(it => {
+            const visible = (it.value ?? 0) > 0;
+            return (
+              <div
+                key={`chip-${it.key}`}
+                className={`${it.pill} ${visible ? '' : 'invisible'}
+                    rounded-xl px-3 py-2 flex items-center justify-between
+                    text-sm border border-slate-200/70 dark:border-slate-700/60`}
+              >
+                <span className="flex items-center gap-2">
+                  <span className={`w-2 h-2 rounded ${it.dot}`} />
+                  <span className="inline-flex items-center gap-1 text-slate-700 dark:text-slate-200 leading-none">
+                    <it.icon className="w-4 h-4 opacity-70" />
+                    {it.label}
+                  </span>
+                </span>
+                <span className="font-semibold tabular-nums text-slate-900 dark:text-white min-w-[92px] text-right">
+                  {fmt(it.value)}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+
+      </div>
+
+      {/* Footer */}
+      <div className="relative mt-4 border-t border-slate-200 dark:border-slate-700 px-5 py-3 flex items-center justify-between text-xs">
+        <div className="inline-flex items-center gap-2 text-slate-500 dark:text-slate-400">
+          <CalendarDays className="w-4 h-4" />
+          <span>Inicio: {started.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
+        </div>
+
+        {/* espacio para acciones rápidas si luego querés agregarlas */}
+        <div className="inline-flex gap-2">
+          {/* Placeholder acciones: */}
+          {/* <button className="px-2 py-1 rounded-md bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 transition">
+            Finalizar
+          </button> */}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ========= MODAL: Productos vendidos por turno (agrupado por categoría) ========= */
+function ShiftProductsModal({
+  open,
+  onClose,
+  employee,
+  business,
+  startedAt,
+  rows,
+  loading,
+  total,
+}: {
+  open: boolean;
+  onClose: () => void;
+  employee: string;
+  business: string;
+  startedAt: string;
+  rows: Array<{
+    category: string;
+    items: { name: string; qty: number; unit: number; total: number }[];
+  }>;
+  loading: boolean;
+  total: number;
+}) {
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-[2000] flex items-end sm:items-center justify-center">
+      {/* overlay */}
+      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
+
+      {/* card */}
+      <div className="relative w-full sm:max-w-3xl max-h-[85vh] overflow-hidden rounded-2xl bg-white dark:bg-slate-900 shadow-xl border border-slate-200 dark:border-slate-700">
+        {/* header */}
+        <div className="px-5 py-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
+          <div>
+            <h3 className="text-base font-semibold text-slate-900 dark:text-white">
+              Productos vendidos — {employee}
+            </h3>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              {business} · Inicio: {new Date(startedAt).toLocaleString()}
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            className="rounded-lg px-3 py-1.5 text-sm bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700"
+          >
+            Cerrar
+          </button>
+        </div>
+
+        {/* body */}
+        <div className="p-4">
+          {loading ? (
+            <div className="h-40 grid place-items-center text-slate-500">Cargando…</div>
+          ) : !rows.length ? (
+            <div className="h-40 grid place-items-center text-slate-500">
+              No hay productos registrados en este turno.
+            </div>
+          ) : (
+            <div className="max-h-[55vh] overflow-auto space-y-6">
+              {rows.map((cat, i) => (
+                <div key={i}>
+                  <h4 className="font-semibold text-slate-700 dark:text-slate-200 mb-2 border-b border-slate-200 dark:border-slate-700 pb-1">
+                    {cat.category}
+                  </h4>
+
+                  <table className="w-full text-sm mb-2">
+                    <thead className="text-[11px] text-slate-500">
+                      <tr>
+                        <th className="text-left py-1">Producto</th>
+                        <th className="text-right py-1">Cant.</th>
+                        <th className="text-right py-1">$ /u</th>
+                        <th className="text-right py-1">Total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {cat.items.map((r, idx) => (
+                        <tr key={idx} className="border-t border-slate-200 dark:border-slate-700">
+                          <td className="py-1">{r.name}</td>
+                          <td className="py-1 text-right tabular-nums">{r.qty}</td>
+                          <td className="py-1 text-right tabular-nums">$ {formatPrice(r.unit)}</td>
+                          <td className="py-1 text-right tabular-nums font-semibold">$ {formatPrice(r.total)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ))}
+
+              {/* total turno */}
+              <div className="border-t border-slate-200 dark:border-slate-700 pt-3 text-right">
+                <span className="text-sm font-medium mr-2">Total ventas del turno</span>
+                <span className="text-sm font-bold">$ {formatPrice(total)}</span>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

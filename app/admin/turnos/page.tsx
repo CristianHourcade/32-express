@@ -555,18 +555,59 @@ function DetailsModal({
 
   /* 🔎 RESUMEN DE PRODUCTOS: suma cantidades por nombre (incluye promos) */
   const productSummary = useMemo(() => {
-    const map = new Map<string, { name: string; qty: number }>();
+    // categorías reconocidas
+    const categories = [
+      "ALMACEN",
+      "CIGARRILLOS",
+      "GOLOSINAS",
+      "BEBIDA",
+      "CERVEZA",
+      "FIAMBRES",
+      "TABACO",
+      "HUEVOS",
+      "HIGIENE",
+      "ALCOHOL",
+      "PROMO",
+      "SIN CATEGORIA",
+      "BRECA",
+    ];
+
+    const grouped = new Map<string, { name: string; qty: number }[]>();
+
     for (const sale of getShiftSales(shift.id)) {
       for (const it of sale.items || []) {
         const name: string = it?.name ?? "—";
-        const prev = map.get(name);
-        const nextQty = (prev?.qty || 0) + Number(it?.quantity || 0);
-        map.set(name, { name, qty: nextQty });
+        const parts = name.split(" ");
+        const first = parts[0]?.toUpperCase();
+        const category = categories.includes(first) ? first : "SIN CATEGORIA";
+
+        const list = grouped.get(category) || [];
+        const existing = list.find((p) => p.name === name);
+
+        if (existing) {
+          existing.qty += Number(it?.quantity || 0);
+        } else {
+          list.push({ name, qty: Number(it?.quantity || 0) });
+        }
+
+        grouped.set(category, list);
       }
     }
-    // ordenar por mayor cantidad
-    return Array.from(map.values()).sort((a, b) => b.qty - a.qty);
+
+    // convertir a array ordenado
+    return Array.from(grouped.entries())
+      .map(([category, items]) => ({
+        category,
+        items: items.sort((a, b) => b.qty - a.qty),
+      }))
+      .sort((a, b) => {
+        const qa = a.items.reduce((sum, i) => sum + i.qty, 0);
+        const qb = b.items.reduce((sum, i) => sum + i.qty, 0);
+        return qb - qa;
+      });
   }, [getShiftSales, shift.id]);
+
+
 
   const tiles = [
     { k: "cash", l: "Efectivo", cls: "bg-emerald" },
@@ -647,36 +688,44 @@ function DetailsModal({
             </div>
           </section>
 
-          {/* 🔵 RESUMEN DE PRODUCTOS DEL TURNO */}
+          {/* 🔵 RESUMEN DE PRODUCTOS DEL TURNO (agrupado por categoría) */}
           <section>
             <h3 className="text-sm font-semibold mb-2 uppercase tracking-wide">
-              Productos vendidos (resumen)
+              Productos vendidos (por categoría)
             </h3>
+
             {productSummary.length ? (
-              <div className="overflow-x-auto rounded-lg ring-1 ring-slate-200 dark:ring-slate-700">
-                <table className="min-w-full text-sm border-separate border-spacing-0">
-                  <thead className="bg-slate-100 text-[11px] text-slate-500 uppercase tracking-wide border-y border-slate-200">
-                    <tr>
-                      <th className="px-4 py-3 text-left font-semibold">Producto</th>
-                      <th className="px-4 py-3 text-right font-semibold">Cantidad</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {productSummary.map((row) => (
-                      <tr key={row.name} className="group transition">
-                        <td className="px-4 py-3 bg-white text-slate-700">{row.name}</td>
-                        <td className="px-4 py-3 bg-white text-right font-semibold text-slate-900">
-                          {row.qty}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+              <div className="max-h-[55vh] overflow-auto space-y-6 rounded-lg ring-1 ring-slate-200 dark:ring-slate-700 p-3">
+                {productSummary.map((cat) => (
+                  <div key={cat.category}>
+                    <h4 className="font-semibold text-slate-700 dark:text-slate-200 mb-2 border-b border-slate-200 dark:border-slate-700 pb-1">
+                      {cat.category}
+                    </h4>
+                    <table className="w-full text-sm mb-4">
+                      <thead className="text-[11px] text-slate-500">
+                        <tr>
+                          <th className="text-left py-1">Producto</th>
+                          <th className="text-right py-1">Cant.</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {cat.items.map((r, idx) => (
+                          <tr key={idx} className="border-t border-slate-200 dark:border-slate-700">
+                            <td className="py-1">{r.name}</td>
+                            <td className="py-1 text-right">{r.qty}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ))}
               </div>
             ) : (
               <p className="text-slate-600 dark:text-slate-400">Sin productos en este turno.</p>
             )}
           </section>
+
+
 
           {/* detalle de ventas */}
           <section>
