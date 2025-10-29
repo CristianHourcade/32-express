@@ -659,6 +659,12 @@ export default function NewSalePage() {
     setProcessing(true);
 
     try {
+      let total = 0
+      if (businessId === 'd421a363-4424-44ec-adc5-9572ea1b933e' && paymentMethod === 'cash') {
+        total = cartTotal-cartTotal*0.10;
+      } else {
+        total = cartTotal;
+      }
       // 1. Armar datos de la venta
       const saleData = {
         businessId: businessId!,
@@ -666,7 +672,7 @@ export default function NewSalePage() {
         employeeId: currentEmp ? currentEmp.id : user!.id,
         employeeName: user!.name,
         items: cart,
-        total: cartTotal,
+        total: total,
         paymentMethod,
         timestamp: new Date().toISOString(),
         shiftId: activeShift.id,
@@ -837,7 +843,15 @@ export default function NewSalePage() {
     }
   };
 
+  /* ─────────── Scanner focus control (FIX) ─────────── */
+  const [showManualSearch, setShowManualSearch] = useState(false);
+  const scannerInputRef = useRef<HTMLInputElement>(null);
+  const [scannerValue, setScannerValue] = useState("");
+  const debouncedScannerValue = useDebounce(scannerValue, 250);
+  const amountGivenRef = useRef<HTMLInputElement>(null);
 
+  // ⛔ Nuevo flag para pausar auto-focus del scanner
+  const [scannerPaused, setScannerPaused] = useState(false);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -850,27 +864,13 @@ export default function NewSalePage() {
         setCart([]);
       }
     };
-
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
-  const change = useMemo(() => {
-    if (typeof amountGiven !== "number") return null;
-    return amountGiven - cartTotal;
-  }, [amountGiven, cartTotal]);
-
-  console.log(businessId)
-  /* ───────────────────────────────────── UI ───────────────────────────────────── */
-  const [showManualSearch, setShowManualSearch] = useState(false);
-  const scannerInputRef = useRef<HTMLInputElement>(null);
-  const [scannerValue, setScannerValue] = useState("");
-  const debouncedScannerValue = useDebounce(scannerValue, 250);
-  const amountGivenRef = useRef<HTMLInputElement>(null);
-
   useEffect(() => {
     const handleBlur = () => {
-      if (!showManualSearch) {
+      if (!showManualSearch && !scannerPaused) {
         setTimeout(() => {
           scannerInputRef.current?.focus();
         }, 10);
@@ -883,7 +883,53 @@ export default function NewSalePage() {
     return () => {
       if (input) input.removeEventListener("blur", handleBlur);
     };
-  }, [showManualSearch]);
+  }, [showManualSearch, scannerPaused]);
+
+  const change = useMemo(() => {
+    if (typeof amountGiven !== "number") return null;
+    return amountGiven - cartTotal;
+  }, [amountGiven, cartTotal]);
+
+  console.log(businessId)
+  /* ───────────────────────────────────── UI ───────────────────────────────────── */
+
+  useEffect(() => {
+    // Si **ningún** modal está abierto y no está pausado, enfocamos el scanner
+    if (!showManualSearch && !showSelectModal && !scannerPaused) {
+      setTimeout(() => scannerInputRef.current?.focus(), 10);
+    }
+  }, [showManualSearch, showSelectModal, scannerPaused]);
+
+  useEffect(() => {
+    const input = scannerInputRef.current;
+    if (!input) return;
+
+    const handleBlur = () => {
+      // Si NO hay ningún modal abierto y no está pausado, refocus
+      if (!showManualSearch && !showSelectModal && !scannerPaused) {
+        setTimeout(() => input.focus(), 0);
+      }
+    };
+
+    input.addEventListener("blur", handleBlur);
+    return () => {
+      input.removeEventListener("blur", handleBlur);
+    };
+  }, [showManualSearch, showSelectModal, scannerPaused]);
+
+  useEffect(() => {
+    const handleClick = (e: MouseEvent) => {
+      // Si no hay ningún modal abierto y no está pausado
+      if (!showManualSearch && !showSelectModal && !scannerPaused) {
+        const target = e.target as HTMLElement;
+        const isInteractive = target.closest('input, textarea, select, button, [contenteditable="true"]');
+        if (!isInteractive) scannerInputRef.current?.focus();
+      }
+    };
+
+    document.addEventListener("click", handleClick);
+    return () => document.removeEventListener("click", handleClick);
+  }, [showManualSearch, showSelectModal, scannerPaused]);
 
   useEffect(() => {
     if (!debouncedScannerValue || showManualSearch) return;
@@ -917,49 +963,19 @@ export default function NewSalePage() {
     // 2. Cerramos el modal de selección
     setShowSelectModal(false);
 
-    // 3. Volvemos a enfocar el scanner para seguir escaneando
-    scannerInputRef.current?.focus();
+    // 3. Volvemos a enfocar el scanner para seguir escaneando (si no está pausado)
+    if (!scannerPaused) scannerInputRef.current?.focus();
   };
 
-  useEffect(() => {
-    // Si **ningún** modal está abierto, enfocamos el scanner
-    if (!showManualSearch && !showSelectModal) {
-      // pequeño delay para asegurarnos de que el input ya existe
-      setTimeout(() => scannerInputRef.current?.focus(), 10);
-    }
-  }, [showManualSearch, showSelectModal]);
-
-  useEffect(() => {
-    const input = scannerInputRef.current;
-    if (!input) return;
-
-    const handleBlur = () => {
-      // Si NO hay ningún modal abierto, refocus
-      if (!showManualSearch && !showSelectModal) {
-        // lo hacemos en un tick para no interferir con el evento actual
-        setTimeout(() => input.focus(), 0);
-      }
-    };
-
-    input.addEventListener("blur", handleBlur);
-    return () => {
-      input.removeEventListener("blur", handleBlur);
-    };
-  }, [showManualSearch, showSelectModal]);
-  useEffect(() => {
-    const handleClick = (e: MouseEvent) => {
-      // Si no hay ningún modal abierto
-      if (!showManualSearch && !showSelectModal) {
-        scannerInputRef.current?.focus();
-      }
-    };
-
-    document.addEventListener("click", handleClick);
-    return () => document.removeEventListener("click", handleClick);
-  }, [showManualSearch, showSelectModal]);
   const changeInputRef = useRef<HTMLInputElement>(null);
 
-
+  const Total = () => {
+    if (businessId === 'd421a363-4424-44ec-adc5-9572ea1b933e' && paymentMethod === 'cash') return (
+      <div style={{ backgroundColor: 'black', padding: 10, color: 'white' }}>
+        10% OFF EFECTIVO: {(formatCurrency(cartTotal - cartTotal * 0.1))}
+      </div>
+    )
+  }
   if (loadingShifts) {
     return (
       <div className="flex justify-center items-center h-64">
@@ -996,7 +1012,6 @@ export default function NewSalePage() {
         autoFocus
         onChange={(e) => setScannerValue(e.target.value)}
         value={scannerValue}
-        // className=""
         className="absolute top-0 left-0 w-0 h-0 opacity-0 pointer-events-none"
       />
 
@@ -1113,7 +1128,7 @@ export default function NewSalePage() {
 
                         {/* Precios + Botón borrar */}
                         <div className="text-right leading-tight min-w-[120px]">
-                          <p className="text-[11px] text-gray-400">Unitario</p>
+                          <p className="text[11px] text-gray-400">Unitario</p>
                           <p className="text-[13px] font-medium text-gray-700">{formatCurrency(item.price)}</p>
                           <p className="text-[11px] text-gray-400 mt-1">Total</p>
                           <div className="flex items-center justify-end gap-2 mt-0.5">
@@ -1176,57 +1191,6 @@ export default function NewSalePage() {
 
               </div>
 
-              {/* Contenedor reservado siempre */}
-              <div className="mt-4 min-h-[120px] transition-all duration-300">
-                {paymentMethod === "cash" && (
-                  <>
-                    {/* Label */}
-                    <label className="mb-1 block text-sm font-semibold text-gray-700 flex items-center gap-2">
-                      💰 ¿Con cuánto paga el cliente?
-                    </label>
-
-                    {/* Input */}
-                    <input
-                      ref={amountGivenRef}
-                      type="number"
-                      placeholder="Ej: 5000"
-                      className={`w-full border px-4 py-3 rounded-lg text-lg shadow-sm focus:outline-none focus:ring-2 ${typeof change === "number" && change < 0
-                        ? "border-red-400 focus:ring-red-500"
-                        : "border-gray-300 focus:ring-emerald-500"
-                        }`}
-                      value={amountGiven}
-                      onChange={(e) => {
-                        const val = parseFloat(e.target.value);
-                        setAmountGiven(isNaN(val) ? "" : val);
-                      }}
-                      onFocus={() => {
-                        // ❌ Quitar foco del input del escáner
-                        scannerInputRef.current?.blur();
-                      }}
-                      onBlur={() => {
-                        // ✅ Volver a enfocar el input del escáner después de un pequeño delay
-                        setTimeout(() => {
-                          scannerInputRef.current?.focus();
-                        }, 100);
-                      }}
-                    />
-
-                    {/* Mensaje de vuelto */}
-                    {typeof change === "number" && (
-                      <p
-                        className={`mt-2 text-center font-semibold text-base ${change < 0 ? "text-red-600" : "text-green-600"
-                          }`}
-                      >
-                        {change < 0
-                          ? "❌ Monto insuficiente"
-                          : `💵 Vuelto: ${formatCurrency(change)}`}
-                      </p>
-                    )}
-                  </>
-                )}
-              </div>
-
-
             </div>
 
             {/* Total final */}
@@ -1236,8 +1200,11 @@ export default function NewSalePage() {
               </p>
 
               <h2 className="text-3xl font-bold mt-1">
-                TOTAL {formatCurrency(cartTotal)}
+                SUBTOTAL {formatCurrency(cartTotal)}
               </h2>
+
+              <Total />
+
 
               <button
                 onClick={() => setConfirm(true)}
@@ -1371,7 +1338,7 @@ export function SelectProductModal({ matchingProducts, onClose, onSelect }) {
     .sort((a, b) => {
       const aIsPromo = Array.isArray(a.products) && a.products.length > 0;
       const bIsPromo = Array.isArray(b.products) && b.products.length > 0;
-      return bIsPromo - aIsPromo; // Promo arriba
+      return Number(bIsPromo) - Number(aIsPromo); // Promo arriba
     });
 
 
