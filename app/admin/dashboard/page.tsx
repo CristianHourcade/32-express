@@ -4,6 +4,62 @@ import { useEffect, useState, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
 import { Banknote, Building2, CalendarDays, ChevronLeft, ChevronRight, CircleDollarSign, CreditCard, Flame, Wallet } from "lucide-react";
 
+// Dinero abreviado: $ 180k / $ 1.2M
+const fmtShortMoney = (n: number) => `$ ${formatNumberAbbrev(Math.max(0, Math.round(n || 0)))}`;
+function SavingsPill({ label, value, titlePrefix = "Ahorro objetivo" }: { label: string; value: number; titlePrefix?: string }) {
+  return (
+    <span
+      title={`${titlePrefix} — ${label}: ${fmtMoney(value)}`}
+      className="inline-flex items-center gap-1 rounded-full border border-slate-200 dark:border-slate-700
+                 bg-slate-50/70 dark:bg-slate-800/40 px-2 py-0.5 text-[11px] leading-none
+                 text-slate-700 dark:text-slate-200 shadow-sm"
+    >
+      <span className="i-lucide-piggy-bank w-3.5 h-3.5 inline-block opacity-70" />
+      <span className="font-medium">{label}:</span>
+      <span className="font-semibold tabular-nums">{fmtShortMoney(value)}</span>
+    </span>
+  );
+}
+
+/* ========= AHORRO: Config y helpers ========= */
+// Modos disponibles: 'percent' | 'fixed' | 'hybrid'
+const SAVING_CONFIG = {
+  mode: 'percent' as 'percent' | 'fixed' | 'hybrid',
+  percent: 0.55,           // 55%
+  fixedPerDay: 180_000,    // $180k por día (si querés el modo fijo)
+  hybridThreshold: 330_000 // umbral para excedente en modo híbrido
+};
+
+// Rangos de días en hora local
+function dayBounds(offsetDays = 0) {
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate() + offsetDays, 0, 0, 0, 0);
+  const end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + offsetDays + 1, 0, 0, 0, 0);
+  return { start, end };
+}
+
+// Targets diarios según modo
+function savingTargetForDayAmount(amount: number): number {
+  const { mode, percent, fixedPerDay, hybridThreshold } = SAVING_CONFIG;
+  if (mode === 'percent') return amount * percent;
+  if (mode === 'fixed') return fixedPerDay;
+  // híbrido: piso fijo + % del excedente sobre el umbral
+  const extra = Math.max(0, amount - hybridThreshold) * percent;
+  return fixedPerDay + extra;
+}
+
+// Targets MTD (acumulado del mes hasta hoy)
+function savingTargetForMTD(mtdAmount: number, daysElapsedInMonth: number): number {
+  const { mode, percent, fixedPerDay, hybridThreshold } = SAVING_CONFIG;
+  if (mode === 'percent') return mtdAmount * percent;
+  if (mode === 'fixed') return fixedPerDay * daysElapsedInMonth;
+  // híbrido: aproximamos con piso fijo * días + % sobre excedente del promedio diario sobre el umbral
+  // (si querés súper exactitud, podrías sumar día por día; esto es rápido y suficiente)
+  const avgPerDay = daysElapsedInMonth > 0 ? mtdAmount / daysElapsedInMonth : 0;
+  const extraPerDay = Math.max(0, avgPerDay - hybridThreshold) * percent;
+  return daysElapsedInMonth * (fixedPerDay + extraPerDay);
+}
+
 /* ========= HELPERS DE FECHA ========= */
 function monthRange(offset = 0) {
   // hoy (hora local)
@@ -143,13 +199,14 @@ function marginSemaforo(m: number) {
 }
 
 /* ======== BusinessCard – Compacta + Expandible ======== */
+/* ======== BusinessCard – Compacta + Expandible (con ahorro objetivo) ======== */
 function BusinessCard({
   b,
   open,
   onToggle,
 }: { b: any; open: boolean; onToggle: () => void }) {
 
-  // Totales
+  // Totales de negocio
   const total = b.totalAmount ?? 0;
   const gastos = b.totalExpense ?? 0;
   const profit = total - gastos;
@@ -157,12 +214,11 @@ function BusinessCard({
   const tx = b.transactions ?? 0;
   const ticket = b.avgTicket ?? 0;
 
-  // Combinar transferencia+MP para visual principal
-  // ► MONTOS UNIFICADOS (entradas y gastos)
+  // Mapa de pagos/gastos por método (unificados para display)
   const payments = unifyPayments(b.paymentMethods || {});
   const expensesByMethod = unifyExpenses(b.expensesByMethod || {});
 
-  // ► Claves/segmentos para barra y tabla (solo métodos unificados)
+  // Segmentos para la barra apilada
   const stackedKeys = UNIFIED_KEYS;
   const segments = stackedKeys.map(k => ({
     key: k,
@@ -171,15 +227,14 @@ function BusinessCard({
     ...METHOD_META_UNI[k],
   }));
 
-
-  // Método top para el detalle
-  const top = stackedKeys
-    .map(k => ({ k, label: METHOD_META[k].label, ventas: payments[k], gastos: expensesByMethod[k], profit: payments[k] - expensesByMethod[k] }))
-    .sort((a, b) => b.ventas - a.ventas)[0];
-
+  // Chip de color por margen
   const profitColor = profit >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400";
   const { pill, text } = marginSemaforo(margin);
-  /* ——— KPIs – lectura de un golpe (ANTI-COLAPSE) ——— */
+
+  // Targets de ahorro calculados en el useMemo
+  const saving: { today: number; yesterday: number; mtd: number } | undefined = b.savingTargets;
+
+  /* ——— KPIs ——— */
   function KPI({
     label,
     value,
@@ -195,7 +250,13 @@ function BusinessCard({
     );
   }
 
-
+  // Etiqueta del modo de ahorro
+  const savingModeLabel =
+    SAVING_CONFIG.mode === 'percent'
+      ? `${(SAVING_CONFIG.percent * 100).toFixed(0)}%`
+      : SAVING_CONFIG.mode === 'fixed'
+        ? `$ ${formatPrice(SAVING_CONFIG.fixedPerDay)}/día`
+        : 'Híbrido';
 
   return (
     <div
@@ -205,7 +266,7 @@ function BusinessCard({
       onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && onToggle()}
       className="group bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl p-4 shadow-sm hover:shadow-md transition-all outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
     >
-      {/* Header compacto */}
+      {/* Header */}
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2 min-w-0">
           <Building2 className="w-4 h-4 text-indigo-500 shrink-0" />
@@ -213,16 +274,22 @@ function BusinessCard({
         </div>
 
         <div className="flex items-center gap-2">
+          {/* Modo de ahorro activo */}
+          <span className="px-2 py-0.5 text-[10px] rounded-full border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300">
+            Ahorro: {savingModeLabel}
+          </span>
+
           <span className={`px-2 py-0.5 text-[11px] font-semibold rounded-full ${pill}`}>
             {text} {margin.toFixed(1)}%
           </span>
-          <svg className={`w-4 h-4 text-slate-400 transition-transform ${open ? "rotate-180" : ""}`} /* ... */>
+
+          <svg className={`w-4 h-4 text-slate-400 transition-transform ${open ? "rotate-180" : ""}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <polyline points="6 9 12 15 18 9" />
           </svg>
         </div>
       </div>
 
-      {/* KPIs – lectura de un golpe */}
+      {/* KPIs clave */}
       <div className="mt-3 grid [grid-template-columns:repeat(auto-fit,minmax(150px,1fr))] gap-x-6 gap-y-2 items-end">
         <KPI label="Ventas" value={fmtMoney(total)} />
         <KPI label="Gastos" value={fmtMoney(gastos)} className="text-red-600 dark:text-red-400" />
@@ -231,6 +298,20 @@ function BusinessCard({
         <KPI label="N. Ventas" value={tx} className="opacity-80" />
         <KPI label="Rentab." value={`${margin.toFixed(1)}%`} className="opacity-80" />
       </div>
+
+      {/* Bloque: Ahorro objetivo (Hoy / Ayer / MTD) */}
+      {/* Bloque mini: Ahorro objetivo (compacto en una sola línea) */}
+      {saving && (
+        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+          <span className="text-[10px] uppercase tracking-wide text-slate-500 dark:text-slate-400">
+            Ahorro objetivo
+          </span>
+          <SavingsPill label="Hoy" value={saving.today} />
+          <SavingsPill label="Ayer" value={saving.yesterday} />
+          <SavingsPill label="Mes" value={saving.mtd} />
+        </div>
+      )}
+
 
       {/* Barra apilada por método */}
       <div className="mt-4">
@@ -256,13 +337,11 @@ function BusinessCard({
         </div>
       </div>
 
-      {/* ===== Detalle expandible ===== */}
+      {/* Detalle expandible */}
       <div className={`grid transition-[grid-template-rows] duration-200 ease-out ${open ? "grid-rows-[1fr]" : "grid-rows-[0fr]"} mt-3`}>
         <div className="overflow-hidden">
           <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-3">
-
-            {/* Tabla mini por método */}
-            {/* Tabla mini por método */}
+            {/* Tabla mini por método (unificado) */}
             <div className="sm:col-span-3 mt-1 overflow-x-auto">
               <table className="w-full text-sm">
                 <thead className="text-[11px] text-slate-500">
@@ -294,11 +373,9 @@ function BusinessCard({
                       </tr>
                     );
                   })}
-
                 </tbody>
               </table>
             </div>
-
 
           </div>
         </div>
@@ -306,6 +383,7 @@ function BusinessCard({
     </div>
   );
 }
+
 
 
 
@@ -694,15 +772,40 @@ export default function AdminDashboard() {
   ]);
 
   /* -------- MÉTRICAS MENSUALES POR NEGOCIO -------- */
+  /* -------- MÉTRICAS MENSUALES POR NEGOCIO -------- */
   const businessesWithMonthlyData = useMemo(() => {
+    // Helpers locales para días del mes seleccionado
+    const msPerDay = 86_400_000;
+    const daysInMonth = (d: Date) => new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+
+    // Hoy/ayer (hora local)
+    const { start: todayStart, end: todayEnd } = dayBounds(0);
+    const { start: yStart, end: yEnd } = dayBounds(-1);
+    const todayISOStart = todayStart.toISOString();
+    const todayISOEnd = todayEnd.toISOString();
+    const yISOStart = yStart.toISOString();
+    const yISOEnd = yEnd.toISOString();
+
+    // Días transcurridos en el mes **del rango seleccionado**
+    const now = new Date();
+    const inSelectedMonth = now >= monthStart && now < monthEnd;
+    const elapsedMillis = Math.max(0, Math.min(now.getTime(), monthEnd.getTime()) - monthStart.getTime());
+    const daysElapsedInMonth = inSelectedMonth
+      ? now.getDate()
+      : Math.min(daysInMonth(monthStart), Math.max(1, Math.floor(elapsedMillis / msPerDay)));
+
+    type PM = "cash" | "card" | "transfer" | "mercadopago" | "rappi" | "consumo";
+
     const base = new Map<
       string,
       {
         tx: number;
         amount: number;
         expense: number;
-        payments: Record<"cash" | "card" | "transfer" | "mercadopago" | "rappi" | "consumo", number>;
-        expensesByMethod: Record<"cash" | "card" | "transfer" | "mercadopago" | "rappi" | "consumo", number>;
+        payments: Record<PM, number>;
+        expensesByMethod: Record<PM, number>;
+        todayAmount: number;
+        yesterdayAmount: number;
       }
     >();
 
@@ -713,29 +816,46 @@ export default function AdminDashboard() {
         expense: 0,
         payments: { cash: 0, card: 0, transfer: 0, mercadopago: 0, rappi: 0, consumo: 0 },
         expensesByMethod: { cash: 0, card: 0, transfer: 0, mercadopago: 0, rappi: 0, consumo: 0 },
+        todayAmount: 0,
+        yesterdayAmount: 0,
       })
     );
 
-
-    sales.forEach((s) => {
+    // Ventas del mes seleccionado + partición hoy/ayer
+    sales.forEach((s: any) => {
       const d = base.get(s.business_id);
       if (!d) return;
+
       d.tx++;
       d.amount += s.total;
-      if (s.payment_method in d.payments) d.payments[s.payment_method] += s.total;
+
+      if (s.payment_method in d.payments)
+        d.payments[s.payment_method as PM] += s.total;
+
+      const ts: string = s.timestamp; // ISO string
+      if (ts >= todayISOStart && ts < todayISOEnd) d.todayAmount += s.total;
+      if (ts >= yISOStart && ts < yISOEnd) d.yesterdayAmount += s.total;
     });
 
-    expenses.forEach((e) => {
+    // Gastos del mes seleccionado
+    expenses.forEach((e: any) => {
       const d = base.get(e.business_id);
-      if (d) d.expense += e.amount;
+      if (!d) return;
 
+      d.expense += e.amount;
       if (e.method && e.method in d.expensesByMethod)
-        d.expensesByMethod[e.method] += e.amount;
-
+        d.expensesByMethod[e.method as PM] += e.amount;
     });
 
+    // Map final con targets de ahorro
     return businesses.map((b) => {
       const d = base.get(b.id)!;
+
+      const mtdAmount = d.amount; // total de ventas del mes seleccionado
+      const savingToday = savingTargetForDayAmount(d.todayAmount);
+      const savingYesterday = savingTargetForDayAmount(d.yesterdayAmount);
+      const savingMonthToDay = savingTargetForMTD(mtdAmount, daysElapsedInMonth);
+
       return {
         ...b,
         transactions: d.tx,
@@ -745,9 +865,17 @@ export default function AdminDashboard() {
         avgTicket: d.tx ? d.amount / d.tx : 0,
         paymentMethods: d.payments,
         expensesByMethod: d.expensesByMethod,
+        todayAmount: d.todayAmount,
+        yesterdayAmount: d.yesterdayAmount,
+        savingTargets: {
+          today: savingToday,
+          yesterday: savingYesterday,
+          mtd: savingMonthToDay,
+        },
       };
     });
-  }, [businesses, sales, expenses]);
+  }, [businesses, sales, expenses, monthStart, monthEnd]);
+
 
   /* -------- TURNOS -------- */
   const calcShiftTotals = (sh: any) => {
