@@ -258,128 +258,174 @@ export default function InventoryPage() {
     if (!drawerProduct) return;
     setIsSaving(true);
 
-    const oldStocks = { ...(drawerProduct.stocks || {}) };
-    const newName =
-      drawerCategory === "SIN CATEGORIA"
-        ? drawerBase
-        : `${drawerCategory} ${drawerBase}`;
-    let prodId = drawerProduct.id;
+    try {
+      const oldStocks: Record<string, number> = { ...(drawerProduct.stocks || {}) };
+      const newName =
+        drawerCategory === "SIN CATEGORIA" ? drawerBase : `${drawerCategory} ${drawerBase}`;
+      let prodId = drawerProduct.id;
 
-    // Insertar o actualizar en products_master
-    if (!prodId) {
-      const { data: insData, error: insErr } = await supabase
-        .from("products_master")
-        .insert({
-          code: drawerProduct.code,
-          name: newName,
-          entryManual: !!drawerProduct.entryManual, // snake en DB
-          default_purchase: drawerProduct.default_purchase,
-          margin_percent: drawerProduct.margin_percent,
-          default_selling: salePrice,
-        })
-        .select("id");
-      if (insErr || !insData?.[0]?.id) {
-        console.error("Error al crear producto master:", insErr);
-        setIsSaving(false);
-        return;
-      }
-      prodId = insData[0].id;
-    } else {
-      const { error: updErr } = await supabase
-        .from("products_master")
-        .update({
-          code: drawerProduct.code,
-          name: newName,
-          default_purchase: drawerProduct.default_purchase,
-          margin_percent: drawerProduct.margin_percent,
-          entryManual: !!drawerProduct.entryManual, // snake en DB
-          default_selling: salePrice,
-        })
-        .eq("id", prodId);
-      if (updErr) {
-        console.error("Error al actualizar producto master:", updErr);
-        setIsSaving(false);
-        return;
-      }
-    }
+      // === 1) Crear/Actualizar producto master ===
+      if (!prodId) {
+        const { data: insData, error: insErr } = await supabase
+          .from("products_master")
+          .insert({
+            code: drawerProduct.code,
+            name: newName,
+            entryManual: !!drawerProduct.entryManual,
+            default_purchase: drawerProduct.default_purchase,
+            margin_percent: drawerProduct.margin_percent,
+            default_selling: salePrice,
+          })
+          .select("id");
 
-    // Guardar inventario
-    const businessIds = Object.keys(editableStocks);
-    const { data: existing, error: fetchError } = await supabase
-      .from("business_inventory")
-      .select("product_id, business_id")
-      .eq("product_id", prodId)
-      .in("business_id", businessIds);
-
-    if (fetchError) {
-      console.error("Error al obtener inventario existente:", fetchError);
-      setIsSaving(false);
-      return;
-    }
-
-    const existingSet = new Set(
-      (existing ?? []).map((r) => `${r.product_id}_${r.business_id}`)
-    );
-
-    const updates: any[] = [];
-    const inserts: any[] = [];
-
-    for (const [business_id, stock] of Object.entries(editableStocks)) {
-      const key = `${prodId}_${business_id}`;
-      const record = { product_id: prodId, business_id, stock };
-      if (existingSet.has(key)) {
-        updates.push(record);
+        if (insErr || !insData?.[0]?.id) {
+          console.error("Error al crear producto master:", insErr);
+          alert("No se pudo crear el producto. Intenta nuevamente.");
+          setIsSaving(false);
+          return;
+        }
+        prodId = insData[0].id;
       } else {
-        inserts.push(record);
-      }
-    }
+        const { error: updErr } = await supabase
+          .from("products_master")
+          .update({
+            code: drawerProduct.code,
+            name: newName,
+            default_purchase: drawerProduct.default_purchase,
+            margin_percent: drawerProduct.margin_percent,
+            entryManual: !!drawerProduct.entryManual,
+            default_selling: salePrice,
+          })
+          .eq("id", prodId);
 
-    // Ejecutar updates
-    for (const u of updates) {
-      const { error } = await supabase
+        if (updErr) {
+          console.error("Error al actualizar producto master:", updErr);
+          alert("No se pudo actualizar el producto. Intenta nuevamente.");
+          setIsSaving(false);
+          return;
+        }
+      }
+
+      // === 2) Detectar cambios reales de stock (solo lo que difiere) ===
+      const changedEntries = Object.entries(editableStocks).filter(([business_id, newStock]) => {
+        const old = (oldStocks ?? {})[business_id] ?? 0;
+        return old !== newStock;
+      });
+      const businessIdsChanged = changedEntries.map(([business_id]) => business_id);
+
+      // Nada cambió en inventario: solo refrescamos master y salimos
+      if (businessIdsChanged.length === 0) {
+        // Actualiza estado local del producto (por si cambió nombre/precio/etc.)
+        setInventory((prev) =>
+          prev
+            .filter((it) => it.id !== prodId)
+            .concat({
+              id: prodId,
+              code: drawerProduct.code,
+              name: newName,
+              default_purchase: drawerProduct.default_purchase,
+              margin_percent: drawerProduct.margin_percent,
+              default_selling: salePrice,
+              stocks: { ...(drawerProduct.stocks || {}) },
+              entryManual: !!drawerProduct.entryManual,
+            })
+        );
+        setIsSaving(false);
+        closeDrawer();
+        return;
+      }
+
+      // === 3) Traer inventario existente SOLO de sucursales cambiadas ===
+      const { data: existing, error: fetchError } = await supabase
         .from("business_inventory")
-        .update({ stock: u.stock })
-        .eq("product_id", u.product_id)
-        .eq("business_id", u.business_id);
-      if (error) {
-        console.error("Error al actualizar stock:", error);
+        .select("product_id, business_id, stock")
+        .eq("product_id", prodId)
+        .in("business_id", businessIdsChanged);
+
+      if (fetchError) {
+        console.error("Error al obtener inventario existente:", fetchError);
+        alert("No se pudo leer el inventario. Intenta nuevamente.");
         setIsSaving(false);
         return;
       }
-    }
 
-    // Ejecutar inserts
-    if (inserts.length > 0) {
-      const { error } = await supabase.from("business_inventory").insert(inserts);
-      if (error) {
-        console.error("Error al insertar stock:", error);
-        setIsSaving(false);
-        return;
+      const existingMap = new Map((existing ?? []).map((r) => [r.business_id, r]));
+
+      type ChangeRow = { business_id: string; oldStock: number; newStock: number };
+      const updates: ChangeRow[] = [];
+      const inserts: ChangeRow[] = [];
+
+      for (const [business_id, newStock] of changedEntries) {
+        const oldStock = (oldStocks ?? {})[business_id] ?? 0;
+        if (existingMap.has(business_id)) {
+          updates.push({ business_id, oldStock, newStock });
+        } else {
+          inserts.push({ business_id, oldStock, newStock });
+        }
       }
-    }
 
-    // Actualiza estado local
-    setInventory((prev) =>
-      prev
-        .filter((it) => it.id !== prodId)
-        .concat({
-          id: prodId,
-          code: drawerProduct.code,
-          name: newName,
-          default_purchase: drawerProduct.default_purchase,
-          margin_percent: drawerProduct.margin_percent,
-          default_selling: salePrice,
-          stocks: editableStocks,
-          entryManual: !!drawerProduct.entryManual,
-        })
-    );
+      // === 4) Ejecutar UPDATES con bloqueo optimista (stock actual debe igualar oldStock) ===
+      const conflicts: string[] = [];
+      for (const u of updates) {
+        const { data, error } = await supabase
+          .from("business_inventory")
+          .update({ stock: u.newStock })
+          .eq("product_id", prodId)
+          .eq("business_id", u.business_id)
+          .eq("stock", u.oldStock) // evita pisar cambios concurrentes
+          .select("business_id");
 
-    // Log de actividades (solo Actualizacion; las Pérdidas ya se loguean en el modal)
-    for (const [business_id, newStock] of Object.entries(editableStocks)) {
-      const oldStock = (oldStocks ?? {})[business_id] ?? 0;
-      if (oldStock !== newStock) {
+        if (error) {
+          console.error("Error al actualizar stock:", error);
+          alert("No se pudo actualizar el stock en una sucursal.");
+          setIsSaving(false);
+          return;
+        }
+        if (!data || data.length === 0) {
+          // Nadie coincide con el oldStock -> alguien lo cambió
+          conflicts.push(u.business_id);
+        }
+      }
+
+      // === 5) Ejecutar INSERTS (si otro insertó, reintenta como UPDATE condicionado) ===
+      for (const ins of inserts) {
+        const { error } = await supabase
+          .from("business_inventory")
+          .insert({ product_id: prodId, business_id: ins.business_id, stock: ins.newStock });
+
+        if (error) {
+          // Reintento como UPDATE con lock por oldStock (evita pisar)
+          const retry = await supabase
+            .from("business_inventory")
+            .update({ stock: ins.newStock })
+            .eq("product_id", prodId)
+            .eq("business_id", ins.business_id)
+            .eq("stock", ins.oldStock)
+            .select("business_id");
+
+          if (retry.error) {
+            console.error("Error al reintentar insert->update stock:", retry.error);
+            alert("No se pudo insertar/actualizar el stock en una sucursal.");
+            setIsSaving(false);
+            return;
+          }
+          if (!retry.data || retry.data.length === 0) {
+            conflicts.push(ins.business_id);
+          }
+        }
+      }
+
+      // === 6) Log de actividades “Actualización” SOLO para cambios aplicados ===
+      const appliedIds = new Set(businessIdsChanged.filter((id) => !conflicts.includes(id)));
+
+      for (const [business_id, newStock] of changedEntries) {
+        if (!appliedIds.has(business_id)) continue; // no loguear conflictos
+
         const motivo = stockChangeReasons[business_id] || "Actualizacion";
-        if (motivo === "Perdida") continue;
+        if (motivo === "Perdida") continue; // las pérdidas ya se loguean al confirmar el modal
+
+        const oldStock = (oldStocks ?? {})[business_id] ?? 0;
+        if (oldStock === newStock) continue;
 
         const biz = businesses.find((b) => b.id === business_id);
         const bizName = biz ? biz.name : business_id;
@@ -400,11 +446,50 @@ export default function InventoryPage() {
           console.error("Error al loguear actualización:", logErr);
         }
       }
-    }
 
-    setIsSaving(false);
-    closeDrawer();
+      // === 7) Avisar conflictos (si hubo) y actualizar estado local SOLO con lo aplicado ===
+      if (conflicts.length > 0) {
+        alert(
+          `Atención: el stock de ${conflicts.length} sucursal(es) cambió mientras editabas.\n` +
+          `No se guardaron esos cambios para evitar sobrescrituras.\n` +
+          `Sucursales: ${conflicts
+            .map((id) => businesses.find((b) => b.id === id)?.name || id)
+            .join(", ")}`
+        );
+      }
+
+      const newStocksApplied: Record<string, number> = { ...(drawerProduct.stocks || {}) };
+      for (const [business_id, newStock] of changedEntries) {
+        if (appliedIds.has(business_id)) {
+          newStocksApplied[business_id] = newStock;
+        }
+      }
+
+      // === 8) Actualizar inventario en estado global y cerrar si no hubo conflictos ===
+      setInventory((prev) =>
+        prev
+          .filter((it) => it.id !== prodId)
+          .concat({
+            id: prodId,
+            code: drawerProduct.code,
+            name: newName,
+            default_purchase: drawerProduct.default_purchase,
+            margin_percent: drawerProduct.margin_percent,
+            default_selling: salePrice,
+            stocks: newStocksApplied,
+            entryManual: !!drawerProduct.entryManual,
+          })
+      );
+
+      setIsSaving(false);
+      if (conflicts.length === 0) closeDrawer();
+    } catch (e) {
+      console.error("Error en saveAll:", e);
+      alert("Ocurrió un error al guardar. Intenta nuevamente.");
+      setIsSaving(false);
+    }
   }
+
 
   function categoryColor(cat: string): string {
     switch (cat) {
@@ -501,8 +586,8 @@ export default function InventoryPage() {
                     qty === 0
                       ? "bg-red-500"
                       : qty < 6
-                      ? "bg-yellow-400"
-                      : "bg-green-500";
+                        ? "bg-yellow-400"
+                        : "bg-green-500";
                   return (
                     <div key={b.id} className="flex justify-between items-center">
                       <span className="truncate">{b.name}</span>
@@ -661,7 +746,7 @@ export default function InventoryPage() {
           onChange={(e) => setSearchTerm(e.target.value)}
           className="w-full  border rounded-md p-2 text-sm bg-white dark:bg-slate-800"
         />
-        <button style={{backgroundColor:'red', color:'white', padding:'0 20px'}} onClick={() => setSearchTerm('')}>
+        <button style={{ backgroundColor: 'red', color: 'white', padding: '0 20px' }} onClick={() => setSearchTerm('')}>
           Limpiar
         </button>
       </div>
@@ -705,11 +790,10 @@ export default function InventoryPage() {
               <button
                 onClick={() => setPage((p) => Math.max(1, p - 1))}
                 disabled={page <= 1}
-                className={`px-3 py-1 rounded-md border ${
-                  page <= 1
+                className={`px-3 py-1 rounded-md border ${page <= 1
                     ? "opacity-50 cursor-not-allowed"
                     : "hover:bg-gray-100 dark:hover:bg-slate-700"
-                }`}
+                  }`}
               >
                 Anterior
               </button>
@@ -719,11 +803,10 @@ export default function InventoryPage() {
               <button
                 onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
                 disabled={page >= totalPages}
-                className={`px-3 py-1 rounded-md border ${
-                  page >= totalPages
+                className={`px-3 py-1 rounded-md border ${page >= totalPages
                     ? "opacity-50 cursor-not-allowed"
                     : "hover:bg-gray-100 dark:hover:bg-slate-700"
-                }`}
+                  }`}
               >
                 Siguiente
               </button>
@@ -830,7 +913,7 @@ export default function InventoryPage() {
                       currency: "ARS",
                     }).format(
                       (drawerProduct!.default_purchase || 0) *
-                        (1 + (drawerProduct!.margin_percent || 0) / 100)
+                      (1 + (drawerProduct!.margin_percent || 0) / 100)
                     )}
                   </div>
                 </div>
@@ -900,20 +983,18 @@ export default function InventoryPage() {
               <button
                 onClick={closeDrawer}
                 disabled={isSaving}
-                className={`px-6 py-3 border rounded-lg text-sm font-medium ${
-                  isSaving ? "bg-gray-100 cursor-not-allowed" : "hover:bg-gray-100"
-                }`}
+                className={`px-6 py-3 border rounded-lg text-sm font-medium ${isSaving ? "bg-gray-100 cursor-not-allowed" : "hover:bg-gray-100"
+                  }`}
               >
                 CANCELAR
               </button>
               <button
                 onClick={saveAll}
                 disabled={isSaving}
-                className={`px-6 py-3 rounded-lg text-sm font-semibold transition ${
-                  isSaving
+                className={`px-6 py-3 rounded-lg text-sm font-semibold transition ${isSaving
                     ? "bg-gray-400 text-white cursor-not-allowed"
                     : "bg-green-600 text-white hover:bg-green-700"
-                }`}
+                  }`}
               >
                 CONFIRMAR CAMBIOS
               </button>
@@ -972,11 +1053,10 @@ export default function InventoryPage() {
               <button
                 onClick={handleConfirmStockModal}
                 disabled={isModalSubmitting}
-                className={`px-4 py-2 rounded-md text-white ${
-                  isModalSubmitting
+                className={`px-4 py-2 rounded-md text-white ${isModalSubmitting
                     ? "bg-gray-400 cursor-not-allowed"
                     : "bg-green-600 hover:bg-green-700"
-                }`}
+                  }`}
               >
                 {isModalSubmitting ? "Procesando..." : "Confirmar"}
               </button>

@@ -14,26 +14,27 @@ type ActivityRow = {
   businesses: { name: string } | null;
 };
 
-/* ────────── Helper: resaltar “added/removed” ────────── */
+/* ────────── Helper: resaltar y crear botones de [PERDIDA - $X] ────────── */
 function highlight(text: string) {
   return text
     .replace(/\[PERDIDA - \$([\d.]+)\]/gi, (_, monto) => {
       const montoNum = parseFloat(monto);
       return `
         <button
-          class="ml-2 inline-block px-2 hover:bg-red-700 py-1 bg-red-500 text-white font-semiboldcursor-pointer"
-          data-monto="${montoNum}" style="border-radius:25px">
+          class="ml-2 inline-block px-2 py-1 bg-red-500 hover:bg-red-700 text-white font-semibold cursor-pointer"
+          data-monto="${isNaN(montoNum) ? 0 : montoNum}"
+          style="border-radius:25px"
+        >
           [PERDIDA - $${monto}]
         </button>
       `;
     })
     .replace(/(added|removed)/gi, (m) =>
-      `<span class="${m.toLowerCase() === "added" ? "text-emerald-600" : "text-rose-600"
+      `<span class="${
+        m.toLowerCase() === "added" ? "text-emerald-600" : "text-rose-600"
       } font-semibold">${m}</span>`
     );
 }
-
-
 
 export default function ActivitiesPage() {
   /* ---------- state ---------- */
@@ -45,11 +46,13 @@ export default function ActivitiesPage() {
   const [selectedBusiness, setSelectedBusiness] = useState("all");
   const [selectedDate, setSelectedDate] = useState("");
   const [search, setSearch] = useState("");
+
+  /* ---------- listener para click en los botones de pérdida ---------- */
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       const target = e.target as HTMLElement;
-      if (target.tagName === "BUTTON" && target.dataset.monto) {
-        const monto = parseFloat(target.dataset.monto);
+      if (target.tagName === "BUTTON" && (target as HTMLElement).dataset.monto) {
+        const monto = parseFloat((target as HTMLElement).dataset.monto!);
         if (!isNaN(monto)) setTotalPerdidas((prev) => prev + monto);
       }
     };
@@ -57,31 +60,48 @@ export default function ActivitiesPage() {
     return () => document.removeEventListener("click", handler);
   }, []);
 
-  /* ---------- fetch ---------- */
+  /* ---------- fetch (paginado hasta traer todo) ---------- */
   useEffect(() => {
     (async () => {
       setLoading(true);
-      const { data, error } = await supabase
-        .from<ActivityRow>("activities")
-        .select("id, details, timestamp, businesses(name)")
-        .order("timestamp", { ascending: false });
+      const allRows: ActivityRow[] = [];
+      const pageSize = 1000;
+      let from = 0;
+      let to = pageSize - 1;
 
-      if (error) console.error("Error cargando actividades:", error.message);
-      else setActivities(data ?? []);
+      while (true) {
+        const { data, error } = await supabase
+          .from<ActivityRow>("activities")
+          .select("id, details, timestamp, businesses(name)")
+          .order("timestamp", { ascending: false })
+          .range(from, to);
+
+        if (error) {
+          console.error("Error cargando actividades:", error.message);
+          break;
+        }
+
+        const batch = data ?? [];
+        allRows.push(...batch);
+
+        if (batch.length < pageSize) break; // no hay más
+        from += pageSize;
+        to += pageSize;
+      }
+
+      setActivities(allRows);
       setLoading(false);
     })();
   }, []);
 
   /* ---------- unique lists ---------- */
   const responsibles = useMemo(() => {
-    const names = activities.map((a) => a.details.split(" ")[0]);
+    const names = activities.map((a) => a.details.split(" ")[0]).filter(Boolean);
     return Array.from(new Set(names));
   }, [activities]);
 
   const businesses = useMemo(() => {
-    const names = activities
-      .map((a) => a.businesses?.name || "")
-      .filter(Boolean);
+    const names = activities.map((a) => a.businesses?.name || "").filter(Boolean);
     return Array.from(new Set(names));
   }, [activities]);
 
@@ -94,23 +114,19 @@ export default function ActivitiesPage() {
       const seaLower = search.toLowerCase();
       const datePart = new Date(a.timestamp).toISOString().split("T")[0];
 
-      const okResp =
-        selectedResponsible === "all" || resp === selectedResponsible;
-      const okBiz =
-        selectedBusiness === "all" || bizName === selectedBusiness;
+      const okResp = selectedResponsible === "all" || resp === selectedResponsible;
+      const okBiz = selectedBusiness === "all" || bizName === selectedBusiness;
       const okSearch =
         detLower.includes(seaLower) || bizName.toLowerCase().includes(seaLower);
       const okDate = !selectedDate || datePart === selectedDate;
 
       return okResp && okBiz && okSearch && okDate;
     });
-  }, [
-    activities,
-    selectedResponsible,
-    selectedBusiness,
-    selectedDate,
-    search,
-  ]);
+  }, [activities, selectedResponsible, selectedBusiness, selectedDate, search]);
+
+  /* ---------- limitar la tabla a 15 filas ---------- */
+  const MAX_ROWS = 15;
+  const visibleRows = useMemo(() => filtered.slice(0, MAX_ROWS), [filtered]);
 
   /* ---------- loading splash ---------- */
   if (loading)
@@ -134,15 +150,23 @@ export default function ActivitiesPage() {
         <p className="text-slate-600 dark:text-slate-400">
           Histórico de acciones de usuarios
         </p>
-        <div>
-          <div className="py-3 text-sm font-semibold text-red-600 dark:text-red-400">
-            Total de pérdidas seleccionadas: ${totalPerdidas.toLocaleString("es-AR", {
+
+        <div className="mt-2 flex items-center gap-3 text-sm">
+          <span className="text-slate-600 dark:text-slate-400">
+            Mostrando {visibleRows.length} de {filtered.length} (total: {activities.length})
+          </span>
+          <div className="py-1.5 px-2 rounded-md bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-300 font-semibold">
+            Total pérdidas seleccionadas: $
+            {totalPerdidas.toLocaleString("es-AR", {
               minimumFractionDigits: 2,
               maximumFractionDigits: 2,
             })}
           </div>
           {totalPerdidas > 0 && (
-            <button className="bg-white px-3 py-1 border" onClick={() => setTotalPerdidas(0)}>
+            <button
+              className="bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-md px-3 py-1 hover:bg-slate-50 dark:hover:bg-slate-700"
+              onClick={() => setTotalPerdidas(0)}
+            >
               Limpiar
             </button>
           )}
@@ -214,8 +238,7 @@ export default function ActivitiesPage() {
         </div>
       </div>
 
-
-      {/* Tabla */}
+      {/* Tabla (máx 15) */}
       <div className="bg-white dark:bg-slate-800 rounded-xl shadow ring-1 ring-slate-200 dark:ring-slate-700 overflow-hidden">
         <div className="overflow-x-auto">
           <table className="min-w-full text-sm">
@@ -228,8 +251,8 @@ export default function ActivitiesPage() {
             </thead>
 
             <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
-              {filtered.length ? (
-                filtered.map((a) => {
+              {visibleRows.length ? (
+                visibleRows.map((a) => {
                   const fecha = new Date(a.timestamp).toLocaleString();
                   const [resp, ...rest] = a.details.split(" ");
                   const detalle = rest.join(" ");
@@ -249,11 +272,10 @@ export default function ActivitiesPage() {
                         className="px-4 py-2"
                         dangerouslySetInnerHTML={{
                           __html: `
-    <span class="font-semibold text-sky-600 dark:text-sky-400 mr-1">${resp}</span>
-    ${highlight(detalle, (m) => setTotalPerdidas((prev) => prev + m))}
-  `,
+                            <span class="font-semibold text-sky-600 dark:text-sky-400 mr-1">${resp}</span>
+                            ${highlight(detalle)}
+                          `,
                         }}
-
                       />
                     </tr>
                   );

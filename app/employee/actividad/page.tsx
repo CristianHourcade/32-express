@@ -39,16 +39,41 @@ export default function ActivitiesPage() {
   useEffect(() => {
     (async () => {
       setLoading(true);
-      const { data, error } = await supabase
-        .from<ActivityRow>("activities")
-        .select("id, details, timestamp, businesses(name)")
-        .order("timestamp", { ascending: false });
+      const allRows: ActivityRow[] = [];
+      const pageSize = 1000;
+      let from = 0;
+      let to = pageSize - 1;
+      let done = false;
 
-      if (error) console.error("Error cargando actividades:", error.message);
-      else setActivities(data ?? []);
+      while (!done) {
+        const { data, error, count } = await supabase
+          .from<ActivityRow>("activities")
+          .select("id, details, timestamp, businesses(name)", { count: "exact" })
+          .order("timestamp", { ascending: false })
+          .range(from, to);
+
+        if (error) {
+          console.error("Error cargando actividades:", error.message);
+          break;
+        }
+
+        if (data && data.length > 0) {
+          allRows.push(...data);
+          // avanzar la ventana
+          from += pageSize;
+          to += pageSize;
+          // si trajimos menos de lo pedido, ya no hay más
+          if (data.length < pageSize) done = true;
+        } else {
+          done = true;
+        }
+      }
+
+      setActivities(allRows);
       setLoading(false);
     })();
   }, []);
+
 
   /* ---------- unique lists ---------- */
   const responsibles = useMemo(() => {
