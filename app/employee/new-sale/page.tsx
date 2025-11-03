@@ -4,7 +4,7 @@
 
 "use client";
 
-import { useEffect, useState, useMemo, useRef } from "react";
+import { useEffect, useState, useMemo, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useDispatch, useSelector } from "react-redux";
@@ -35,6 +35,66 @@ const ANGEL_CRISTIAN_APITOKEN = process.env.NEXT_PUBLIC_ANGEL_CRISTIAN_APITOKEN;
 /* ────────────────────────────────────────────────────────── */
 /*  Constantes & helpers                                      */
 /* ────────────────────────────────────────────────────────── */
+// ── Auto-reload por inactividad ──────────────────────────────
+
+function useInactivityReload({
+  ms = 120000,          // 2 minutos
+  enabled = true,
+  deps = [],
+}: {
+  ms?: number;
+  enabled?: boolean;
+  deps?: any[];
+}) {
+  const timerRef = useRef<number | null>(null);
+
+  const reset = useCallback(() => {
+    if (!enabled) return;
+    if (timerRef.current) window.clearTimeout(timerRef.current);
+    timerRef.current = window.setTimeout(() => {
+      // Recarga completa de la página
+      window.location.reload();
+      // Si preferís solo refrescar datos sin recargar todo:
+      // router.refresh();
+    }, ms);
+  }, [ms, enabled]);
+
+  useEffect(() => {
+    if (!enabled) return;
+    // Inicia el contador
+    reset();
+
+    // Cualquier actividad de usuario reinicia el temporizador
+    const handler = () => reset();
+    const events: (keyof WindowEventMap)[] = [
+      "keydown",
+      "mousemove",
+      "click",
+      "touchstart",
+      "wheel",
+    ];
+    events.forEach((ev) =>
+      window.addEventListener(ev, handler as EventListener, { passive: true })
+    );
+
+    return () => {
+      if (timerRef.current) window.clearTimeout(timerRef.current);
+      events.forEach((ev) =>
+        window.removeEventListener(ev, handler as EventListener)
+      );
+    };
+  }, [reset, enabled]);
+
+  // Además, si cambian valores que implican actividad (scanner, búsqueda),
+  // también reiniciamos el temporizador.
+  useEffect(() => {
+    if (!enabled) return;
+    reset();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, deps);
+
+  return { reset };
+}
 
 const CATEGORIES = [
   "ALMACEN",
@@ -661,7 +721,7 @@ export default function NewSalePage() {
     try {
       let total = 0
       if (businessId === 'd421a363-4424-44ec-adc5-9572ea1b933e' && paymentMethod === 'cash') {
-        total = cartTotal-cartTotal*0.10;
+        total = cartTotal - cartTotal * 0.10;
       } else {
         total = cartTotal;
       }
@@ -966,6 +1026,11 @@ export default function NewSalePage() {
     // 3. Volvemos a enfocar el scanner para seguir escaneando (si no está pausado)
     if (!scannerPaused) scannerInputRef.current?.focus();
   };
+  useInactivityReload({
+    ms: 240000,
+    enabled: !showManualSearch && !showSelectModal, // pausa mientras hay modal
+    deps: [scannerValue, debouncedScannerValue, search, debouncedSearch],
+  });
 
   const changeInputRef = useRef<HTMLInputElement>(null);
 
@@ -1001,6 +1066,7 @@ export default function NewSalePage() {
     rappi: "📲 Rappi",
     consumo: " CONSUMO INTERNO"
   };
+  // Reinicia el contador cuando haya actividad real del cajero
 
 
   return (
