@@ -29,6 +29,34 @@ import LoadingSpinner from "@/components/LoadingSpinner";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 
+
+async function logActivity({
+  businessId,
+  productId = null,
+  motivo = "Actualizacion",
+  details,
+  userName,
+}: {
+  businessId?: string | null;
+  productId?: string | null;
+  motivo?: "Actualizacion" | "BusquedaManual" | "Scanner" | "SeleccionManual" | "SeleccionPromo";
+  details: string;
+  userName?: string;
+}) {
+  if (!businessId) return; // si no hay negocio, no logueamos
+  try {
+    await supabase.from("activities").insert({
+      business_id: businessId,
+      product_id: productId,
+      details: userName ? `${userName}: ${details}` : details,
+      motivo,
+      lost_cash: null,
+      created_at: new Date().toISOString(),
+    });
+  } catch (e) {
+    console.error("No se pudo loguear actividad:", e);
+  }
+}
 const ANGEL_CRISTIAN_USERTOKEN = process.env.NEXT_PUBLIC_ANGEL_CRISTIAN_USERTOKEN;
 const ANGEL_CRISTIAN_APIKEY = process.env.NEXT_PUBLIC_ANGEL_CRISTIAN_APIKEY;
 const ANGEL_CRISTIAN_APITOKEN = process.env.NEXT_PUBLIC_ANGEL_CRISTIAN_APITOKEN;
@@ -917,7 +945,7 @@ export default function NewSalePage() {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "F2") {
         e.preventDefault();
-        setShowManualSearch(true);
+        openManualSearch();
       }
       if (e.key === "F4") {
         e.preventDefault();
@@ -927,6 +955,7 @@ export default function NewSalePage() {
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
+
 
   useEffect(() => {
     const handleBlur = () => {
@@ -994,10 +1023,24 @@ export default function NewSalePage() {
   useEffect(() => {
     if (!debouncedScannerValue || showManualSearch) return;
 
+    const scannedCode = debouncedScannerValue.toLowerCase();
+
     // 1. Buscamos **todos** los productos con ese código
     const matches = products.filter(
-      p => p.code?.toLowerCase() === debouncedScannerValue.toLowerCase()
+      p => p.code?.toLowerCase() === scannedCode
     );
+
+    // 🔹 Log general de scanner
+    logActivity({
+      businessId,
+      motivo: "Scanner",
+      details:
+        matches.length === 1
+          ? `Escaneo: code=${scannedCode} → 1 coincidencia (${matches[0].name})`
+          : `Escaneo: code=${scannedCode} → ${matches.length} coincidencias`,
+      productId: matches.length === 1 ? String(matches[0].id) : null,
+      userName: user?.name,
+    });
 
     // 2. Limpiamos siempre el input del scanner
     setScannerValue("");
@@ -1005,27 +1048,31 @@ export default function NewSalePage() {
     // 3. Si sólo hay uno, lo agregamos al carrito
     if (matches.length === 1) {
       addToCart(matches[0]);
-
-      // 4. Si hay más de uno, abrimos el modal de selección
+      // (Opcional) log adicional al agregar por scanner único (ya logueamos arriba)
     } else if (matches.length > 1) {
+      // 4. Si hay más de uno, abrimos el modal de selección
       setMatchingProducts(matches);
       setShowSelectModal(true);
     }
-
-    // 5. Dependencias: vuelve a ejecutarse en cada cambio de scanner, productos o manual search
   }, [debouncedScannerValue, products, showManualSearch]);
+
 
   // Cuando el cajero elija uno de los productos duplicados:
   const handleSelectProduct = (p: any) => {
-    // 1. Lo agregamos al carrito como siempre
     addToCart(p);
 
-    // 2. Cerramos el modal de selección
-    setShowSelectModal(false);
+    logActivity({
+      businessId,
+      motivo: Array.isArray(p.products) && p.products.length > 0 ? "SeleccionPromo" : "Actualizacion",
+      details: `Selección desde modal de scanner: ${p.name}`,
+      productId: String(p.id),
+      userName: user?.name,
+    });
 
-    // 3. Volvemos a enfocar el scanner para seguir escaneando (si no está pausado)
+    setShowSelectModal(false);
     if (!scannerPaused) scannerInputRef.current?.focus();
   };
+
   useInactivityReload({
     ms: 240000,
     enabled: !showManualSearch && !showSelectModal, // pausa mientras hay modal
@@ -1041,6 +1088,11 @@ export default function NewSalePage() {
       </div>
     )
   }
+
+  const openManualSearch = async () => {
+    setShowManualSearch(true);
+  };
+
   if (loadingShifts) {
     return (
       <div className="flex justify-center items-center h-64">
@@ -1090,7 +1142,7 @@ export default function NewSalePage() {
             <div className="flex justify-between items-center px-6 py-4 border-b">
               <div className="flex gap-2">
                 <button
-                  onClick={() => setShowManualSearch(true)}
+                  onClick={openManualSearch}
                   className="flex items-center gap-1 px-3 py-1.5 bg-yellow-500 hover:bg-yellow-600 text-white text-sm font-medium rounded-md shadow transition"
                 >
                   <Search className="w-4 h-4" />
@@ -1310,6 +1362,15 @@ export default function NewSalePage() {
                     onClick={() => {
                       if (isOutOfStock) return;
                       addToCart(p);
+
+                      logActivity({
+                        businessId,
+                        motivo: "SeleccionManual",
+                        details: `Selección desde búsqueda manual: ${p.name}`,
+                        productId: String(p.id),
+                        userName: user?.name,
+                      });
+
                       setSearch("");
                       setShowManualSearch(false);
                     }}

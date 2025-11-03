@@ -23,6 +23,7 @@ const categories = [
   "BRECA",
 ];
 
+
 // Helper para derivar categoría y base del nombre
 function extractCategory(name: string): { category: string; base: string } {
   const parts = name.trim().split(" ");
