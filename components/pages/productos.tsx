@@ -540,10 +540,9 @@ export default function InventoryByBranchPage() {
           </td>
 
           {/* Stock en sucursal activa */}
-          <td className="px-4 py-3 text-sm">
-            <div className="flex items-center justify-between gap-2 w-36">
-              <span className="text-xs text-gray-600">{selectedBranch?.name || "Sucursal"}</span>
-              <span className={`${qtyColor} text-white text-xs rounded-full px-2`}>{branchQty}</span>
+          <td className="px-4 py-3 text-sm text-center ">
+            <div className="flex flex justify-center items-center">
+              <div className={`${qtyColor} text-white text-xs rounded-full px-2`}>{branchQty}</div>
             </div>
           </td>
 
