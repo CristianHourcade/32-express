@@ -1,12 +1,20 @@
 "use client";
 
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import type { AppDispatch, RootState } from "@/lib/redux/store";
 import { fetchBusinesses } from "@/lib/redux/slices/businessSlice";
 import { supabase } from "@/lib/supabase";
 
-// Categorías disponibles
+/* ──────────────────────────────────────────────────────────────────────────
+  INVENTARIO POR SUCURSAL (ENFORCED)
+  - Paso 1: selección obligatoria de sucursal (bloquea la UI hasta elegir).
+  - Paso 2: listado/edición de productos, trabajando SOLO sobre esa sucursal.
+  - Respeta features previos: búsqueda, filtros, paginación, orden, drawer,
+    optimista para stock, logs en activities (Pérdida / Actualización), etc.
+────────────────────────────────────────────────────────────────────────── */
+
+/* Categorías disponibles */
 const categories = [
   "ALMACEN",
   "CIGARRILLOS",
@@ -21,107 +29,185 @@ const categories = [
   "PROMO",
   "SIN CATEGORIA",
   "BRECA",
-];
+] as const;
 
+type Category = (typeof categories)[number];
 
-// Helper para derivar categoría y base del nombre
-function extractCategory(name: string): { category: string; base: string } {
+/* Helper: derivar categoría y base del nombre */
+function extractCategory(name: string): { category: Category; base: string } {
   const parts = name.trim().split(" ");
-  const first = parts[0].toUpperCase();
-  if (categories.includes(first)) {
-    return { category: first, base: parts.slice(1).join(" ") };
+  const first = parts[0]?.toUpperCase() as Category;
+  if (first && (categories as readonly string[]).includes(first)) {
+    return { category: first as Category, base: parts.slice(1).join(" ") };
   }
   return { category: "SIN CATEGORIA", base: name };
 }
 
-type InventoryItem = {
+/* Tipos */
+export type InventoryItem = {
   id: string;
   code: string;
   name: string;
   default_purchase: number;
   margin_percent: number;
   default_selling: number;
-  stocks: Record<string, number>;
-  entryManual?: boolean; // UI; en DB es entryManual
+  stocks: Record<string, number>; // { [business_id]: stock }
+  entryManual?: boolean;
 };
 
-// ¿Tiene stock en algún local?
-const hasAnyStock = (item: InventoryItem) =>
-  Object.values(item.stocks || {}).some((q) => (q ?? 0) > 0);
+/* ¿Tiene stock >0 en la sucursal activa? */
+const hasStockInBranch = (item: InventoryItem, branchId: string) =>
+  ((item.stocks || {})[branchId] ?? 0) > 0;
 
-export default function InventoryPage() {
+/* Paleta para badge de categoría */
+function categoryColor(cat: string): string {
+  switch (cat) {
+    case "CIGARRILLOS":
+      return "bg-yellow-300 text-black";
+    case "GOLOSINAS":
+      return "bg-pink-300 text-black";
+    case "BEBIDA":
+      return "bg-blue-200 text-black";
+    case "CERVEZA":
+      return "bg-amber-300 text-black";
+    case "FIAMBRES":
+      return "bg-rose-300 text-black";
+    case "HUEVOS":
+      return "bg-amber-200 text-black";
+    case "HIGIENE":
+      return "bg-teal-200 text-black";
+    case "ALCOHOL":
+      return "bg-indigo-300 text-white";
+    case "TABACO":
+      return "bg-red-300 text-black";
+    case "ALMACEN":
+      return "bg-green-200 text-black";
+    default:
+      return "bg-slate-200 text-gray-800";
+  }
+}
+
+/* Página */
+export default function InventoryByBranchPage() {
   const dispatch = useDispatch<AppDispatch>();
   const { businesses, loading: businessesLoading } = useSelector(
     (s: RootState) => s.businesses
   );
   const { user } = useSelector((s: RootState) => s.auth);
 
-  // Estados
-  const [stockModalReason, setStockModalReason] =
-    useState<"Perdida" | "Actualizacion">("Actualizacion");
-  const [searchTerm, setSearchTerm] = useState("");
-  const [inventory, setInventory] = useState<InventoryItem[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [drawerProduct, setDrawerProduct] = useState<InventoryItem | null>(null);
-  const [editableStocks, setEditableStocks] = useState<Record<string, number>>(
-    {}
+  /* Selección obligatoria de sucursal */
+  const [selectedBranchId, setSelectedBranchId] = useState<string | null>(null);
+  const selectedBranch = useMemo(
+    () => businesses.find((b) => b.id === selectedBranchId) || null,
+    [businesses, selectedBranchId]
   );
-  const [salePrice, setSalePrice] = useState<number>(0);
-  const [drawerCategory, setDrawerCategory] = useState<string>("SIN CATEGORIA");
-  const [drawerBase, setDrawerBase] = useState<string>("");
-  const [stockChangeReasons, setStockChangeReasons] = useState<
-    Record<string, "Perdida" | "Actualizacion">
-  >({});
-  const [selectedCategory, setSelectedCategory] = useState<string>("");
 
-  // 🧭 Paginación (10 por página)
+  /* Estados UI */
+  const [searchTerm, setSearchTerm] = useState("");
+  const [selectedCategory, setSelectedCategory] = useState<string>("");
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc" | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [inventory, setInventory] = useState<InventoryItem[]>([]);
+
+  /* Drawer */
+  const [drawerProduct, setDrawerProduct] = useState<InventoryItem | null>(null);
+  const [drawerCategory, setDrawerCategory] = useState<Category>("SIN CATEGORIA");
+  const [drawerBase, setDrawerBase] = useState<string>("");
+  const [salePrice, setSalePrice] = useState<number>(0);
+  const [editableStocks, setEditableStocks] = useState<Record<string, number>>({});
+  const [isSaving, setIsSaving] = useState(false);
+
+  /* Modal de stock */
+  const [isStockModalOpen, setIsStockModalOpen] = useState(false);
+  const [stockModalAction, setStockModalAction] = useState<"add" | "remove" | null>(null);
+  const [stockModalAmount, setStockModalAmount] = useState<number>(1);
+  const [stockModalReason, setStockModalReason] = useState<"Perdida" | "Actualizacion">(
+    "Actualizacion"
+  );
+
+  /* Paginación */
   const PAGE_SIZE = 10;
   const [page, setPage] = useState(1);
 
+  /* Init */
+  useEffect(() => {
+    dispatch(fetchBusinesses());
+  }, [dispatch]);
+
+  /* Fetch de datos limitado a sucursal seleccionada */
+  useEffect(() => {
+    const run = async () => {
+      if (!selectedBranchId) return; // hasta que elija sucursal
+      setLoading(true);
+
+      try {
+        const masters = await fetchAllMasters();
+        const invForBranch = await fetchInventoryForBranch(selectedBranchId);
+
+        const map: Record<string, Record<string, number>> = {};
+        invForBranch.forEach((r) => {
+          map[r.product_id] = map[r.product_id] || {};
+          map[r.product_id][r.business_id] = r.stock;
+        });
+
+        setInventory(
+          masters.map((m: any) => ({
+            id: m.id,
+            code: m.code,
+            name: m.name,
+            default_purchase: m.default_purchase,
+            margin_percent: m.margin_percent,
+            default_selling: m.default_selling,
+            stocks: map[m.id] || {},
+            entryManual: !!(m.entryManual ?? m.entryManual ?? false),
+          }))
+        );
+      } finally {
+        setLoading(false);
+      }
+    };
+    run();
+  }, [selectedBranchId]);
+
+  /* Helpers fetch */
   async function fetchAllMasters() {
     const step = 1000;
     let from = 0;
-    let allMasters: any[] = [];
-
+    let all: any[] = [];
     while (true) {
       const { data, error } = await supabase
         .from("products_master")
-        .select(
-          "id, code, name, default_purchase, margin_percent, default_selling, entryManual"
-        )
+        .select("id, code, name, default_purchase, margin_percent, default_selling, entryManual")
         .range(from, from + step - 1);
-
       if (error) throw error;
-      allMasters = allMasters.concat(data || []);
+      all = all.concat(data || []);
       if (!data || data.length < step) break;
       from += step;
     }
-
-    return allMasters;
+    return all;
   }
 
-  async function fetchAllInventory() {
+  async function fetchInventoryForBranch(branchId: string) {
     const step = 1000;
     let from = 0;
-    let allInv: any[] = [];
-
+    let all: any[] = [];
     while (true) {
       const { data, error } = await supabase
         .from("business_inventory")
         .select("business_id, product_id, stock")
+        .eq("business_id", branchId)
         .range(from, from + step - 1);
-
       if (error) throw error;
-      allInv = allInv.concat(data || []);
+      all = all.concat(data || []);
       if (!data || data.length < step) break;
       from += step;
     }
-
-    return allInv;
+    return all;
   }
 
-  // Crear nuevo producto
+  /* Acciones */
   function openNew() {
+    if (!selectedBranchId) return;
     setDrawerProduct({
       id: "",
       code: "",
@@ -129,83 +215,47 @@ export default function InventoryPage() {
       default_purchase: 0,
       margin_percent: 0,
       default_selling: 0,
-      stocks: {},
+      stocks: { [selectedBranchId]: 0 },
       entryManual: false,
     });
     setDrawerCategory("SIN CATEGORIA");
     setDrawerBase("");
     setSalePrice(0);
-    setEditableStocks({});
-    setStockChangeReasons({});
+    setEditableStocks({ [selectedBranchId]: 0 });
   }
 
-  // Fetch inicial
-  useEffect(() => {
-    dispatch(fetchBusinesses());
-  }, [dispatch]);
+  function openDrawer(item: InventoryItem) {
+    const { category, base } = extractCategory(item.name);
+    setDrawerProduct(item);
+    setEditableStocks({ ...item.stocks });
+    setSalePrice(item.default_selling);
+    setDrawerCategory(category);
+    setDrawerBase(base);
+  }
+  function closeDrawer() {
+    setDrawerProduct(null);
+  }
 
-  useEffect(() => {
-    async function fetchData() {
-      if (!businesses.length) return;
-      setLoading(true);
-
-      // traigo TODO products_master en bloques de 1000
-      const masters = await fetchAllMasters();
-
-      // traigo TODO business_inventory en bloques de 1000
-      const invData = await fetchAllInventory();
-
-      // reconstruyo el mapa de stocks
-      const map: Record<string, Record<string, number>> = {};
-      invData.forEach((r) => {
-        map[r.product_id] = map[r.product_id] || {};
-        map[r.product_id][r.business_id] = r.stock;
-      });
-
-      // armo el estado de inventory
-      setInventory(
-        masters.map((m: any) => ({
-          id: m.id,
-          code: m.code,
-          name: m.name,
-          default_purchase: m.default_purchase,
-          margin_percent: m.margin_percent,
-          default_selling: m.default_selling,
-          stocks: map[m.id] || {},
-          entryManual: !!(m.entryManual ?? m.entryManual ?? false), // normalizo camel
-        }))
-      );
-
-      setLoading(false);
-    }
-
-    fetchData();
-  }, [businesses]);
-
-  const [sortOrder, setSortOrder] = useState<"asc" | "desc" | null>(null);
   function toggleSortOrder() {
-    setSortOrder((prev) => {
-      if (prev === "asc") return "desc";
-      if (prev === "desc") return null;
-      return "asc";
-    });
+    setSortOrder((prev) => (prev === "asc" ? "desc" : prev === "desc" ? null : "asc"));
   }
 
-  // Filtrado:
-  // - Sin búsqueda: solo productos con stock > 0 (en cualquier local)
-  // - Con búsqueda: busca en TODO el inventory (aunque stock sea 0)
+  /* Filtrado (PARA UNA SOLA SUCURSAL) */
   const filtered = useMemo(() => {
-    const base = searchTerm.trim() ? inventory : inventory.filter(hasAnyStock);
+    if (!selectedBranchId) return [] as InventoryItem[];
+
+    // Sin búsqueda: mostrar sólo los que tienen stock en la sucursal activa
+    const base = searchTerm.trim()
+      ? inventory
+      : inventory.filter((it) => hasStockInBranch(it, selectedBranchId));
 
     let list = base.filter((item) => {
       const { category } = extractCategory(item.name);
       const matchesCategory = selectedCategory ? category === selectedCategory : true;
-
       const q = searchTerm.toLowerCase();
       const matchesSearch = !q
         ? true
         : item.name.toLowerCase().includes(q) || item.code.toLowerCase().includes(q);
-
       return matchesCategory && matchesSearch;
     });
 
@@ -216,58 +266,81 @@ export default function InventoryPage() {
           : b.default_selling - a.default_selling
       );
     }
-
     return list;
-  }, [inventory, selectedCategory, searchTerm, sortOrder]);
+  }, [inventory, searchTerm, selectedCategory, sortOrder, selectedBranchId]);
 
-  // 🔄 Resetear página cuando cambian filtros/orden/datos
+  /* Reset de página ante cambios */
   useEffect(() => {
     setPage(1);
-  }, [searchTerm, selectedCategory, sortOrder, inventory.length]);
+  }, [searchTerm, selectedCategory, sortOrder, inventory.length, selectedBranchId]);
 
-  // Derivar paginado
+  /* Paginado */
   const totalItems = filtered.length;
   const totalPages = Math.max(1, Math.ceil(totalItems / PAGE_SIZE));
   const startIndex = (page - 1) * PAGE_SIZE;
   const endIndex = Math.min(startIndex + PAGE_SIZE, totalItems);
-
-  const paginated = useMemo(
-    () => filtered.slice(startIndex, endIndex),
-    [filtered, startIndex, endIndex]
-  );
+  const paginated = useMemo(() => filtered.slice(startIndex, endIndex), [filtered, startIndex, endIndex]);
 
   const isBusy = loading || businessesLoading;
 
-  // Abrir/cerrar drawer
-  function openDrawer(item: InventoryItem) {
-    const { category, base } = extractCategory(item.name);
-    setDrawerProduct(item);
-    setEditableStocks({ ...item.stocks });
-    setSalePrice(item.default_selling);
-    setDrawerCategory(category);
-    setDrawerBase(base);
-    setStockChangeReasons({});
-  }
-  function closeDrawer() {
-    setDrawerProduct(null);
+  /* Modal de stock (siempre sobre sucursal seleccionada) */
+  function openStockModal(action: "add" | "remove") {
+    setStockModalAction(action);
+    setStockModalAmount(1);
+    setStockModalReason("Actualizacion");
+    setIsStockModalOpen(true);
   }
 
-  const [isSaving, setIsSaving] = useState(false);
+  const [isModalSubmitting, setIsModalSubmitting] = useState(false);
 
-  // Guardar o crear
-  async function saveAll() {
-    if (!drawerProduct) return;
-    setIsSaving(true);
+  async function handleConfirmStockModal() {
+    if (!drawerProduct || !selectedBranchId || !stockModalAction) return;
+    if (isModalSubmitting) return;
+    setIsModalSubmitting(true);
 
     try {
-      const oldStocks: Record<string, number> = { ...(drawerProduct.stocks || {}) };
-      const newName =
-        drawerCategory === "SIN CATEGORIA" ? drawerBase : `${drawerCategory} ${drawerBase}`;
+      const current = editableStocks[selectedBranchId] ?? 0;
+      const newValue = stockModalAction === "add" ? current + stockModalAmount : Math.max(0, current - stockModalAmount);
+
+      // Log inmediato si es Pérdida
+      if (stockModalAction === "remove" && stockModalReason === "Perdida") {
+        const qtyLost = Math.max(0, current - newValue);
+        if (qtyLost > 0) {
+          const nameFinal = drawerCategory === "SIN CATEGORIA" ? drawerBase : `${drawerCategory} ${drawerBase}`;
+          const details = user?.name
+            ? `${user.name} cambió stock de ${nameFinal} en ${selectedBranch?.name ?? selectedBranchId}: ${current} → ${newValue}`
+            : `Cambio stock de ${nameFinal} en ${selectedBranch?.name ?? selectedBranchId}: ${current} → ${newValue}`;
+          const lost_cash = qtyLost * (drawerProduct.default_selling ?? 0);
+          await supabase.from("activities").insert({
+            business_id: selectedBranchId,
+            product_id: drawerProduct.id,
+            details,
+            motivo: "Perdida",
+            lost_cash,
+            created_at: new Date().toISOString(),
+          });
+        }
+      }
+
+      setEditableStocks((prev) => ({ ...prev, [selectedBranchId]: newValue }));
+      setIsStockModalOpen(false);
+    } finally {
+      setIsModalSubmitting(false);
+    }
+  }
+
+  /* Guardar / Crear */
+  async function saveAll() {
+    if (!drawerProduct || !selectedBranchId) return;
+    setIsSaving(true);
+    try {
+      const oldStocks = { ...(drawerProduct.stocks || {}) };
+      const newName = drawerCategory === "SIN CATEGORIA" ? drawerBase : `${drawerCategory} ${drawerBase}`;
       let prodId = drawerProduct.id;
 
-      // === 1) Crear/Actualizar producto master ===
+      // 1) Crear o actualizar master
       if (!prodId) {
-        const { data: insData, error: insErr } = await supabase
+        const { data, error } = await supabase
           .from("products_master")
           .insert({
             code: drawerProduct.code,
@@ -278,16 +351,10 @@ export default function InventoryPage() {
             default_selling: salePrice,
           })
           .select("id");
-
-        if (insErr || !insData?.[0]?.id) {
-          console.error("Error al crear producto master:", insErr);
-          alert("No se pudo crear el producto. Intenta nuevamente.");
-          setIsSaving(false);
-          return;
-        }
-        prodId = insData[0].id;
+        if (error || !data?.[0]?.id) throw error || new Error("No se pudo crear el producto");
+        prodId = data[0].id;
       } else {
-        const { error: updErr } = await supabase
+        const { error } = await supabase
           .from("products_master")
           .update({
             code: drawerProduct.code,
@@ -298,145 +365,80 @@ export default function InventoryPage() {
             default_selling: salePrice,
           })
           .eq("id", prodId);
-
-        if (updErr) {
-          console.error("Error al actualizar producto master:", updErr);
-          alert("No se pudo actualizar el producto. Intenta nuevamente.");
-          setIsSaving(false);
-          return;
-        }
+        if (error) throw error;
       }
 
-      // === 2) Detectar cambios reales de stock (solo lo que difiere) ===
-      const changedEntries = Object.entries(editableStocks).filter(([business_id, newStock]) => {
-        const old = (oldStocks ?? {})[business_id] ?? 0;
-        return old !== newStock;
-      });
-      const businessIdsChanged = changedEntries.map(([business_id]) => business_id);
+      // 2) Detectar cambio real SOLO en la sucursal activa
+      const old = (oldStocks[selectedBranchId] ?? 0);
+      const next = (editableStocks[selectedBranchId] ?? 0);
+      const changed = old !== next;
 
-      // Nada cambió en inventario: solo refrescamos master y salimos
-      if (businessIdsChanged.length === 0) {
-        // Actualiza estado local del producto (por si cambió nombre/precio/etc.)
-        setInventory((prev) =>
-          prev
-            .filter((it) => it.id !== prodId)
-            .concat({
-              id: prodId,
-              code: drawerProduct.code,
-              name: newName,
-              default_purchase: drawerProduct.default_purchase,
-              margin_percent: drawerProduct.margin_percent,
-              default_selling: salePrice,
-              stocks: { ...(drawerProduct.stocks || {}) },
-              entryManual: !!drawerProduct.entryManual,
-            })
-        );
+      if (!changed) {
+        // Actualizar estado local de master y salir
+        setInventory((prev) => prev.filter((it) => it.id !== prodId).concat({
+          id: prodId,
+          code: drawerProduct.code,
+          name: newName,
+          default_purchase: drawerProduct.default_purchase,
+          margin_percent: drawerProduct.margin_percent,
+          default_selling: salePrice,
+          stocks: { ...drawerProduct.stocks },
+          entryManual: !!drawerProduct.entryManual,
+        }));
         setIsSaving(false);
         closeDrawer();
         return;
       }
 
-      // === 3) Traer inventario existente SOLO de sucursales cambiadas ===
-      const { data: existing, error: fetchError } = await supabase
+      // 3) Leer registro existente de inventario SOLO para la sucursal
+      const { data: existing, error: readErr } = await supabase
         .from("business_inventory")
         .select("product_id, business_id, stock")
         .eq("product_id", prodId)
-        .in("business_id", businessIdsChanged);
+        .eq("business_id", selectedBranchId)
+        .maybeSingle();
+      if (readErr && readErr.code !== "PGRST116") throw readErr; // ignora not found
 
-      if (fetchError) {
-        console.error("Error al obtener inventario existente:", fetchError);
-        alert("No se pudo leer el inventario. Intenta nuevamente.");
-        setIsSaving(false);
-        return;
-      }
+      let conflict = false;
 
-      const existingMap = new Map((existing ?? []).map((r) => [r.business_id, r]));
-
-      type ChangeRow = { business_id: string; oldStock: number; newStock: number };
-      const updates: ChangeRow[] = [];
-      const inserts: ChangeRow[] = [];
-
-      for (const [business_id, newStock] of changedEntries) {
-        const oldStock = (oldStocks ?? {})[business_id] ?? 0;
-        if (existingMap.has(business_id)) {
-          updates.push({ business_id, oldStock, newStock });
-        } else {
-          inserts.push({ business_id, oldStock, newStock });
-        }
-      }
-
-      // === 4) Ejecutar UPDATES con bloqueo optimista (stock actual debe igualar oldStock) ===
-      const conflicts: string[] = [];
-      for (const u of updates) {
+      if (existing) {
+        // 4) UPDATE con bloqueo optimista
         const { data, error } = await supabase
           .from("business_inventory")
-          .update({ stock: u.newStock })
+          .update({ stock: next })
           .eq("product_id", prodId)
-          .eq("business_id", u.business_id)
-          .eq("stock", u.oldStock) // evita pisar cambios concurrentes
+          .eq("business_id", selectedBranchId)
+          .eq("stock", old)
           .select("business_id");
-
-        if (error) {
-          console.error("Error al actualizar stock:", error);
-          alert("No se pudo actualizar el stock en una sucursal.");
-          setIsSaving(false);
-          return;
-        }
-        if (!data || data.length === 0) {
-          // Nadie coincide con el oldStock -> alguien lo cambió
-          conflicts.push(u.business_id);
-        }
-      }
-
-      // === 5) Ejecutar INSERTS (si otro insertó, reintenta como UPDATE condicionado) ===
-      for (const ins of inserts) {
+        if (error) throw error;
+        if (!data || data.length === 0) conflict = true;
+      } else {
+        // 5) INSERT; si falla, reintenta como UPDATE condicionado
         const { error } = await supabase
           .from("business_inventory")
-          .insert({ product_id: prodId, business_id: ins.business_id, stock: ins.newStock });
-
+          .insert({ product_id: prodId, business_id: selectedBranchId, stock: next });
         if (error) {
-          // Reintento como UPDATE con lock por oldStock (evita pisar)
           const retry = await supabase
             .from("business_inventory")
-            .update({ stock: ins.newStock })
+            .update({ stock: next })
             .eq("product_id", prodId)
-            .eq("business_id", ins.business_id)
-            .eq("stock", ins.oldStock)
+            .eq("business_id", selectedBranchId)
+            .eq("stock", old)
             .select("business_id");
-
-          if (retry.error) {
-            console.error("Error al reintentar insert->update stock:", retry.error);
-            alert("No se pudo insertar/actualizar el stock en una sucursal.");
-            setIsSaving(false);
-            return;
-          }
-          if (!retry.data || retry.data.length === 0) {
-            conflicts.push(ins.business_id);
-          }
+          if (retry.error) throw retry.error;
+          if (!retry.data || retry.data.length === 0) conflict = true;
         }
       }
 
-      // === 6) Log de actividades “Actualización” SOLO para cambios aplicados ===
-      const appliedIds = new Set(businessIdsChanged.filter((id) => !conflicts.includes(id)));
-
-      for (const [business_id, newStock] of changedEntries) {
-        if (!appliedIds.has(business_id)) continue; // no loguear conflictos
-
-        const motivo = stockChangeReasons[business_id] || "Actualizacion";
-        if (motivo === "Perdida") continue; // las pérdidas ya se loguean al confirmar el modal
-
-        const oldStock = (oldStocks ?? {})[business_id] ?? 0;
-        if (oldStock === newStock) continue;
-
-        const biz = businesses.find((b) => b.id === business_id);
-        const bizName = biz ? biz.name : business_id;
+      // 6) Log Actualización SOLO si aplicó y motivo no es Pérdida inmediata
+      if (!conflict && old !== next) {
+        const nameFinal = newName;
         const details = user?.name
-          ? `${user.name} cambió stock de ${newName} en ${bizName}: ${oldStock} → ${newStock}`
-          : `Cambio stock de ${newName} en ${bizName}: ${oldStock} → ${newStock}`;
-
+          ? `${user.name} cambió stock de ${nameFinal} en ${selectedBranch?.name ?? selectedBranchId}: ${old} → ${next}`
+          : `Cambio stock de ${nameFinal} en ${selectedBranch?.name ?? selectedBranchId}: ${old} → ${next}`;
         try {
           await supabase.from("activities").insert({
-            business_id,
+            business_id: selectedBranchId,
             product_id: prodId,
             details,
             motivo: "Actualizacion",
@@ -448,42 +450,30 @@ export default function InventoryPage() {
         }
       }
 
-      // === 7) Avisar conflictos (si hubo) y actualizar estado local SOLO con lo aplicado ===
-      if (conflicts.length > 0) {
+      if (conflict) {
         alert(
-          `Atención: el stock de ${conflicts.length} sucursal(es) cambió mientras editabas.\n` +
-          `No se guardaron esos cambios para evitar sobrescrituras.\n` +
-          `Sucursales: ${conflicts
-            .map((id) => businesses.find((b) => b.id === id)?.name || id)
-            .join(", ")}`
+          `Atención: el stock en ${selectedBranch?.name ?? selectedBranchId} cambió mientras editabas.\n` +
+            `No se guardó para evitar sobrescrituras.`
         );
       }
 
+      // 7) Actualizar estado local
       const newStocksApplied: Record<string, number> = { ...(drawerProduct.stocks || {}) };
-      for (const [business_id, newStock] of changedEntries) {
-        if (appliedIds.has(business_id)) {
-          newStocksApplied[business_id] = newStock;
-        }
-      }
+      if (!conflict) newStocksApplied[selectedBranchId] = next;
 
-      // === 8) Actualizar inventario en estado global y cerrar si no hubo conflictos ===
-      setInventory((prev) =>
-        prev
-          .filter((it) => it.id !== prodId)
-          .concat({
-            id: prodId,
-            code: drawerProduct.code,
-            name: newName,
-            default_purchase: drawerProduct.default_purchase,
-            margin_percent: drawerProduct.margin_percent,
-            default_selling: salePrice,
-            stocks: newStocksApplied,
-            entryManual: !!drawerProduct.entryManual,
-          })
-      );
+      setInventory((prev) => prev.filter((it) => it.id !== prodId).concat({
+        id: prodId,
+        code: drawerProduct.code,
+        name: newName,
+        default_purchase: drawerProduct.default_purchase,
+        margin_percent: drawerProduct.margin_percent,
+        default_selling: salePrice,
+        stocks: newStocksApplied,
+        entryManual: !!drawerProduct.entryManual,
+      }));
 
       setIsSaving(false);
-      if (conflicts.length === 0) closeDrawer();
+      if (!conflict) closeDrawer();
     } catch (e) {
       console.error("Error en saveAll:", e);
       alert("Ocurrió un error al guardar. Intenta nuevamente.");
@@ -491,61 +481,29 @@ export default function InventoryPage() {
     }
   }
 
-
-  function categoryColor(cat: string): string {
-    switch (cat) {
-      case "CIGARRILLOS":
-        return "bg-yellow-300 text-black";
-      case "GOLOSINAS":
-        return "bg-pink-300 text-black";
-      case "BEBIDA":
-        return "bg-blue-200 text-black";
-      case "CERVEZA":
-        return "bg-amber-300 text-black";
-      case "FIAMBRES":
-        return "bg-rose-300 text-black";
-      case "HUEVOS":
-        return "bg-amber-200 text-black";
-      case "HIGIENE":
-        return "bg-teal-200 text-black";
-      case "ALCOHOL":
-        return "bg-indigo-300 text-white";
-      case "TABACO":
-        return "bg-red-300 text-black";
-      case "ALMACEN":
-        return "bg-green-200 text-black";
-      default:
-        return "bg-slate-200 text-gray-800";
-    }
-  }
-
+  /* UI: filas */
   const productRows = useMemo(() => {
     return paginated.map((item) => {
-      const showNoStockBadge = searchTerm.trim() && !hasAnyStock(item);
+      const branchId = selectedBranchId!;
+      const branchQty = (item.stocks[branchId] ?? 0);
+      const showNoStockBadge = searchTerm.trim() && branchQty === 0;
+
+      const qtyColor = branchQty === 0 ? "bg-red-500" : branchQty < 6 ? "bg-yellow-400" : "bg-green-500";
 
       return (
-        <tr
-          key={item.id}
-          className="border-b even:bg-slate-50/60 dark:even:bg-slate-800/30 hover:bg-slate-100 transition"
-        >
+        <tr key={item.id} className="border-b even:bg-slate-50/60 dark:even:bg-slate-800/30 hover:bg-slate-100 transition">
           {/* Producto */}
           <td className="px-4 py-3">
             <div className="flex flex-col gap-1">
               <div>
-                <span
-                  className={`text-xs font-semibold px-2 py-0.5 rounded-full ${categoryColor(
-                    extractCategory(item.name).category
-                  )}`}
-                >
+                <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${categoryColor(extractCategory(item.name).category)}`}>
                   {extractCategory(item.name).category}
                 </span>
               </div>
               <div className="flex items-center gap-2">
                 <span className="font-semibold text-base">{item.name}</span>
                 {showNoStockBadge && (
-                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-red-100 text-red-700">
-                    SIN STOCK
-                  </span>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-red-100 text-red-700">SIN STOCK</span>
                 )}
               </div>
               <div className="text-sm text-gray-500 truncate">{item.code}</div>
@@ -554,52 +512,26 @@ export default function InventoryPage() {
 
           {/* Compra */}
           <td className="px-4 py-3 whitespace-nowrap text-sm">
-            {new Intl.NumberFormat("es-AR", {
-              style: "currency",
-              currency: "ARS",
-            }).format(item.default_purchase)}
+            {new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS" }).format(item.default_purchase)}
           </td>
 
-          {/* Venta */}
+          {/* Venta (ordenable) */}
           <td
             className="px-4 py-3 whitespace-nowrap text-sm cursor-pointer select-none"
             onClick={toggleSortOrder}
             title="Ordenar por precio de venta"
           >
-            {new Intl.NumberFormat("es-AR", {
-              style: "currency",
-              currency: "ARS",
-            }).format(item.default_selling)}
+            {new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS" }).format(item.default_selling)}
             {sortOrder === "asc" && " ▲"}
             {sortOrder === "desc" && " ▼"}
           </td>
 
-          {/* Ver Inventario */}
+          {/* Stock en sucursal activa */}
           <td className="px-4 py-3 text-sm">
-            <details className="group">
-              <summary className="bg-gray-200 hover:bg-gray-300 dark:bg-slate-700 dark:hover:bg-slate-600 px-4 py-2 rounded-md text-center cursor-pointer w-full text-sm font-medium">
-                VER INVENTARIO
-              </summary>
-              <div className="mt-2 bg-white dark:bg-slate-800 rounded-lg shadow-md border border-gray-200 dark:border-slate-700 p-3 space-y-2 w-full max-w-md">
-                {businesses.map((b) => {
-                  const qty = item.stocks[b.id] || 0;
-                  const color =
-                    qty === 0
-                      ? "bg-red-500"
-                      : qty < 6
-                        ? "bg-yellow-400"
-                        : "bg-green-500";
-                  return (
-                    <div key={b.id} className="flex justify-between items-center">
-                      <span className="truncate">{b.name}</span>
-                      <span className={`${color} text-white text-xs rounded-full px-2`}>
-                        {qty}
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
-            </details>
+            <div className="flex items-center justify-between gap-2 w-36">
+              <span className="text-xs text-gray-600">{selectedBranch?.name || "Sucursal"}</span>
+              <span className={`${qtyColor} text-white text-xs rounded-full px-2`}>{branchQty}</span>
+            </div>
           </td>
 
           {/* Acciones */}
@@ -612,16 +544,11 @@ export default function InventoryPage() {
                 Ajustar
               </button>
               <button
-                onClick={() => {
+                onClick={async () => {
                   if (confirm(`¿Eliminar ${item.name}?`)) {
-                    supabase
-                      .from("products_master")
-                      .delete()
-                      .eq("id", item.id)
-                      .then(() =>
-                        setInventory((prev) => prev.filter((p) => p.id !== item.id))
-                      );
-                    supabase.from("business_inventory").delete().eq("product_id", item.id);
+                    await supabase.from("products_master").delete().eq("id", item.id);
+                    await supabase.from("business_inventory").delete().eq("product_id", item.id);
+                    setInventory((prev) => prev.filter((p) => p.id !== item.id));
                   }
                 }}
                 className="flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium bg-red-600 text-white hover:bg-red-700 transition"
@@ -633,125 +560,97 @@ export default function InventoryPage() {
         </tr>
       );
     });
-  }, [paginated, businesses, searchTerm, sortOrder]);
+  }, [paginated, selectedBranchId, selectedBranch?.name, searchTerm, sortOrder]);
 
-  // --- Modal de stock ---
-  const [isStockModalOpen, setIsStockModalOpen] = useState(false);
-  const [stockModalAction, setStockModalAction] =
-    useState<"add" | "remove" | null>(null);
-  const [stockModalBusiness, setStockModalBusiness] = useState<string | null>(
-    null
-  );
-  const [stockModalAmount, setStockModalAmount] = useState<number>(1);
-
-  function openStockModal(action: "add" | "remove", businessId: string) {
-    setStockModalAction(action);
-    setStockModalBusiness(businessId);
-    setStockModalAmount(1);
-    setStockModalReason("Actualizacion");
-    setIsStockModalOpen(true);
-  }
-  const [isModalSubmitting, setIsModalSubmitting] = useState(false);
-
-  // Handler: confirmar modal (con log inmediato de Pérdida)
-  async function handleConfirmStockModal() {
-    if (!stockModalAction || !stockModalBusiness) return;
-    if (isModalSubmitting) return;
-    setIsModalSubmitting(true);
-
-    try {
-      const businessId = stockModalBusiness;
-      const current = editableStocks[businessId] ?? 0;
-      const newValue =
-        stockModalAction === "add"
-          ? current + stockModalAmount
-          : Math.max(0, current - stockModalAmount);
-
-      // Log inmediato de Pérdida
-      if (
-        stockModalAction === "remove" &&
-        stockModalReason === "Perdida" &&
-        drawerProduct?.id
-      ) {
-        const qtyLost = Math.max(0, current - newValue);
-        if (qtyLost > 0) {
-          const newName =
-            drawerCategory === "SIN CATEGORIA" ? drawerBase : `${drawerCategory} ${drawerBase}`;
-          const biz = businesses.find((b) => b.id === businessId);
-          const bizName = biz ? biz.name : businessId;
-          const details = user?.name
-            ? `${user.name} cambió stock de ${newName} en ${bizName}: ${current} → ${newValue}`
-            : `Cambio stock de ${newName} en ${bizName}: ${current} → ${newValue}`;
-          const lost_cash = qtyLost * (drawerProduct.default_selling ?? 0);
-
-          await supabase.from("activities").upsert({
-            business_id: businessId,
-            product_id: drawerProduct.id,
-            details,
-            motivo: "Perdida",
-            lost_cash,
-            created_at: new Date().toISOString(),
-          });
-        }
-      }
-
-      // Estado
-      setEditableStocks((prev) => ({ ...prev, [businessId]: newValue }));
-      setStockChangeReasons((prev) => ({
-        ...prev,
-        [businessId]:
-          stockModalAction === "remove" ? stockModalReason : "Actualizacion",
-      }));
-
-      setIsStockModalOpen(false);
-    } catch (e) {
-      console.error("Error al confirmar stock:", e);
-    } finally {
-      setIsModalSubmitting(false);
-    }
-  }
-
-  function categoryColorFooter() {
-    return null;
-  }
-
+  /* Render */
   return (
     <div className="space-y-6 p-6">
+      {/* Bloqueo de interfaz hasta seleccionar sucursal */}
+      {!selectedBranchId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
+          <div className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-2xl p-6 shadow-xl">
+            <h2 className="text-2xl font-bold mb-2">Seleccioná la sucursal</h2>
+            <p className="text-sm text-gray-600 mb-4">
+              Para evitar confusiones, primero elegí sobre qué sucursal querés trabajar. Podrás cambiarla luego desde el encabezado.
+            </p>
+            <div className="space-y-3 max-h-[50vh] overflow-y-auto">
+              {businessesLoading && <div className="text-center py-6">Cargando sucursales…</div>}
+              {!businessesLoading && businesses.map((b) => (
+                <button
+                  key={b.id}
+                  onClick={() => setSelectedBranchId(b.id)}
+                  className="w-full text-left px-4 py-3 rounded-lg border hover:bg-slate-50 dark:hover:bg-slate-800"
+                >
+                  <div className="font-medium">{b.name}</div>
+                  <div className="text-xs text-gray-500">ID: {b.id}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Header */}
       <header className="flex flex-col md:flex-row justify-between items-center gap-4">
-        <button
-          onClick={openNew}
-          className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700"
-        >
-          + Agregar Producto
-        </button>
-        <h1 className="text-3xl font-bold">Productos de 32 EXPRESS</h1>
-        <select
-          value={selectedCategory}
-          onChange={(e) => setSelectedCategory(e.target.value)}
-          className="bg-white dark:bg-slate-800 border rounded-md p-2 text-sm"
-        >
-          <option value="">Todas las categorías</option>
-          {categories.map((c) => (
-            <option key={c} value={c}>
-              {c}
-            </option>
-          ))}
-        </select>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setSelectedBranchId(null)}
+            className="px-3 py-2 rounded-md border hover:bg-gray-100 dark:hover:bg-slate-800"
+            title="Cambiar sucursal"
+          >
+            Cambiar sucursal
+          </button>
+          <div className="text-sm">
+            <div className="text-gray-500 leading-tight">Sucursal actual</div>
+            <div className="font-semibold leading-tight">{selectedBranch?.name ?? "—"}</div>
+          </div>
+        </div>
+
+        <h1 className="text-3xl font-bold">Inventario por Sucursal</h1>
+
+        <div className="flex items-center gap-2">
+          <button
+            onClick={openNew}
+            disabled={!selectedBranchId}
+            className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium ${
+              selectedBranchId ? "bg-indigo-600 text-white hover:bg-indigo-700" : "bg-gray-300 text-gray-600 cursor-not-allowed"
+            }`}
+          >
+            + Agregar Producto
+          </button>
+          <select
+            value={selectedCategory}
+            onChange={(e) => setSelectedCategory(e.target.value)}
+            className="bg-white dark:bg-slate-800 border rounded-md p-2 text-sm"
+          >
+            <option value="">Todas las categorías</option>
+            {categories.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </select>
+        </div>
       </header>
 
+      {/* Buscador */}
       <div className="flex">
         <input
           type="text"
           placeholder="Buscar por nombre o código"
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
-          className="w-full  border rounded-md p-2 text-sm bg-white dark:bg-slate-800"
+          className="w-full border rounded-md p-2 text-sm bg-white dark:bg-slate-800"
         />
-        <button style={{ backgroundColor: 'red', color: 'white', padding: '0 20px' }} onClick={() => setSearchTerm('')}>
+        <button
+          onClick={() => setSearchTerm("")}
+          className="ml-2 px-4 rounded-md bg-red-600 text-white text-sm"
+        >
           Limpiar
         </button>
       </div>
 
+      {/* Tabla */}
       <div className="overflow-x-auto bg-white dark:bg-slate-800 rounded-2xl shadow-lg p-6">
         <div className="border border-gray-200 dark:border-slate-700 rounded-lg">
           <div className="max-h-[600px] overflow-y-auto overflow-x-auto">
@@ -761,15 +660,15 @@ export default function InventoryPage() {
                   <th className="px-6 py-4 text-left">Producto</th>
                   <th className="px-6 py-4 text-left">Compra</th>
                   <th className="px-6 py-4 text-left">Venta</th>
-                  <th className="px-6 py-4 text-center">STOCK</th>
+                  <th className="px-6 py-4 text-center">Stock ({selectedBranch?.name ?? "Sucursal"})</th>
                   <th className="px-6 py-4 text-right">Acciones</th>
                 </tr>
               </thead>
               <tbody>
-                {isBusy ? (
+                {isBusy || !selectedBranchId ? (
                   <tr>
                     <td colSpan={5} className="py-16 text-center">
-                      Cargando…
+                      {selectedBranchId ? "Cargando…" : "Seleccione una sucursal para continuar"}
                     </td>
                   </tr>
                 ) : (
@@ -779,22 +678,16 @@ export default function InventoryPage() {
             </table>
           </div>
 
-          {/* Footer de paginación */}
+          {/* Footer paginación */}
           <div className="flex flex-col md:flex-row items-center justify-between gap-3 mt-3 px-4 py-3">
             <span className="text-sm text-gray-600">
-              Mostrando{" "}
-              <b>{totalItems === 0 ? 0 : startIndex + 1}</b>–<b>{endIndex}</b> de{" "}
-              <b>{totalItems}</b>
+              Mostrando <b>{totalItems === 0 ? 0 : startIndex + 1}</b>–<b>{endIndex}</b> de <b>{totalItems}</b>
             </span>
-
             <div className="flex items-center gap-2">
               <button
                 onClick={() => setPage((p) => Math.max(1, p - 1))}
                 disabled={page <= 1}
-                className={`px-3 py-1 rounded-md border ${page <= 1
-                    ? "opacity-50 cursor-not-allowed"
-                    : "hover:bg-gray-100 dark:hover:bg-slate-700"
-                  }`}
+                className={`px-3 py-1 rounded-md border ${page <= 1 ? "opacity-50 cursor-not-allowed" : "hover:bg-gray-100 dark:hover:bg-slate-700"}`}
               >
                 Anterior
               </button>
@@ -804,10 +697,7 @@ export default function InventoryPage() {
               <button
                 onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
                 disabled={page >= totalPages}
-                className={`px-3 py-1 rounded-md border ${page >= totalPages
-                    ? "opacity-50 cursor-not-allowed"
-                    : "hover:bg-gray-100 dark:hover:bg-slate-700"
-                  }`}
+                className={`px-3 py-1 rounded-md border ${page >= totalPages ? "opacity-50 cursor-not-allowed" : "hover:bg-gray-100 dark:hover:bg-slate-700"}`}
               >
                 Siguiente
               </button>
@@ -816,12 +706,14 @@ export default function InventoryPage() {
         </div>
       </div>
 
-      {drawerProduct && (
+      {/* Drawer */}
+      {drawerProduct && selectedBranchId && (
         <div className="fixed inset-0 flex z-50">
           <div className="absolute inset-0 bg-black/50" onClick={closeDrawer} />
           <div className="relative ml-auto w-full max-w-3xl h-full bg-white p-6 overflow-y-auto shadow-xl rounded-l-2xl">
             <h2 className="text-2xl font-semibold mb-6">Ajustar Producto</h2>
 
+            {/* Datos del producto */}
             <div className="bg-slate-50 dark:bg-slate-900 rounded-xl p-6 shadow-md space-y-4 mb-8">
               <h3 className="text-lg font-semibold mb-2">Datos del producto</h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -829,7 +721,7 @@ export default function InventoryPage() {
                   <label className="block text-sm font-medium">Categoría</label>
                   <select
                     value={drawerCategory}
-                    onChange={(e) => setDrawerCategory(e.target.value)}
+                    onChange={(e) => setDrawerCategory(e.target.value as Category)}
                     className="w-full border rounded-lg p-3 text-sm bg-white dark:bg-slate-800"
                   >
                     {categories.map((c) => (
@@ -852,12 +744,8 @@ export default function InventoryPage() {
                   <label className="block text-sm font-medium">Código</label>
                   <input
                     type="text"
-                    value={drawerProduct?.code || ""}
-                    onChange={(e) =>
-                      setDrawerProduct((pr) =>
-                        pr ? { ...pr, code: e.target.value } : pr
-                      )
-                    }
+                    value={drawerProduct.code || ""}
+                    onChange={(e) => setDrawerProduct((pr) => (pr ? { ...pr, code: e.target.value } : pr))}
                     className="w-full border rounded-lg p-3 text-sm bg-white dark:bg-slate-800"
                   />
                 </div>
@@ -867,34 +755,21 @@ export default function InventoryPage() {
                   </label>
                   <input
                     type="number"
-                    value={drawerProduct?.default_purchase || ""}
+                    value={drawerProduct.default_purchase || 0}
                     onChange={(e) =>
-                      setDrawerProduct((pr) =>
-                        pr
-                          ? { ...pr, default_purchase: Number(e.target.value) }
-                          : pr
-                      )
+                      setDrawerProduct((pr) => (pr ? { ...pr, default_purchase: Number(e.target.value) } : pr))
                     }
                     className="w-full border rounded-lg p-3 text-sm dark:bg-slate-800"
-                    style={{
-                      background: "#ffa2a2",
-                      border: 1,
-                      borderColor: "black",
-                      borderRadius: 15,
-                    }}
+                    style={{ background: "#ffa2a2", border: 1, borderColor: "black", borderRadius: 15 }}
                   />
                 </div>
                 <div className="space-y-2">
                   <label className="block text-sm font-medium">Margen %</label>
                   <input
                     type="number"
-                    value={drawerProduct?.margin_percent || ""}
+                    value={drawerProduct.margin_percent || 0}
                     onChange={(e) =>
-                      setDrawerProduct((pr) =>
-                        pr
-                          ? { ...pr, margin_percent: Number(e.target.value) }
-                          : pr
-                      )
+                      setDrawerProduct((pr) => (pr ? { ...pr, margin_percent: Number(e.target.value) } : pr))
                     }
                     className="w-full border rounded-lg p-3 text-sm bg-white dark:bg-slate-800"
                   />
@@ -903,18 +778,14 @@ export default function InventoryPage() {
                   <label className="block text-sm font-medium">Precio Venta</label>
                   <input
                     type="number"
-                    value={salePrice || ""}
+                    value={salePrice || 0}
                     onChange={(e) => setSalePrice(Number(e.target.value))}
                     className="w-full border rounded-lg p-3 text-sm bg-white dark:bg-slate-800"
                   />
                   <div className="text-xs italic text-gray-500 mt-1">
                     Sugerido:{" "}
-                    {new Intl.NumberFormat("es-AR", {
-                      style: "currency",
-                      currency: "ARS",
-                    }).format(
-                      (drawerProduct!.default_purchase || 0) *
-                      (1 + (drawerProduct!.margin_percent || 0) / 100)
+                    {new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS" }).format(
+                      (drawerProduct.default_purchase || 0) * (1 + (drawerProduct.margin_percent || 0) / 100)
                     )}
                   </div>
                 </div>
@@ -927,12 +798,8 @@ export default function InventoryPage() {
               <label className="inline-flex items-center gap-2 cursor-pointer select-none">
                 <input
                   type="checkbox"
-                  checked={!!drawerProduct?.entryManual}
-                  onChange={(e) =>
-                    setDrawerProduct((pr) =>
-                      pr ? { ...pr, entryManual: e.target.checked } : pr
-                    )
-                  }
+                  checked={!!drawerProduct.entryManual}
+                  onChange={(e) => setDrawerProduct((pr) => (pr ? { ...pr, entryManual: e.target.checked } : pr))}
                   className="h-4 w-4 accent-black"
                 />
                 <span className="text-sm">
@@ -940,62 +807,43 @@ export default function InventoryPage() {
                 </span>
               </label>
               <p className="text-xs text-gray-500">
-                Si está desactivado, el producto sólo se podrá vender por <i>scanner</i> o
-                accesos directos.
+                Si está desactivado, el producto sólo se podrá vender por <i>scanner</i> o accesos directos.
               </p>
             </div>
 
-            <div className="bg-slate-50 dark:bg-slate-900 rounded-xl p-6 shadow-md space-y-4">
-              <h3 className="text-lg font-semibold mb-2">Stock por Local</h3>
-              {businesses.map((b) => {
-                const current = editableStocks[b.id] ?? 0;
-
-                return (
-                  <div
-                    key={b.id}
-                    className="flex justify-between items-center bg-slate-50 dark:bg-slate-800 p-3 rounded-lg"
-                  >
-                    <span className="text-sm font-medium">{b.name}</span>
-                    <div className="flex flex-col md:flex-row items-start md:items-center gap-2 md:gap-4">
-                      <span className="text-sm text-gray-700">
-                        Stock actual: <span className="font-semibold">{current}</span>
-                      </span>
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => openStockModal("add", b.id)}
-                          className="px-3 py-1 rounded-md text-sm bg-green-600 text-white hover:bg-green-700"
-                        >
-                          Agregar stock
-                        </button>
-                        <button
-                          onClick={() => openStockModal("remove", b.id)}
-                          className="px-3 py-1 rounded-md text-sm bg-red-600 text-white hover:bg-red-700"
-                        >
-                          Quitar stock
-                        </button>
-                      </div>
-                    </div>
+            {/* Stock por sucursal (SOLO la activa) */}
+            <div className="bg-slate-50 dark:bg-slate-900 rounded-xl p-6 shadow-md space-y-4 mt-6">
+              <h3 className="text-lg font-semibold mb-2">Stock en {selectedBranch?.name}</h3>
+              <div className="flex justify-between items-center bg-slate-50 dark:bg-slate-800 p-3 rounded-lg">
+                <span className="text-sm font-medium">{selectedBranch?.name}</span>
+                <div className="flex flex-col md:flex-row items-start md:items-center gap-2 md:gap-4">
+                  <span className="text-sm text-gray-700">
+                    Stock actual: <span className="font-semibold">{editableStocks[selectedBranchId] ?? 0}</span>
+                  </span>
+                  <div className="flex gap-2">
+                    <button onClick={() => openStockModal("add")} className="px-3 py-1 rounded-md text-sm bg-green-600 text-white hover:bg-green-700">
+                      Agregar stock
+                    </button>
+                    <button onClick={() => openStockModal("remove")} className="px-3 py-1 rounded-md text-sm bg-red-600 text-white hover:bg-red-700">
+                      Quitar stock
+                    </button>
                   </div>
-                );
-              })}
+                </div>
+              </div>
             </div>
 
             <div className="flex justify-end gap-4 mt-10">
               <button
                 onClick={closeDrawer}
                 disabled={isSaving}
-                className={`px-6 py-3 border rounded-lg text-sm font-medium ${isSaving ? "bg-gray-100 cursor-not-allowed" : "hover:bg-gray-100"
-                  }`}
+                className={`px-6 py-3 border rounded-lg text-sm font-medium ${isSaving ? "bg-gray-100 cursor-not-allowed" : "hover:bg-gray-100"}`}
               >
                 CANCELAR
               </button>
               <button
                 onClick={saveAll}
                 disabled={isSaving}
-                className={`px-6 py-3 rounded-lg text-sm font-semibold transition ${isSaving
-                    ? "bg-gray-400 text-white cursor-not-allowed"
-                    : "bg-green-600 text-white hover:bg-green-700"
-                  }`}
+                className={`px-6 py-3 rounded-lg text-sm font-semibold transition ${isSaving ? "bg-gray-400 text-white cursor-not-allowed" : "bg-green-600 text-white hover:bg-green-700"}`}
               >
                 CONFIRMAR CAMBIOS
               </button>
@@ -1004,20 +852,14 @@ export default function InventoryPage() {
         </div>
       )}
 
-      {isStockModalOpen && stockModalAction && stockModalBusiness && (
+      {/* Modal de stock */}
+      {isStockModalOpen && drawerProduct && selectedBranchId && (
         <div className="fixed inset-0 flex z-50 items-center justify-center">
-          <div
-            className="absolute inset-0 bg-black/50"
-            onClick={() => setIsStockModalOpen(false)}
-          />
+          <div className="absolute inset-0 bg-black/50" onClick={() => setIsStockModalOpen(false)} />
           <div className="relative z-10 bg-white dark:bg-slate-800 p-6 rounded-xl shadow-xl max-w-md w-full space-y-4">
-            <h3 className="text-xl font-semibold">
-              {stockModalAction === "add" ? "Agregar Stock" : "Quitar Stock"}
-            </h3>
+            <h3 className="text-xl font-semibold">{stockModalAction === "add" ? "Agregar Stock" : "Quitar Stock"}</h3>
             <p className="text-sm text-gray-600 dark:text-gray-300">
-              ¿Cuántas unidades querés{" "}
-              {stockModalAction === "add" ? "agregar" : "quitar"} en{" "}
-              {businesses.find((b) => b.id === stockModalBusiness)?.name}?
+              ¿Cuántas unidades querés {stockModalAction === "add" ? "agregar" : "quitar"} en {selectedBranch?.name}?
             </p>
             <input
               type="number"
@@ -1031,11 +873,7 @@ export default function InventoryPage() {
                 <label className="block text-sm mb-1">Motivo</label>
                 <select
                   value={stockModalReason}
-                  onChange={(e) =>
-                    setStockModalReason(
-                      e.target.value as "Perdida" | "Actualizacion"
-                    )
-                  }
+                  onChange={(e) => setStockModalReason(e.target.value as "Perdida" | "Actualizacion")}
                   className="w-full border rounded-md p-2 bg-white dark:bg-slate-900"
                 >
                   <option value="Perdida">Pérdida</option>
@@ -1043,21 +881,14 @@ export default function InventoryPage() {
                 </select>
               </div>
             )}
-
             <div className="flex justify-end gap-2">
-              <button
-                onClick={() => setIsStockModalOpen(false)}
-                className="px-4 py-2 rounded-md border hover:bg-gray-100 dark:hover:bg-slate-700"
-              >
+              <button onClick={() => setIsStockModalOpen(false)} className="px-4 py-2 rounded-md border hover:bg-gray-100 dark:hover:bg-slate-700">
                 Cancelar
               </button>
               <button
                 onClick={handleConfirmStockModal}
                 disabled={isModalSubmitting}
-                className={`px-4 py-2 rounded-md text-white ${isModalSubmitting
-                    ? "bg-gray-400 cursor-not-allowed"
-                    : "bg-green-600 hover:bg-green-700"
-                  }`}
+                className={`px-4 py-2 rounded-md text-white ${isModalSubmitting ? "bg-gray-400 cursor-not-allowed" : "bg-green-600 hover:bg-green-700"}`}
               >
                 {isModalSubmitting ? "Procesando..." : "Confirmar"}
               </button>
