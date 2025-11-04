@@ -252,22 +252,35 @@ export default function InventoryByBranchPage() {
     let list = base.filter((item) => {
       const { category } = extractCategory(item.name);
       const matchesCategory = selectedCategory ? category === selectedCategory : true;
+
       const q = searchTerm.toLowerCase();
       const matchesSearch = !q
         ? true
         : item.name.toLowerCase().includes(q) || item.code.toLowerCase().includes(q);
+
       return matchesCategory && matchesSearch;
     });
 
+    // Ordenamiento:
+    // - Si hay sortOrder => ordena por precio de venta (asc/desc)
+    // - Si NO hay sortOrder => ordena por STOCK (desc) en la sucursal seleccionada
     if (sortOrder) {
       list = [...list].sort((a, b) =>
         sortOrder === "asc"
           ? a.default_selling - b.default_selling
           : b.default_selling - a.default_selling
       );
+    } else {
+      list = [...list].sort((a, b) => {
+        const sa = (a.stocks[selectedBranchId] ?? 0);
+        const sb = (b.stocks[selectedBranchId] ?? 0);
+        return sb - sa; // más stock primero
+      });
     }
+
     return list;
   }, [inventory, searchTerm, selectedCategory, sortOrder, selectedBranchId]);
+
 
   /* Reset de página ante cambios */
   useEffect(() => {
@@ -453,7 +466,7 @@ export default function InventoryByBranchPage() {
       if (conflict) {
         alert(
           `Atención: el stock en ${selectedBranch?.name ?? selectedBranchId} cambió mientras editabas.\n` +
-            `No se guardó para evitar sobrescrituras.`
+          `No se guardó para evitar sobrescrituras.`
         );
       }
 
@@ -612,9 +625,8 @@ export default function InventoryByBranchPage() {
           <button
             onClick={openNew}
             disabled={!selectedBranchId}
-            className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium ${
-              selectedBranchId ? "bg-indigo-600 text-white hover:bg-indigo-700" : "bg-gray-300 text-gray-600 cursor-not-allowed"
-            }`}
+            className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium ${selectedBranchId ? "bg-indigo-600 text-white hover:bg-indigo-700" : "bg-gray-300 text-gray-600 cursor-not-allowed"
+              }`}
           >
             + Agregar Producto
           </button>
