@@ -47,6 +47,7 @@ function extractCategory(name: string): { category: Category; base: string } {
 export type InventoryItem = {
   id: string;
   code: string;
+  codes_asociados?: string[];      // ⬅️ nuevos códigos secundarios
   name: string;
   default_purchase: number;
   margin_percent: number;
@@ -101,6 +102,9 @@ export default function InventoryByBranchPage() {
     () => businesses.find((b) => b.id === selectedBranchId) || null,
     [businesses, selectedBranchId]
   );
+  // 🔁 Estados nuevos para manejar chips de códigos secundarios
+  const [codesAsociados, setCodesAsociados] = useState<string[]>([]);
+  const [codeDraft, setCodeDraft] = useState<string>(""); // input temporal
 
   /* Estados UI */
   const [searchTerm, setSearchTerm] = useState("");
@@ -150,18 +154,21 @@ export default function InventoryByBranchPage() {
           map[r.product_id][r.business_id] = r.stock;
         });
 
+        // 🔁 Al setInventory() (cuando mapeás masters → InventoryItem):
         setInventory(
           masters.map((m: any) => ({
             id: m.id,
             code: m.code,
+            codes_asociados: Array.isArray(m.codes_asociados) ? m.codes_asociados : [], // ⬅️ safe
             name: m.name,
             default_purchase: m.default_purchase,
             margin_percent: m.margin_percent,
             default_selling: m.default_selling,
             stocks: map[m.id] || {},
-            entryManual: !!(m.entryManual ?? m.entryManual ?? false),
+            entryManual: !!(m.entryManual ?? false),
           }))
         );
+
       } finally {
         setLoading(false);
       }
@@ -177,7 +184,7 @@ export default function InventoryByBranchPage() {
     while (true) {
       const { data, error } = await supabase
         .from("products_master")
-        .select("id, code, name, default_purchase, margin_percent, default_selling, entryManual")
+        .select("id, code, name, default_purchase, margin_percent, default_selling, entryManual, codes_asociados")
         .is("deleted_at", null)
         .range(from, from + step - 1);
       if (error) throw error;
@@ -212,6 +219,7 @@ export default function InventoryByBranchPage() {
     setDrawerProduct({
       id: "",
       code: "",
+      codes_asociados: [],         // ⬅️
       name: "",
       default_purchase: 0,
       margin_percent: 0,
@@ -219,6 +227,8 @@ export default function InventoryByBranchPage() {
       stocks: { [selectedBranchId]: 0 },
       entryManual: false,
     });
+    setCodesAsociados([]);         // ⬅️
+    setCodeDraft("");              // ⬅️
     setDrawerCategory("SIN CATEGORIA");
     setDrawerBase("");
     setSalePrice(0);
@@ -232,6 +242,8 @@ export default function InventoryByBranchPage() {
     setSalePrice(item.default_selling);
     setDrawerCategory(category);
     setDrawerBase(base);
+    setCodesAsociados(Array.isArray(item.codes_asociados) ? item.codes_asociados : []); // ⬅️
+    setCodeDraft(""); // ⬅️
   }
   function closeDrawer() {
     setDrawerProduct(null);
@@ -255,9 +267,13 @@ export default function InventoryByBranchPage() {
       const matchesCategory = selectedCategory ? category === selectedCategory : true;
 
       const q = searchTerm.toLowerCase();
+      // 🔁 En el filtrado (const filtered = useMemo(...)):
       const matchesSearch = !q
         ? true
-        : item.name.toLowerCase().includes(q) || item.code.toLowerCase().includes(q);
+        : item.name.toLowerCase().includes(q)
+        || item.code.toLowerCase().includes(q)
+        || (Array.isArray(item.codes_asociados) && item.codes_asociados.some(cs => cs.toLowerCase().includes(q))); // ⬅️
+
 
       return matchesCategory && matchesSearch;
     });
@@ -349,7 +365,8 @@ export default function InventoryByBranchPage() {
     setIsSaving(true);
     try {
       const oldStocks = { ...(drawerProduct.stocks || {}) };
-      const newName = drawerCategory === "SIN CATEGORIA" ? drawerBase : `${drawerCategory} ${drawerBase}`;
+      const newName =
+        drawerCategory === "SIN CATEGORIA" ? drawerBase : `${drawerCategory} ${drawerBase}`;
       let prodId = drawerProduct.id;
 
       // 1) Crear o actualizar master
@@ -358,6 +375,7 @@ export default function InventoryByBranchPage() {
           .from("products_master")
           .insert({
             code: drawerProduct.code,
+            codes_asociados: codesAsociados,
             name: newName,
             entryManual: !!drawerProduct.entryManual,
             default_purchase: drawerProduct.default_purchase,
@@ -372,6 +390,7 @@ export default function InventoryByBranchPage() {
           .from("products_master")
           .update({
             code: drawerProduct.code,
+            codes_asociados: codesAsociados,
             name: newName,
             default_purchase: drawerProduct.default_purchase,
             margin_percent: drawerProduct.margin_percent,
@@ -383,22 +402,29 @@ export default function InventoryByBranchPage() {
       }
 
       // 2) Detectar cambio real SOLO en la sucursal activa
-      const old = (oldStocks[selectedBranchId] ?? 0);
-      const next = (editableStocks[selectedBranchId] ?? 0);
+      const old = oldStocks[selectedBranchId] ?? 0;
+      const next = editableStocks[selectedBranchId] ?? 0;
       const changed = old !== next;
+
+      // ⚠️ Preparar siempre newStocksApplied (se usa en ambos branches)
+      const newStocksApplied: Record<string, number> = { ...(drawerProduct.stocks || {}) };
+      if (changed) newStocksApplied[selectedBranchId] = next;
 
       if (!changed) {
         // Actualizar estado local de master y salir
-        setInventory((prev) => prev.filter((it) => it.id !== prodId).concat({
-          id: prodId,
-          code: drawerProduct.code,
-          name: newName,
-          default_purchase: drawerProduct.default_purchase,
-          margin_percent: drawerProduct.margin_percent,
-          default_selling: salePrice,
-          stocks: { ...drawerProduct.stocks },
-          entryManual: !!drawerProduct.entryManual,
-        }));
+        setInventory((prev) =>
+          prev.filter((it) => it.id !== prodId).concat({
+            id: prodId,
+            code: drawerProduct.code,
+            codes_asociados: codesAsociados,
+            name: newName,
+            default_purchase: drawerProduct.default_purchase,
+            margin_percent: drawerProduct.margin_percent,
+            default_selling: salePrice,
+            stocks: newStocksApplied, // ya existe
+            entryManual: !!drawerProduct.entryManual,
+          })
+        );
         setIsSaving(false);
         closeDrawer();
         return;
@@ -444,12 +470,11 @@ export default function InventoryByBranchPage() {
         }
       }
 
-      // 6) Log Actualización SOLO si aplicó y motivo no es Pérdida inmediata
+      // 6) Log Actualización (si aplicó)
       if (!conflict && old !== next) {
-        const nameFinal = newName;
         const details = user?.name
-          ? `${user.name} cambió stock de ${nameFinal} en ${selectedBranch?.name ?? selectedBranchId}: ${old} → ${next}`
-          : `Cambio stock de ${nameFinal} en ${selectedBranch?.name ?? selectedBranchId}: ${old} → ${next}`;
+          ? `${user.name} cambió stock de ${newName} en ${selectedBranch?.name ?? selectedBranchId}: ${old} → ${next}`
+          : `Cambio stock de ${newName} en ${selectedBranch?.name ?? selectedBranchId}: ${old} → ${next}`;
         try {
           await supabase.from("activities").insert({
             business_id: selectedBranchId,
@@ -472,19 +497,19 @@ export default function InventoryByBranchPage() {
       }
 
       // 7) Actualizar estado local
-      const newStocksApplied: Record<string, number> = { ...(drawerProduct.stocks || {}) };
-      if (!conflict) newStocksApplied[selectedBranchId] = next;
-
-      setInventory((prev) => prev.filter((it) => it.id !== prodId).concat({
-        id: prodId,
-        code: drawerProduct.code,
-        name: newName,
-        default_purchase: drawerProduct.default_purchase,
-        margin_percent: drawerProduct.margin_percent,
-        default_selling: salePrice,
-        stocks: newStocksApplied,
-        entryManual: !!drawerProduct.entryManual,
-      }));
+      setInventory((prev) =>
+        prev.filter((it) => it.id !== prodId).concat({
+          id: prodId,
+          code: drawerProduct.code,
+          codes_asociados: codesAsociados,
+          name: newName,
+          default_purchase: drawerProduct.default_purchase,
+          margin_percent: drawerProduct.margin_percent,
+          default_selling: salePrice,
+          stocks: conflict ? (drawerProduct.stocks || {}) : newStocksApplied,
+          entryManual: !!drawerProduct.entryManual,
+        })
+      );
 
       setIsSaving(false);
       if (!conflict) closeDrawer();
@@ -494,6 +519,7 @@ export default function InventoryByBranchPage() {
       setIsSaving(false);
     }
   }
+
 
   /* UI: filas */
   const productRows = useMemo(() => {
@@ -766,8 +792,8 @@ export default function InventoryByBranchPage() {
                     className="w-full border rounded-lg p-3 text-sm bg-white dark:bg-slate-800"
                   />
                 </div>
-                <div className="space-y-2">
-                  <label className="block text-sm font-medium">Código</label>
+                <div className="space-y-2 md:col-span-2">
+                  <label className="block text-sm font-medium">Código principal</label>
                   <input
                     type="text"
                     value={drawerProduct.code || ""}
@@ -775,6 +801,137 @@ export default function InventoryByBranchPage() {
                     className="w-full border rounded-lg p-3 text-sm bg-white dark:bg-slate-800"
                   />
                 </div>
+                {/* Códigos secundarios (chips) */}
+                <div className="space-y-2 md:col-span-2">
+                  {/* Chips */}
+                  {/* Códigos secundarios (responsive + táctil) */}
+                  <div className="space-y-2 md:col-span-2">
+                    <label className="block text-sm font-medium">Códigos secundarios</label>
+
+                    {/* Input + acciones */}
+                    <div className="flex flex-col sm:flex-row gap-2">
+                      <input
+                        type="text"
+                        value={codeDraft}
+                        onChange={(e) => setCodeDraft(e.target.value)}
+                        onPaste={(e) => {
+                          const text = e.clipboardData.getData("text");
+                          if (!text || text.trim() === "") return;
+                          const parts = text.split(/[\s,;\n\r]+/).map(s => s.trim()).filter(Boolean);
+                          if (parts.length <= 1) return; // deja que el paste normal siga si es 1
+                          e.preventDefault();
+                          setCodesAsociados(prev => {
+                            const set = new Set(prev);
+                            parts.forEach(p => set.add(p));
+                            return Array.from(set);
+                          });
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === ",") {
+                            e.preventDefault();
+                            const raw = (codeDraft || "").trim();
+                            if (!raw) return;
+                            setCodesAsociados((prev) => (prev.includes(raw) ? prev : [...prev, raw]));
+                            setCodeDraft("");
+                          } else if (e.key === "Backspace" && !codeDraft) {
+                            // backspace con input vacío: borra el último chip (gesto útil en tablet)
+                            setCodesAsociados((prev) => prev.slice(0, -1));
+                          }
+                        }}
+                        placeholder="Escribí un código y Enter (podés pegar varios)"
+                        className="w-full border rounded-lg p-3 text-sm bg-white dark:bg-slate-800"
+                        inputMode="text"
+                        autoComplete="off"
+                      />
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const raw = (codeDraft || "").trim();
+                            if (!raw) return;
+                            setCodesAsociados((prev) => (prev.includes(raw) ? prev : [...prev, raw]));
+                            setCodeDraft("");
+                          }}
+                          className="px-4 py-2 rounded-md text-sm font-medium bg-indigo-600 text-white hover:bg-indigo-700 active:scale-[.98]"
+                        >
+                          Agregar
+                        </button>
+                        {codesAsociados.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (confirm("¿Limpiar todos los códigos secundarios?")) setCodesAsociados([]);
+                            }}
+                            className="px-4 py-2 rounded-md text-sm font-medium bg-slate-200 text-slate-800 hover:bg-slate-300 active:scale-[.98]"
+                          >
+                            Limpiar
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Contenedor de chips: scrollable horizontal en móvil, grid en desktop */}
+                    <div className="
+      flex sm:grid gap-2 sm:grid-cols-2 lg:grid-cols-3
+      overflow-x-auto no-scrollbar py-1 -mx-1 px-1
+    ">
+                      {codesAsociados.length === 0 && (
+                        <span className="text-xs text-gray-500">Sin códigos secundarios cargados</span>
+                      )}
+
+                      {codesAsociados.map((c) => (
+                        <div
+                          key={c}
+                          className="
+          group shrink-0 sm:shrink sm:w-auto
+          inline-flex items-center justify-between
+          rounded-full border border-slate-300 dark:border-slate-600
+          bg-slate-100/80 dark:bg-slate-700/60
+          px-3 py-2 min-h-[38px] gap-2
+          max-w-[85vw] sm:max-w-none
+        "
+                          title={c}
+                        >
+                          <span className="text-xs font-medium text-slate-800 dark:text-slate-100 truncate max-w-[60vw] sm:max-w-[16rem]">
+                            {c}
+                          </span>
+
+                          <div className="flex items-center gap-1">
+                            {/* Copiar */}
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                try { await navigator.clipboard.writeText(c); } catch { }
+                              }}
+                              className="rounded-full p-1.5 text-[10px] leading-none bg-white/60 dark:bg-slate-800/60 hover:bg-white dark:hover:bg-slate-800 border border-slate-300 dark:border-slate-600"
+                              aria-label={`Copiar ${c}`}
+                              title="Copiar"
+                            >
+                              ⧉
+                            </button>
+
+                            {/* Eliminar: botón grande para táctil */}
+                            <button
+                              type="button"
+                              onClick={() => setCodesAsociados((prev) => prev.filter((x) => x !== c))}
+                              className="rounded-full p-1.5 text-[12px] leading-none bg-red-100/80 text-red-700 hover:bg-red-200 border border-red-200 min-w-[28px] min-h-[28px]"
+                              aria-label={`Eliminar ${c}`}
+                              title="Eliminar"
+                            >
+                              ×
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* contador */}
+                    <div className="text-[11px] text-slate-500">{codesAsociados.length} código(s)</div>
+                  </div>
+
+
+                </div>
+
                 <div className="space-y-2">
                   <label className="block text-sm font-medium">
                     Precio Compra - <b style={{ fontSize: 18 }}>VERIFICAR SIEMPRE</b>

@@ -492,6 +492,7 @@ export default function NewSalePage() {
         const prodsWithStock = acc.map((p) => ({
           ...p,
           stock: stockMap[p.id.toString()] ?? 0,
+          codes_asociados: Array.isArray(p.codes_asociados) ? p.codes_asociados : [], // ⬅️
         }));
 
         // 3. Cargar promociones activas
@@ -569,13 +570,19 @@ export default function NewSalePage() {
   const filteredProducts = useMemo(() => {
     if (!debouncedSearch.trim()) return [];
     const q = debouncedSearch.toLowerCase();
-    return products.filter(
-      (p) =>
-        p.name?.toLowerCase().includes(q) ||
-        p.code?.toLowerCase().includes(q) ||
-        p.description?.toLowerCase().includes(q)
-    );
+
+    return products.filter((p) => {
+      const inName = p.name?.toLowerCase().includes(q);
+      const inCode = p.code?.toLowerCase().includes(q);
+      const inDesc = p.description?.toLowerCase().includes(q);
+      const inCodesAsociados =
+        Array.isArray(p.codes_asociados) &&
+        p.codes_asociados.some((c: any) => String(c).toLowerCase().includes(q)); // ⬅️
+
+      return inName || inCode || inDesc || inCodesAsociados;
+    });
   }, [debouncedSearch, products]);
+
 
   /* ─ Cart helpers ─ */
   const toastSinStock = () => {
@@ -674,6 +681,7 @@ export default function NewSalePage() {
         const { data, error } = await supabase
           .from("products_master")
           .select("*")
+          .is("deleted_at", null)
           .range(from, to);
         if (error) throw error;
         acc = acc.concat(data ?? []);
@@ -685,6 +693,7 @@ export default function NewSalePage() {
       const prodsWithStock = acc.map((p) => ({
         ...p,
         stock: stockMap[p.id.toString()] ?? 0,
+        codes_asociados: Array.isArray(p.codes_asociados) ? p.codes_asociados : [], // ⬅️
       }));
 
       // 4. Promos
@@ -1026,12 +1035,19 @@ export default function NewSalePage() {
 
     const scannedCode = debouncedScannerValue.toLowerCase();
 
-    // 1. Buscamos **todos** los productos con ese código
-    const matches = products.filter(
-      p => p.code?.toLowerCase() === scannedCode
-    );
+    // ✅ Match exacto contra code y codes_asociados
+    const matches = products.filter((p) => {
+      const allCodes = [
+        p.code,
+        ...(Array.isArray(p.codes_asociados) ? p.codes_asociados : []),
+      ]
+        .filter(Boolean)
+        .map((s) => String(s).toLowerCase());
 
-    // 🔹 Log general de scanner
+      return allCodes.includes(scannedCode);
+    });
+
+    // Log + limpiar + flujo de selección como ya tenías
     logActivity({
       businessId,
       motivo: "Scanner",
@@ -1043,20 +1059,15 @@ export default function NewSalePage() {
       userName: user?.name,
     });
 
-    // 2. Limpiamos siempre el input del scanner
     setScannerValue("");
 
-    // 3. Si sólo hay uno, lo agregamos al carrito
     if (matches.length === 1) {
       addToCart(matches[0]);
-      // (Opcional) log adicional al agregar por scanner único (ya logueamos arriba)
     } else if (matches.length > 1) {
-      // 4. Si hay más de uno, abrimos el modal de selección
       setMatchingProducts(matches);
       setShowSelectModal(true);
     }
   }, [debouncedScannerValue, products, showManualSearch]);
-
 
   // Cuando el cajero elija uno de los productos duplicados:
   const handleSelectProduct = (p: any) => {
@@ -1462,12 +1473,21 @@ export function SelectProductModal({ matchingProducts, onClose, onSelect }) {
   const [filter, setFilter] = useState("");
 
   const filtered = matchingProducts
-    .filter(p => p.name.toLowerCase().includes(filter.toLowerCase()))
+    .filter((p) => {
+      const q = filter.toLowerCase();
+      const inName = p.name?.toLowerCase().includes(q);
+      const inCode = p.code?.toLowerCase().includes(q);
+      const inCodesAsociados =
+        Array.isArray(p.codes_asociados) &&
+        p.codes_asociados.some((c: any) => String(c).toLowerCase().includes(q));
+      return inName || inCode || inCodesAsociados; // ⬅️
+    })
     .sort((a, b) => {
       const aIsPromo = Array.isArray(a.products) && a.products.length > 0;
       const bIsPromo = Array.isArray(b.products) && b.products.length > 0;
-      return Number(bIsPromo) - Number(aIsPromo); // Promo arriba
+      return Number(bIsPromo) - Number(aIsPromo);
     });
+
 
 
   return (
