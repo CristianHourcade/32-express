@@ -148,6 +148,7 @@
              const { data, error } = await supabase
                .from("products_master")
                .select("id, code, name, default_purchase, margin_percent, default_selling")
+               .is("deleted_at", null)
                .range(from, to);
              if (error) throw error;
              masters = masters.concat(data ?? []);

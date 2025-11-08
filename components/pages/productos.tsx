@@ -178,6 +178,7 @@ export default function InventoryByBranchPage() {
       const { data, error } = await supabase
         .from("products_master")
         .select("id, code, name, default_purchase, margin_percent, default_selling, entryManual")
+        .is("deleted_at", null)
         .range(from, from + step - 1);
       if (error) throw error;
       all = all.concat(data || []);
@@ -557,10 +558,24 @@ export default function InventoryByBranchPage() {
               </button>
               <button
                 onClick={async () => {
-                  if (confirm(`¿Eliminar ${item.name}?`)) {
-                    await supabase.from("products_master").delete().eq("id", item.id);
+                  if (!confirm(`¿Eliminar ${item.name}?`)) return;
+
+                  try {
+                    // 1) Soft delete en products_master
+                    const { error: upErr } = await supabase
+                      .from("products_master")
+                      .update({ deleted_at: new Date().toISOString() })
+                      .eq("id", item.id);
+
+                    if (upErr) throw upErr;
+
+                    // 2) (Opcional) limpiar inventario para que no quede “colgado” en vistas antiguas
                     await supabase.from("business_inventory").delete().eq("product_id", item.id);
+
+                    // 3) Actualizar estado local
                     setInventory((prev) => prev.filter((p) => p.id !== item.id));
+                  } catch (e: any) {
+                    alert("No se pudo eliminar (soft). " + (e?.message ?? "Error desconocido"));
                   }
                 }}
                 className="flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium bg-red-600 text-white hover:bg-red-700 transition"

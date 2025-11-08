@@ -481,6 +481,7 @@ export default function NewSalePage() {
           const { data, error } = await supabase
             .from("products_master")
             .select("*")
+            .is("deleted_at", null)
             .range(from, to);
           if (error) throw error;
           acc = acc.concat(data ?? []);
