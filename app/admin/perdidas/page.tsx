@@ -17,7 +17,6 @@ import {
   addDays,
   isBefore,
   isAfter,
-  subWeeks,
   subMonths,
 } from "date-fns";
 
@@ -40,17 +39,17 @@ const CATEGORIES = [
   "BRECA",
 ];
 const ORDER_WITH_OTHERS = [...CATEGORIES, "OTROS"];
-const money = (n) => `$ ${Number(n || 0).toLocaleString("es-AR")}`;
+const money = (n: number) => `$ ${Number(n || 0).toLocaleString("es-AR")}`;
 
-function getCategoryFromName(name) {
+function getCategoryFromName(name?: string) {
   const token = String(name || "").trim().split(/\s+/)[0]?.toUpperCase();
   return CATEGORIES.includes(token) ? token : "OTROS";
 }
 
 // Semanas recientes (labels dd/MM–dd/MM)
-function getLastNWeeks(n, dateTo) {
+function getLastNWeeks(n: number, dateTo?: string) {
   const endDate = dateTo ? new Date(dateTo) : new Date();
-  const weeks = [];
+  const weeks: { label: string; start: Date; end: Date }[] = [];
   let endOfCurrentWeek = startOfWeek(endDate, { weekStartsOn: 1 });
   for (let i = n - 1; i >= 0; i--) {
     const weekStart = addWeeks(endOfCurrentWeek, -i);
@@ -64,7 +63,7 @@ function getLastNWeeks(n, dateTo) {
   return weeks;
 }
 
-function getWeeklyLossesLastN(data, dateTo) {
+function getWeeklyLossesLastN(data: any[], dateTo?: string) {
   const weeks = getLastNWeeks(4, dateTo);
   return weeks.map(({ label, start, end }) => {
     const loss = data
@@ -77,17 +76,17 @@ function getWeeklyLossesLastN(data, dateTo) {
   });
 }
 
-function getMonthsOfYear(year) {
-  const months = [];
+function getMonthsOfYear(year: number) {
+  const months: string[] = [];
   for (let i = 0; i < 12; i++) months.push(format(new Date(year, i, 1), "yyyy-MM"));
   return months;
 }
 
-function getMonthlyLossesCompleted(data, dateTo) {
+function getMonthlyLossesCompleted(data: any[], dateTo?: string) {
   const now = dateTo ? new Date(dateTo) : new Date();
   const year = now.getFullYear();
   const months = getMonthsOfYear(year);
-  const map = {};
+  const map: Record<string, number> = {};
   data.forEach((l) => {
     const month = format(startOfMonth(new Date(l.created_at)), "yyyy-MM");
     map[month] = (map[month] || 0) + (l.lost_cash || 0);
@@ -95,8 +94,8 @@ function getMonthlyLossesCompleted(data, dateTo) {
   return months.map((month) => ({ month, loss: map[month] || 0 }));
 }
 
-function getTopLostProducts(data) {
-  const map = {};
+function getTopLostProducts(data: any[]) {
+  const map: Record<string, number> = {};
   data.forEach((l) => {
     const name = l.products_master?.name || l.product_id;
     map[name] = (map[name] || 0) + (l.lost_cash || 0);
@@ -107,24 +106,27 @@ function getTopLostProducts(data) {
     .slice(0, 5);
 }
 
-function sum(arr, sel) {
-  return arr.reduce((a, x) => a + (sel ? sel(x) : x), 0);
+function sum<T>(arr: T[], sel?: (x: T) => number) {
+  return arr.reduce((a: number, x: any) => a + (sel ? sel(x) : x), 0);
 }
 
-function toCSV(rows) {
-  const header = ["Fecha", "Negocio", "Producto", "Detalle", "Pérdida $", "ProductoID"]; // export extendido
+function toCSV(rows: any[]) {
+  const header = ["Fecha", "Negocio", "Producto", "Detalle", "Motivo", "Pérdida $", "ProductoID"];
   const lines = rows.map((r) => [
     new Date(r.created_at).toLocaleDateString(),
     r.businesses?.name ?? r.business_id ?? "",
     r.products_master?.name ?? r.product_id ?? "",
     String(r.details ?? "").replaceAll("\n", " "),
+    r.motivo ?? "",
     Number(r.lost_cash || 0).toString().replace(".", ","),
     r.product_id ?? "",
   ]);
-  return [header, ...lines].map((line) => line.map((c) => `"${String(c).replaceAll('"', '""')}"`).join(",")).join("\n");
+  return [header, ...lines]
+    .map((line) => line.map((c) => `"${String(c).replaceAll('"', '""')}"`).join(","))
+    .join("\n");
 }
 
-function download(filename, text) {
+function download(filename: string, text: string) {
   const el = document.createElement("a");
   el.setAttribute("href", "data:text/plain;charset=utf-8," + encodeURIComponent(text));
   el.setAttribute("download", filename);
@@ -138,10 +140,10 @@ function download(filename, text) {
  * Página principal
  *********************************/
 export default function LossesPagePro() {
-  const [losses, setLosses] = useState([]);
+  const [losses, setLosses] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const [businesses, setBusinesses] = useState([]);
+  const [businesses, setBusinesses] = useState<any[]>([]);
   const [activeBusiness, setActiveBusiness] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
@@ -150,7 +152,9 @@ export default function LossesPagePro() {
   const [showExecutive, setShowExecutive] = useState(true);
   const [showCharts, setShowCharts] = useState(true);
   const [showTables, setShowTables] = useState(true);
-  const printRef = useRef(null);
+
+  // filtro de motivos (incluye “Perdida” y “Vencimiento”)
+  const [motivos, setMotivos] = useState<string[]>(["Perdida", "Vencimiento"]);
 
   // Cargar negocios
   useEffect(() => {
@@ -177,7 +181,7 @@ export default function LossesPagePro() {
            products_master:product_id(id, name),
            businesses:business_id(id, name)`
         )
-        .eq("motivo", "Perdida")
+        .in("motivo", motivos) // 👈 trae Perdida + Vencimiento
         .eq("business_id", activeBusiness);
 
       if (dateFrom) query = query.gte("created_at", dateFrom);
@@ -187,7 +191,7 @@ export default function LossesPagePro() {
       if (data) setLosses(data);
       setLoading(false);
     })();
-  }, [activeBusiness, dateFrom, dateTo]);
+  }, [activeBusiness, dateFrom, dateTo, motivos]);
 
   /*********************************
    * Derivados
@@ -197,28 +201,29 @@ export default function LossesPagePro() {
     [businesses, activeBusiness]
   );
 
-  const base = losses; // ya viene filtrado por business
+  const base = losses; // ya viene filtrado por business + motivos
 
   const searchQ = search.trim().toLowerCase();
-  const matchesSearch = (l) => {
+  const matchesSearch = (l: any) => {
     if (!searchQ) return true;
     const name = (l.products_master?.name || "").toLowerCase();
     const details = String(l.details || "").toLowerCase();
     const pid = String(l.product_id || "").toLowerCase();
-    return name.includes(searchQ) || details.includes(searchQ) || pid.includes(searchQ);
+    const motivo = String(l.motivo || "").toLowerCase();
+    return name.includes(searchQ) || details.includes(searchQ) || pid.includes(searchQ) || motivo.includes(searchQ);
   };
 
   const filtered = useMemo(() => base.filter(matchesSearch), [base, searchQ]);
-  const totalLost = useMemo(() => sum(filtered, (x) => x.lost_cash || 0), [filtered]);
+  const totalLost = useMemo(() => sum(filtered, (x: any) => x.lost_cash || 0), [filtered]);
 
-  // Tendencias vs período anterior (semanas y meses)
+  // Tendencias
   const weeklyData = useMemo(() => getWeeklyLossesLastN(filtered, dateTo), [filtered, dateTo]);
   const monthlyData = useMemo(() => getMonthlyLossesCompleted(filtered, dateTo), [filtered, dateTo]);
   const topProducts = useMemo(() => getTopLostProducts(filtered), [filtered]);
 
   // Por categoría
   const groupedByCategory = useMemo(() => {
-    const groups = {};
+    const groups: Record<string, any[]> = {};
     for (const l of filtered) {
       const cat = getCategoryFromName(l.products_master?.name);
       if (!groups[cat]) groups[cat] = [];
@@ -230,7 +235,7 @@ export default function LossesPagePro() {
   const categoryMetrics = useMemo(() => {
     return ORDER_WITH_OTHERS.map((cat) => {
       const arr = groupedByCategory[cat] || [];
-      const loss = sum(arr, (x) => x.lost_cash || 0);
+      const loss = sum(arr, (x: any) => x.lost_cash || 0);
       return { cat, count: arr.length, loss };
     }).filter((m) => m.count > 0 || m.loss > 0);
   }, [groupedByCategory]);
@@ -246,14 +251,20 @@ export default function LossesPagePro() {
   }, [dateTo]);
 
   const weekChange = useMemo(() => {
-    const cur = sum(filtered.filter((l) => {
-      const d = new Date(l.created_at);
-      return d >= lastWeekRange.start && d <= lastWeekRange.end;
-    }), (x) => x.lost_cash || 0);
-    const prev = sum(filtered.filter((l) => {
-      const d = new Date(l.created_at);
-      return d >= lastWeekRange.prevStart && d <= lastWeekRange.prevEnd;
-    }), (x) => x.lost_cash || 0);
+    const cur = sum(
+      filtered.filter((l) => {
+        const d = new Date(l.created_at);
+        return d >= lastWeekRange.start && d <= lastWeekRange.end;
+      }),
+      (x: any) => x.lost_cash || 0
+    );
+    const prev = sum(
+      filtered.filter((l) => {
+        const d = new Date(l.created_at);
+        return d >= lastWeekRange.prevStart && d <= lastWeekRange.prevEnd;
+      }),
+      (x: any) => x.lost_cash || 0
+    );
     const diff = cur - prev;
     const pct = prev === 0 ? null : (diff / prev) * 100;
     return { cur, prev, diff, pct };
@@ -269,14 +280,20 @@ export default function LossesPagePro() {
   }, [dateTo]);
 
   const monthChange = useMemo(() => {
-    const cur = sum(filtered.filter((l) => {
-      const d = new Date(l.created_at);
-      return d >= lastMonthRange.start && d <= lastMonthRange.end;
-    }), (x) => x.lost_cash || 0);
-    const prev = sum(filtered.filter((l) => {
-      const d = new Date(l.created_at);
-      return d >= lastMonthRange.prevStart && d <= lastMonthRange.prevEnd;
-    }), (x) => x.lost_cash || 0);
+    const cur = sum(
+      filtered.filter((l) => {
+        const d = new Date(l.created_at);
+        return d >= lastMonthRange.start && d <= lastMonthRange.end;
+      }),
+      (x: any) => x.lost_cash || 0
+    );
+    const prev = sum(
+      filtered.filter((l) => {
+        const d = new Date(l.created_at);
+        return d >= lastMonthRange.prevStart && d <= lastMonthRange.prevEnd;
+      }),
+      (x: any) => x.lost_cash || 0
+    );
     const diff = cur - prev;
     const pct = prev === 0 ? null : (diff / prev) * 100;
     return { cur, prev, diff, pct };
@@ -296,22 +313,25 @@ export default function LossesPagePro() {
     const cat = categoryMetrics
       .sort((a, b) => b.loss - a.loss)
       .slice(0, 5)
-      .map((c, i) => `${i + 1}. ${c.cat}: ${money(c.loss)} (${c.count} regs)`) 
+      .map((c, i) => `${i + 1}. ${c.cat}: ${money(c.loss)} (${c.count} regs)`)
       .join("\n");
-    const txt = `📍 Reporte de pérdidas — ${activeName}\nPeriodo: ${dateFrom || "(sin inicio)"} al ${dateTo || "(hoy)"}\nTotal: ${money(totalLost)}\n\nTOP productos:\n${top || "—"}\n\nTOP categorías:\n${cat || "—"}`;
+    const txt = `📍 Reporte de pérdidas — ${activeName}\nPeriodo: ${dateFrom || "(sin inicio)"} al ${dateTo || "(hoy)"}\nTotal: ${money(
+      totalLost
+    )}\n\nTOP productos:\n${top || "—"}\n\nTOP categorías:\n${cat || "—"}`;
     navigator.clipboard?.writeText(txt);
   }
 
   function openPrintableReport() {
     const now = new Date();
     const rows = filtered
-      .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+      .sort((a, b) => +new Date(a.created_at) - +new Date(b.created_at))
       .map(
         (l) => `
           <tr>
             <td>${new Date(l.created_at).toLocaleDateString()}</td>
             <td>${(l.products_master?.name || l.product_id || "").replaceAll("<", "&lt;")}</td>
             <td>${String(l.details || "").replaceAll("<", "&lt;")}</td>
+            <td>${String(l.motivo || "").replaceAll("<", "&lt;")}</td>
             <td style="text-align:right">${(l.lost_cash || 0).toLocaleString("es-AR")}</td>
           </tr>`
       )
@@ -343,22 +363,24 @@ export default function LossesPagePro() {
         <div class="grid" style="margin:18px 0 22px">
           <div class="card"><div class="muted">Total perdido</div><div style="font-weight:700; font-size:18px">${money(totalLost)}</div></div>
           <div class="card"><div class="muted">Registros</div><div style="font-weight:700; font-size:18px">${filtered.length}</div></div>
-          <div class="card"><div class="muted">Top producto</div><div style="font-weight:700; font-size:14px">${topProducts[0]?.name || "—"}</div></div>
+          <div class="card"><div class="muted">Top producto</div><div style="font-weight:700; font-size:14px">${(topProducts[0]?.name || "—")
+            .toString()
+            .replaceAll("<", "&lt;")}</div></div>
         </div>
 
         <h2>Detalle</h2>
         <table>
           <thead>
-            <tr><th>Fecha</th><th>Producto</th><th>Detalle</th><th style="text-align:right">Pérdida $</th></tr>
+            <tr><th>Fecha</th><th>Producto</th><th>Detalle</th><th>Motivo</th><th style="text-align:right">Pérdida $</th></tr>
           </thead>
           <tbody>
             ${rows || ""}
           </tbody>
           <tfoot>
-            <tr><td></td><td></td><td style="text-align:right">TOTAL</td><td style="text-align:right">${totalLost.toLocaleString("es-AR")}</td></tr>
+            <tr><td></td><td></td><td></td><td style="text-align:right">TOTAL</td><td style="text-align:right">${totalLost.toLocaleString("es-AR")}</td></tr>
           </tfoot>
         </table>
-      </body></nhtml>`;
+      </body></html>`;
 
     const w = window.open("", "_blank");
     w?.document.write(body);
@@ -369,25 +391,37 @@ export default function LossesPagePro() {
    * Render
    *********************************/
   return (
-    <div className="min-h-screen p-6  from-slate-50 to-white">
+    <div className="min-h-screen p-6 from-slate-50 to-white">
       <div className="mx-auto max-w-7xl">
         <div className="bg-white rounded-3xl shadow-xl p-6 md:p-8 space-y-8 border border-slate-100">
           {/* Header */}
           <header className="flex flex-col gap-4 md:flex-row md:items-end md:gap-6">
             <div className="flex-1 space-y-1">
               <h1 className="text-2xl font-bold text-slate-900">Pérdidas</h1>
-              <p className="text-slate-500 text-sm">Controla pérdidas por negocio, filtra por rango de fechas y genera reportes ejecutivos.</p>
+              <p className="text-slate-500 text-sm">
+                Controla pérdidas por negocio, filtra por rango de fechas y genera reportes ejecutivos.
+              </p>
             </div>
 
             {/* Rango de fechas */}
             <div className="flex gap-3">
               <div>
                 <label className="block text-xs font-medium text-slate-600 mb-1">Desde</label>
-                <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="border rounded-lg px-3 py-1.5 text-sm bg-slate-50 shadow focus:ring-1 focus:ring-indigo-300" />
+                <input
+                  type="date"
+                  value={dateFrom}
+                  onChange={(e) => setDateFrom(e.target.value)}
+                  className="border rounded-lg px-3 py-1.5 text-sm bg-slate-50 shadow focus:ring-1 focus:ring-indigo-300"
+                />
               </div>
               <div>
                 <label className="block text-xs font-medium text-slate-600 mb-1">Hasta</label>
-                <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="border rounded-lg px-3 py-1.5 text-sm bg-slate-50 shadow focus:ring-1 focus:ring-indigo-300" />
+                <input
+                  type="date"
+                  value={dateTo}
+                  onChange={(e) => setDateTo(e.target.value)}
+                  className="border rounded-lg px-3 py-1.5 text-sm bg-slate-50 shadow focus:ring-1 focus:ring-indigo-300"
+                />
               </div>
             </div>
           </header>
@@ -416,16 +450,61 @@ export default function LossesPagePro() {
               <input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Buscar (producto, detalle o ID)…"
+                placeholder="Buscar (producto, detalle, motivo o ID)…"
                 className="pl-3 pr-3 py-2 text-sm rounded-lg border w-72 bg-slate-50"
               />
-              <button onClick={() => { setSearch(""); }} className="px-3 py-2 rounded-lg text-sm border border-slate-200 hover:bg-slate-50">Limpiar</button>
+              <button
+                onClick={() => {
+                  setSearch("");
+                }}
+                className="px-3 py-2 rounded-lg text-sm border border-slate-200 hover:bg-slate-50"
+              >
+                Limpiar
+              </button>
+            </div>
+
+            {/* Filtros de motivo */}
+            <div className="flex flex-wrap gap-2">
+              {["Perdida", "Vencimiento"].map((m) => {
+                const active = motivos.includes(m);
+                return (
+                  <button
+                    key={m}
+                    onClick={() =>
+                      setMotivos((prev) => (active ? prev.filter((x) => x !== m) : [...prev, m]))
+                    }
+                    className={`px-3 py-1.5 rounded-full text-xs border transition ${
+                      active
+                        ? "bg-slate-900 text-white border-slate-900"
+                        : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
+                    }`}
+                    title={`Filtrar motivo: ${m}`}
+                  >
+                    {m}
+                  </button>
+                );
+              })}
             </div>
 
             <div className="flex flex-wrap gap-2">
-              <button onClick={handleExportCSV} className="px-3 py-2 rounded-lg text-sm font-semibold bg-slate-900 text-white hover:opacity-90">Exportar CSV</button>
-              <button onClick={copySummaryToClipboard} className="px-3 py-2 rounded-lg text-sm font-semibold border border-slate-200 hover:bg-slate-50">Copiar resumen</button>
-              <button onClick={openPrintableReport} className="px-3 py-2 rounded-lg text-sm font-semibold bg-indigo-600 text-white hover:bg-indigo-700">Generar Reporte</button>
+              <button
+                onClick={handleExportCSV}
+                className="px-3 py-2 rounded-lg text-sm font-semibold bg-slate-900 text-white hover:opacity-90"
+              >
+                Exportar CSV
+              </button>
+              <button
+                onClick={copySummaryToClipboard}
+                className="px-3 py-2 rounded-lg text-sm font-semibold border border-slate-200 hover:bg-slate-50"
+              >
+                Copiar resumen
+              </button>
+              <button
+                onClick={openPrintableReport}
+                className="px-3 py-2 rounded-lg text-sm font-semibold bg-indigo-600 text-white hover:bg-indigo-700"
+              >
+                Generar Reporte
+              </button>
             </div>
           </div>
 
@@ -459,7 +538,7 @@ export default function LossesPagePro() {
                       <BarChart data={weeklyData}>
                         <XAxis dataKey="week" fontSize={12} />
                         <YAxis fontSize={12} />
-                        <Tooltip formatter={(v) => `$${Number(v).toLocaleString("es-AR")}`} />
+                        <Tooltip formatter={(v: number) => `$${Number(v).toLocaleString("es-AR")}`} />
                         <Bar dataKey="loss" radius={[8, 8, 0, 0]} />
                       </BarChart>
                     </ResponsiveContainer>
@@ -469,7 +548,7 @@ export default function LossesPagePro() {
                       <BarChart data={monthlyData}>
                         <XAxis dataKey="month" fontSize={12} />
                         <YAxis fontSize={12} />
-                        <Tooltip formatter={(v) => `$${Number(v).toLocaleString("es-AR")}`} />
+                        <Tooltip formatter={(v: number) => `$${Number(v).toLocaleString("es-AR")}`} />
                         <Bar dataKey="loss" radius={[8, 8, 0, 0]} />
                       </BarChart>
                     </ResponsiveContainer>
@@ -480,14 +559,16 @@ export default function LossesPagePro() {
               {showTables && (
                 <section className="space-y-6">
                   {ORDER_WITH_OTHERS.map((cat) => {
-                    const arr = (groupedByCategory[cat] || []);
+                    const arr = groupedByCategory[cat] || [];
                     if (!arr.length) return null;
-                    const subtotal = sum(arr, (x) => x.lost_cash || 0);
+                    const subtotal = sum(arr, (x: any) => x.lost_cash || 0);
                     return (
                       <div key={cat} className="bg-slate-50 rounded-2xl p-5 shadow-sm">
                         <div className="flex items-center justify-between mb-3">
                           <h3 className="text-base font-semibold text-slate-700">{cat}</h3>
-                          <div className="text-sm text-slate-600">Subtotal: <span className="font-semibold">{money(subtotal)}</span></div>
+                          <div className="text-sm text-slate-600">
+                            Subtotal: <span className="font-semibold">{money(subtotal)}</span>
+                          </div>
                         </div>
                         <div className="overflow-x-auto">
                           <table className="min-w-full text-sm">
@@ -496,16 +577,31 @@ export default function LossesPagePro() {
                                 <th className="px-4 py-2 text-left">Fecha</th>
                                 <th className="px-4 py-2 text-left">Producto</th>
                                 <th className="px-4 py-2 text-left">Detalle</th>
+                                <th className="px-4 py-2 text-left">Motivo</th>
                                 <th className="px-4 py-2 text-right">Pérdida $</th>
                               </tr>
                             </thead>
                             <tbody>
-                              {arr.map((l) => (
+                              {arr.map((l: any) => (
                                 <tr key={l.id} className="border-b last:border-none">
                                   <td className="px-4 py-2">{new Date(l.created_at).toLocaleDateString()}</td>
                                   <td className="px-4 py-2">{l.products_master?.name || l.product_id}</td>
                                   <td className="px-4 py-2">{l.details}</td>
-                                  <td className="px-4 py-2 text-right">{(l.lost_cash || 0).toLocaleString("es-AR")}</td>
+                                  <td className="px-4 py-2">
+                                    <span
+                                      className={
+                                        "inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium " +
+                                        (l.motivo === "Perdida"
+                                          ? "bg-rose-50 text-rose-700 border border-rose-100"
+                                          : "bg-amber-50 text-amber-700 border border-amber-100")
+                                      }
+                                    >
+                                      {l.motivo}
+                                    </span>
+                                  </td>
+                                  <td className="px-4 py-2 text-right">
+                                    {(l.lost_cash || 0).toLocaleString("es-AR")}
+                                  </td>
                                 </tr>
                               ))}
                             </tbody>
@@ -513,8 +609,11 @@ export default function LossesPagePro() {
                               <tr>
                                 <td className="px-4 py-2"></td>
                                 <td className="px-4 py-2"></td>
+                                <td className="px-4 py-2"></td>
                                 <td className="px-4 py-2 text-right font-semibold">Total categoría</td>
-                                <td className="px-4 py-2 text-right font-semibold">{subtotal.toLocaleString("es-AR")}</td>
+                                <td className="px-4 py-2 text-right font-semibold">
+                                  {subtotal.toLocaleString("es-AR")}
+                                </td>
                               </tr>
                             </tfoot>
                           </table>
@@ -535,8 +634,8 @@ export default function LossesPagePro() {
 /*********************************
  * Subcomponentes UI
  *********************************/
-function MetricCard({ label, value, accent = "", subtle = false }) {
-  const accentMap = {
+function MetricCard({ label, value, accent = "", subtle = false }: { label: string; value: any; accent?: string; subtle?: boolean }) {
+  const accentMap: Record<string, string> = {
     rose: "bg-rose-50 text-rose-700 border-rose-100",
     indigo: "bg-indigo-50 text-indigo-700 border-indigo-100",
   };
@@ -551,14 +650,12 @@ function MetricCard({ label, value, accent = "", subtle = false }) {
   );
 }
 
-function MetricDelta({ label, value }) {
-  const sign = value.pct == null ? null : value.pct >= 0 ? "+" : "";
-  const color = value.pct == null ? "text-slate-600" : value.pct >= 0 ? "text-rose-600" : "text-emerald-600";
-  const text = value.pct == null ? "s/datos" : `${sign}${value.pct.toFixed(1)}%`;
+function MetricDelta({ label, value }: { label: string; value: { pct: number | null } }) {
+  const text = value.pct == null ? "s/datos" : `${value.pct >= 0 ? "+" : ""}${value.pct.toFixed(1)}%`;
   return <MetricCard label={label} value={text} accent={value.pct == null ? "" : value.pct >= 0 ? "rose" : "indigo"} />;
 }
 
-function ChartCard({ title, children }) {
+function ChartCard({ title, children }: { title: string; children: any }) {
   return (
     <div className="bg-slate-50 rounded-2xl p-5 shadow-sm border border-slate-100">
       <h3 className="text-base font-semibold mb-3 text-slate-700">{title}</h3>
@@ -567,7 +664,7 @@ function ChartCard({ title, children }) {
   );
 }
 
-function Toggle({ value, onChange, label }) {
+function Toggle({ value, onChange, label }: { value: boolean; onChange: (v: boolean) => void; label: string }) {
   return (
     <button
       onClick={() => onChange(!value)}
@@ -580,7 +677,15 @@ function Toggle({ value, onChange, label }) {
   );
 }
 
-function ExecutiveSummary({ topProducts, categoryMetrics, totalLost }) {
+function ExecutiveSummary({
+  topProducts,
+  categoryMetrics,
+  totalLost,
+}: {
+  topProducts: { name: string; loss: number }[];
+  categoryMetrics: { cat: string; count: number; loss: number }[];
+  totalLost: number;
+}) {
   const topCats = [...categoryMetrics].sort((a, b) => b.loss - a.loss).slice(0, 5);
   return (
     <section className="grid grid-cols-1 md:grid-cols-2 gap-8">
@@ -592,7 +697,10 @@ function ExecutiveSummary({ topProducts, categoryMetrics, totalLost }) {
           <ul className="space-y-2">
             {topProducts.map((p, i) => (
               <li key={p.name} className="flex items-center justify-between">
-                <div className="flex items-center gap-2"><span className="text-slate-400">#{i + 1}</span><span>{p.name}</span></div>
+                <div className="flex items-center gap-2">
+                  <span className="text-slate-400">#{i + 1}</span>
+                  <span>{p.name}</span>
+                </div>
                 <div className="font-semibold">{money(p.loss)}</div>
               </li>
             ))}
@@ -608,13 +716,20 @@ function ExecutiveSummary({ topProducts, categoryMetrics, totalLost }) {
           <ul className="space-y-2">
             {topCats.map((c, i) => (
               <li key={c.cat} className="flex items-center justify-between">
-                <div className="flex items-center gap-2"><span className="text-slate-400">#{i + 1}</span><span>{c.cat}</span></div>
-                <div className="font-semibold">{money(c.loss)} <span className="text-xs text-slate-400">({c.count})</span></div>
+                <div className="flex items-center gap-2">
+                  <span className="text-slate-400">#{i + 1}</span>
+                  <span>{c.cat}</span>
+                </div>
+                <div className="font-semibold">
+                  {money(c.loss)} <span className="text-xs text-slate-400">({c.count})</span>
+                </div>
               </li>
             ))}
           </ul>
         )}
-        <div className="mt-4 text-sm text-slate-500">Total pérdidas del período: <span className="font-semibold text-slate-700">{money(totalLost)}</span></div>
+        <div className="mt-4 text-sm text-slate-500">
+          Total pérdidas del período: <span className="font-semibold text-slate-700">{money(totalLost)}</span>
+        </div>
       </div>
     </section>
   );
