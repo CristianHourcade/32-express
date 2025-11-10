@@ -322,7 +322,7 @@
            business_id: businessId,
            product_id: product.id,
            motivo: "Edicion",
-           details: `${employeeName}: ${old} → ${next}`,
+           details: `${employeeName} - ${product.name}: ${old} → ${next}`,
            lost_cash: null,
          });
    
