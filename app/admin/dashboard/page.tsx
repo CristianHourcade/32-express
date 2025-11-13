@@ -1174,14 +1174,9 @@ export default function AdminDashboard() {
                   <thead className="text-[11px] text-slate-500">
                     <tr>
                       <th className="text-left py-1">Negocio</th>
-                      <th className="text-right py-1">Ingreso EFT</th>
-                      <th className="text-right py-1">Ingeso BANCO</th>
-                      <th className="text-right py-1">Gasto EFT</th>
-                      <th className="text-right py-1">Gasto TRANSFER</th>
-                      <th className="text-right py-1">Bal. EFT</th>
-                      <th className="text-right py-1">Bal. TRANSFER</th>
-                      <th className="text-right py-1">Balance</th>
-                      <th className="text-right py-1">% del Total</th>
+                      <th className="text-right py-1">EFECTIVO</th>
+                      <th className="text-right py-1">BANCO</th>
+                      <th className="text-right py-1">BALANCE</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1190,14 +1185,9 @@ export default function AdminDashboard() {
                       return (
                         <tr key={r.businessId} className="border-t border-slate-200 dark:border-slate-700">
                           <td className="py-1">{r.businessName}</td>
-                          <td className="py-1 text-right tabular-nums">{fmtMoney(r.incomeCash)}</td>
-                          <td className="py-1 text-right tabular-nums">{fmtMoney(r.incomeRest)}</td>
-                          <td className="py-1 text-right tabular-nums text-red-600 dark:text-red-400">{fmtMoney(r.expenseCash)}</td>
-                          <td className="py-1 text-right tabular-nums text-red-600 dark:text-red-400">{fmtMoney(r.expenseRest)}</td>
                           <td className={`py-1 text-right tabular-nums ${r.balanceCash >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>{fmtMoney(r.balanceCash)}</td>
                           <td className={`py-1 text-right tabular-nums ${r.balanceRest >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>{fmtMoney(r.balanceRest)}</td>
                           <td className={`py-1 text-right tabular-nums font-semibold ${r.balance >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>{fmtMoney(r.balance)}</td>
-                          <td className="py-1 text-right tabular-nums">{share.toFixed(1)}%</td>
                         </tr>
                       );
                     })}
@@ -1207,10 +1197,6 @@ export default function AdminDashboard() {
                   <tfoot>
                     <tr className="border-t border-slate-300 dark:border-slate-600">
                       <td className="py-2 font-semibold">Total grupo</td>
-                      <td className="py-2 text-right tabular-nums font-semibold">{fmtMoney(totalIncome3M_Cash)}</td>
-                      <td className="py-2 text-right tabular-nums font-semibold">{fmtMoney(totalIncome3M_Rest)}</td>
-                      <td className="py-2 text-right tabular-nums font-semibold text-red-600 dark:text-red-400">{fmtMoney(totalExpense3M_Cash)}</td>
-                      <td className="py-2 text-right tabular-nums font-semibold text-red-600 dark:text-red-400">{fmtMoney(totalExpense3M_Rest)}</td>
                       <td className={`py-2 text-right tabular-nums font-semibold ${totalBalance3M_Cash >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>{fmtMoney(totalBalance3M_Cash)}</td>
                       <td className={`py-2 text-right tabular-nums font-semibold ${totalBalance3M_Rest >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>{fmtMoney(totalBalance3M_Rest)}</td>
                       <td className={`py-2 text-right tabular-nums font-bold ${totalBalance3M >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>{fmtMoney(totalBalance3M)}</td>
