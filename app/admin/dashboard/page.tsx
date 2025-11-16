@@ -50,7 +50,7 @@ const clamp = (v: number) => Math.max(0, Math.min(100, v));
    ───────────────────────────────────────────────────────── */
 const SAVING_CONFIG = {
   mode: "percent" as "percent" | "fixed" | "hybrid",
-  percent: 0.55,
+  percent: 0.45,
   fixedPerDay: 180_000,
   hybridThreshold: 330_000,
 };
