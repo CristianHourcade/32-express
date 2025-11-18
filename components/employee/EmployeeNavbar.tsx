@@ -20,6 +20,7 @@ import {
   TagIcon,
   Archive,
   BookText,
+  BookUser,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 
@@ -35,6 +36,7 @@ const supervisorItems = [
   { name: "Faltantes", href: "/employee/faltantes", icon: Airplay },
   { name: "Promos", href: "/employee/promos", icon: Archive },
   { name: "Gastos", href: "/employee/gastos", icon: BookText },
+  { name: "Retiros", href: "/employee/retiros", icon: BookUser },
 ];
 
 export default function EmployeeNavbar() {
