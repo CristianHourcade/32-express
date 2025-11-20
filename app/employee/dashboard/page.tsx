@@ -633,30 +633,40 @@ export default function EmployeeDashboard() {
             </div>
           </div>
           <div>
-            {activeShift ? (
-              <button onClick={() => setShowEndShiftModal(true)} disabled={isEndingShift} className="btn btn-danger">
+            {isMobileDevice ? (
+              // Vista en CELULAR: nada de botones
+              <p className="text-xs text-gray-500 mt-1">
+                No podés iniciar ni finalizar turno desde el celular. Hacelo desde la PC del local.
+              </p>
+            ) : activeShift ? (
+              // Vista en PC con turno ACTIVO
+              <button
+                onClick={() => setShowEndShiftModal(true)}
+                disabled={isEndingShift}
+                className="btn btn-danger"
+              >
                 {isEndingShift ? "Finalizando..." : "Finalizar Turno"}
               </button>
             ) : (
+              // Vista en PC sin turno activo
               <button
                 onClick={() => setShowStartShiftModal(true)}
-                disabled={isStartingShift || !businessId || !currentEmployee || isMobileDevice}
-                className={`btn ${!businessId || !currentEmployee || isMobileDevice ? "btn-disabled" : "btn-success"}`}
+                disabled={isStartingShift || !businessId || !currentEmployee}
+                className={`btn ${!businessId || !currentEmployee ? "btn-disabled" : "btn-success"
+                  }`}
                 title={
                   !businessId
                     ? "Necesitás tener un negocio asignado"
                     : !currentEmployee
                       ? "No se encontró tu registro de empleado"
-                      : isMobileDevice
-                        ? "No podés iniciar turno desde el celular"
-                        : ""
+                      : ""
                 }
               >
                 {isStartingShift ? "Iniciando..." : "Iniciar Turno"}
               </button>
-
             )}
           </div>
+
         </div>
       </div>
 
