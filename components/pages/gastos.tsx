@@ -11,7 +11,7 @@ import {
   type Expense,
 } from "@/lib/redux/slices/expensesSlice"
 import { fetchBusinesses } from "@/lib/redux/slices/businessSlice"
-import { Plus, Edit, Trash2, X, Search, Calendar } from "lucide-react"
+import { Plus, Edit, Trash2, X } from "lucide-react"
 
 // Helper para formatear fecha local en "YYYY-MM-DD"
 function getLocalDateString(date = new Date()) {
@@ -33,6 +33,9 @@ export default function ExpensesPage() {
   // Filtros
   const [selectedBusinessId, setSelectedBusinessId] = useState<string>("all")
   const [selectedCategory, setSelectedCategory] = useState<string>("all")
+  // 👇 NUEVO: filtro por método de pago
+  const [selectedMethod, setSelectedMethod] = useState<"all" | "cash" | "transfer">("all")
+
   const [dateRange, setDateRange] = useState<{ start: string; end: string }>({
     start: getLocalDateString(new Date(new Date().getFullYear(), new Date().getMonth(), 1)),
     end: getLocalDateString(new Date()),
@@ -85,8 +88,6 @@ export default function ExpensesPage() {
   // Abrir modal para editar un gasto
   const openEditModal = (expense: Expense) => {
     setCurrentExpense(expense)
-    // Se asume que expense.date es algo como "2025-04-10T00:00:00"
-    // Tomamos solo la parte de la fecha (antes de la "T")
     const datePart = expense.date.split("T")[0] // "YYYY-MM-DD"
     setFormData({
       businessId: expense.businessId,
@@ -94,7 +95,7 @@ export default function ExpensesPage() {
       amount: expense.amount,
       description: expense.description,
       date: datePart,
-      method: expense.method ?? "cash", // fallback por seguridad
+      method: (expense.method as "cash" | "transfer") ?? "cash",
     });
 
     setIsModalOpen(true)
@@ -116,7 +117,6 @@ export default function ExpensesPage() {
           date: formData.date,
         })
       );
-
     } else {
       // Crear nuevo
       const businessName = businesses.find((b) => b.id === formData.businessId)?.name || ""
@@ -143,9 +143,12 @@ export default function ExpensesPage() {
     const matchesBusiness = selectedBusinessId === "all" || expense.businessId === selectedBusinessId
     const matchesCategory = selectedCategory === "all" || expense.category === selectedCategory
 
-    // Extraer solo la parte de fecha (YYYY-MM-DD)
-    const datePart = expense.date.split("T")[0] // p.ej. "2025-04-10"
-    // Forzar T12:00:00 para evitar desfases
+    // 👇 NUEVO: filtro por método (si no tiene method, solo entra cuando es "all")
+    const matchesMethod =
+      selectedMethod === "all" ||
+      expense.method === selectedMethod
+
+    const datePart = expense.date.split("T")[0]
     const expenseDate = new Date(`${datePart}T12:00:00`)
 
     const startDate = new Date(`${dateRange.start}T12:00:00`)
@@ -153,15 +156,15 @@ export default function ExpensesPage() {
     endDate.setHours(23, 59, 59, 999)
 
     const matchesDate = expenseDate >= startDate && expenseDate <= endDate
-    return matchesBusiness && matchesCategory && matchesDate
+    return matchesBusiness && matchesCategory && matchesMethod && matchesDate
   })
 
   const totalExpenses = filteredExpenses.reduce((sum, expense) => sum + expense.amount, 0)
-  /* ────────── helper global ────────── */
+
   const formatCurrency = (n: number) =>
     n.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
   const isLoading = expensesLoading || businessesLoading
-  /* ╔═════════ LOADING  ─── igual que antes ═════════ */
 
   if (isLoading) {
     return (
@@ -182,7 +185,6 @@ export default function ExpensesPage() {
     .filter((e) => e.method === "transfer")
     .reduce((sum, e) => sum + e.amount, 0);
 
-  /* ╔═════════ COMIENZA EL RETURN PRINCIPAL ═════════ */
   return (
     <div className="space-y-8">
       {/* ───── Encabezado ───── */}
@@ -239,6 +241,20 @@ export default function ExpensesPage() {
                   {c}
                 </option>
               ))}
+            </select>
+          </div>
+
+          {/* Método de pago */}
+          <div className="flex-1 min-w-[160px]">
+            <label className="block text-xs font-medium mb-1">Método de pago</label>
+            <select
+              value={selectedMethod}
+              onChange={(e) => setSelectedMethod(e.target.value as "all" | "cash" | "transfer")}
+              className="appearance-none bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-full px-3 py-1.5 text-xs shadow-sm w-full focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            >
+              <option value="all">Todos</option>
+              <option value="cash">Efectivo</option>
+              <option value="transfer">Transferencia</option>
             </select>
           </div>
 
@@ -337,7 +353,6 @@ export default function ExpensesPage() {
                       )}
                     </td>
 
-
                     <td className="px-4 py-2 font-semibold text-red-600 dark:text-red-400">
                       ${formatCurrency(ex.amount)}
                     </td>
@@ -364,7 +379,7 @@ export default function ExpensesPage() {
               })}
               {!filteredExpenses.length && (
                 <tr>
-                  <td colSpan={6} className="py-10 text-center text-slate-500 dark:text-slate-400">
+                  <td colSpan={7} className="py-10 text-center text-slate-500 dark:text-slate-400">
                     No se encontraron gastos.
                   </td>
                 </tr>
@@ -404,6 +419,7 @@ export default function ExpensesPage() {
           </div>
         </div>
       )}
+
       {/* ───── Modal Agregar / Editar ───── */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
@@ -500,6 +516,7 @@ export default function ExpensesPage() {
                   className="appearance-none bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-full px-3 py-1.5 text-xs w-full focus:outline-none focus:ring-2 focus:ring-indigo-500"
                 />
               </div>
+
               {/* Método de pago */}
               <div>
                 <label className="block text-xs font-medium mb-1">Método de pago</label>
@@ -560,5 +577,4 @@ export default function ExpensesPage() {
       )}
     </div>
   );
-
 }
