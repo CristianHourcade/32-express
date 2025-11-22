@@ -102,11 +102,13 @@ function marginSemaforo(m: number) {
 /* ─────────────────────────────────────────────────────────
    MÉTODOS (UNIFICACIÓN)
    ───────────────────────────────────────────────────────── */
-const UNIFIED_KEYS = ["cash", "card", "rappi", "consumo"] as const;
-type UnifiedKey = typeof UNIFIED_KEYS[number];
+const UNIFIED_KEYS = ["cash", "card", "transfer", "rappi", "consumo"] as const;
+type UnifiedKey = (typeof UNIFIED_KEYS)[number];
+
 const unifyPayments = (pm: Record<string, number> = {}) => ({
   cash: pm.cash ?? 0,
-  card: (pm.card ?? 0) + (pm.transfer ?? 0) + (pm.mercadopago ?? 0),
+  card: pm.card ?? 0,
+  transfer: (pm.transfer ?? 0) + (pm.mercadopago ?? 0),
   rappi: pm.rappi ?? 0,
   consumo: pm.consumo ?? 0,
 });
@@ -116,9 +118,13 @@ const unifyExpenses = (em: Record<string, number> = {}) => ({
   rappi: em.rappi ?? 0,
   consumo: em.consumo ?? 0,
 });
-const METHOD_META_UNI: Record<UnifiedKey, { label: string; short: string; barClass: string; dotClass: string }> = {
+const METHOD_META_UNI: Record<
+  UnifiedKey,
+  { label: string; short: string; barClass: string; dotClass: string }
+> = {
   cash: { label: "Efectivo", short: "EF", barClass: "bg-emerald-500", dotClass: "bg-emerald-500" },
-  card: { label: "Tarjeta (incl. Transfer/MP)", short: "TJ", barClass: "bg-indigo-500", dotClass: "bg-indigo-500" },
+  card: { label: "Tarjeta", short: "TJ", barClass: "bg-indigo-500", dotClass: "bg-indigo-500" },
+  transfer: { label: "Transfer/MP", short: "TR", barClass: "bg-yellow-500", dotClass: "bg-yellow-500" },
   rappi: { label: "Rappi", short: "RP", barClass: "bg-orange-500", dotClass: "bg-orange-500" },
   consumo: { label: "Consumo", short: "CI", barClass: "bg-slate-400", dotClass: "bg-slate-400" },
 };
