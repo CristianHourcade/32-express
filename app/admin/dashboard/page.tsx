@@ -8,12 +8,20 @@ import { Banknote, Building2, CalendarDays, CreditCard, Flame, Wallet } from "lu
    FECHAS / RANGOS
    ───────────────────────────────────────────────────────── */
 function threeMonthWindow(offset = 0) {
-  // Usa el mismo “origen” que monthRange(offset)
   const base = new Date();
-  const start = new Date(base.getFullYear(), base.getMonth() + offset - 2, 1, 0, 0, 0, 0);
-  const end = new Date(base.getFullYear(), base.getMonth() + offset + 1, 1, 0, 0, 0, 0);
+  // mes "base" según el offset (igual que monthRange)
+  const baseMonth = base.getMonth() + offset;
+  const year = base.getFullYear();
+
+  // 👉 Desde el primer día del MES ANTERIOR…
+  const start = new Date(year, baseMonth - 1, 1, 0, 0, 0, 0);
+  // 👉 …hasta el primer día del MES SIGUIENTE,
+  //    con lo cual cubrís mes anterior + mes actual
+  const end = new Date(year, baseMonth + 1, 1, 0, 0, 0, 0);
+
   return { start, end };
 }
+
 
 function last3MonthsRange() {
   const now = new Date();
@@ -102,32 +110,48 @@ function marginSemaforo(m: number) {
 /* ─────────────────────────────────────────────────────────
    MÉTODOS (UNIFICACIÓN)
    ───────────────────────────────────────────────────────── */
-const UNIFIED_KEYS = ["cash", "card", "transfer", "rappi", "consumo"] as const;
+const UNIFIED_KEYS = ["cash", "card", "rappi", "consumo"] as const;
 type UnifiedKey = (typeof UNIFIED_KEYS)[number];
 
-const unifyPayments = (pm: Record<string, number> = {}) => ({
-  cash: pm.cash ?? 0,
-  card: pm.card ?? 0,
-  transfer: (pm.transfer ?? 0) + (pm.mercadopago ?? 0),
-  rappi: pm.rappi ?? 0,
-  consumo: pm.consumo ?? 0,
-});
-const unifyExpenses = (em: Record<string, number> = {}) => ({
-  cash: em.cash ?? 0,
-  card: (em.card ?? 0) + (em.transfer ?? 0) + (em.mercadopago ?? 0),
-  rappi: em.rappi ?? 0,
-  consumo: em.consumo ?? 0,
-});
+
+const unifyPayments = (pm: Record<string, number> = {}) => {
+  const cardTotal =
+    (pm.card ?? 0) +
+    (pm.transfer ?? 0) +     // sumamos transfer acá
+    (pm.mercadopago ?? 0);  // y MP también
+
+  return {
+    cash: pm.cash ?? 0,
+    card: cardTotal,
+    rappi: pm.rappi ?? 0,
+    consumo: pm.consumo ?? 0,
+  };
+};
+
+const unifyExpenses = (em: Record<string, number> = {}) => {
+  const cardTotal =
+    (em.card ?? 0) +
+    (em.transfer ?? 0) +     // gastos con method="transfer" van acá
+    (em.mercadopago ?? 0);  // y los de MP también
+
+  return {
+    cash: em.cash ?? 0,
+    card: cardTotal,
+    rappi: em.rappi ?? 0,
+    consumo: em.consumo ?? 0,
+  };
+};
+
 const METHOD_META_UNI: Record<
   UnifiedKey,
   { label: string; short: string; barClass: string; dotClass: string }
 > = {
   cash: { label: "Efectivo", short: "EF", barClass: "bg-emerald-500", dotClass: "bg-emerald-500" },
-  card: { label: "Tarjeta", short: "TJ", barClass: "bg-indigo-500", dotClass: "bg-indigo-500" },
-  transfer: { label: "Transfer/MP", short: "TR", barClass: "bg-yellow-500", dotClass: "bg-yellow-500" },
+  card: { label: "Tarjeta / Transfer", short: "TJ/TR", barClass: "bg-indigo-500", dotClass: "bg-indigo-500" },
   rappi: { label: "Rappi", short: "RP", barClass: "bg-orange-500", dotClass: "bg-orange-500" },
   consumo: { label: "Consumo", short: "CI", barClass: "bg-slate-400", dotClass: "bg-slate-400" },
 };
+
 const METHOD_META: Record<"cash" | "card" | "transfer" | "mercadopago" | "rappi" | "consumo", { label: string; short: string; barClass: string; dotClass: string }> = {
   cash: { label: "Efectivo", short: "EF", barClass: "bg-emerald-500", dotClass: "bg-emerald-500" },
   card: { label: "Tarjeta", short: "TJ", barClass: "bg-indigo-500", dotClass: "bg-indigo-500" },
@@ -1152,7 +1176,7 @@ export default function AdminDashboard() {
       <section>
         <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4 shadow-sm">
           <div className="flex items-center justify-between flex-wrap gap-3 mb-3">
-            <h1 className="text-xl md:text-2xl font-bold tracking-tight text-slate-800 dark:text-white">BALANCE KIOSKO 32 - 3 MESES</h1>
+            <h1 className="text-xl md:text-2xl font-bold tracking-tight text-slate-800 dark:text-white">BALANCE KIOSKO 32</h1>
             {loading3m && (
               <span className="text-xs px-2 py-1 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-500">Calculando…</span>
             )}
@@ -1160,16 +1184,16 @@ export default function AdminDashboard() {
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <StatCard label="Ingresos (3 meses · grupo 1)" value={fmtMoney(global3m.income)} />
-            <StatCard label="Egresos (3 meses · grupo 1)" value={<span className="text-red-600 dark:text-red-400">{fmtMoney(global3m.expense)}</span>} />
-            <StatCard label="Balance (3 meses · grupo 1)" value={<span className={global3m.balance >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}>{fmtMoney(global3m.balance)}</span>} />
+            <StatCard label="Ingresos" value={fmtMoney(global3m.income)} />
+            <StatCard label="Egresos" value={<span className="text-red-600 dark:text-red-400">{fmtMoney(global3m.expense)}</span>} />
+            <StatCard label="Balance" value={<span className={global3m.balance >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}>{fmtMoney(global3m.balance)}</span>} />
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
             {/* ===== Balance por negocio (grupo 1 · últimos 3 meses) con EF/RESTO ===== */}
             <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-4 md:col-span-2">
               <div className="flex items-center justify-between">
-                <div className="text-sm font-semibold mb-2">Balance por negocio (últimos 3 meses)</div>
+                <div className="text-sm font-semibold mb-2">Balance por negocio</div>
                 {global3m.loading && (
                   <span className="text-xs px-2 py-1 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-500">Calculando…</span>
                 )}
