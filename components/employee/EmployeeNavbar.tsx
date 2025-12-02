@@ -50,7 +50,7 @@ export default function EmployeeNavbar() {
     async function fetchFlag() {
       if (!user?.email) return;
       const { data, error } = await supabase
-        .from("employees")
+        .from("users")
         .select("supervisor")
         .eq("email", user.email)
         .single();
