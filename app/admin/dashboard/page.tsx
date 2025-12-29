@@ -633,18 +633,24 @@ type GlobalBalance = {
 type BusinessBalance = {
   businessId: string;
   businessName: string;
-  // totales 3m
+
   income: number;
   expense: number;
   balance: number;
-  // desglose EF vs Resto (3m)
+
   incomeCash: number;
   incomeRest: number;
   expenseCash: number;
   expenseRest: number;
   balanceCash: number;
   balanceRest: number;
+
+  // NUEVO
+  bankTax: number;      // + (5% de incomeRest)
+  bankTaxNeg: number;   // -bankTax
+  balanceNet: number;   // balance + bankTaxNeg
 };
+
 
 const getGroupVal = (b: any) => b?.group ?? b?.group_id ?? b?.groupId ?? b?.grupo ?? null;
 const isGroup1 = (b: any) => String(getGroupVal(b)).trim() === "1";
@@ -771,21 +777,29 @@ export default function AdminDashboard() {
     }
 
     let perBiz = Array.from(bizMap.entries()).map(([businessId, v]) => {
-      const income = v.incomeCash + v.incomeRest;
-      const expense = v.expenseCash + v.expenseRest;
+      const balance = income - expense;
+      const bankTax = v.incomeRest * 0.05;
+      const bankTaxNeg = -bankTax;
+      const balanceNet = balance + bankTaxNeg;
+
       return {
         businessId,
         businessName: v.name,
         income,
         expense,
-        balance: income - expense,
+        balance,
         incomeCash: v.incomeCash,
         incomeRest: v.incomeRest,
         expenseCash: v.expenseCash,
         expenseRest: v.expenseRest,
         balanceCash: v.incomeCash - v.expenseCash,
         balanceRest: v.incomeRest - v.expenseRest,
+
+        bankTax,
+        bankTaxNeg,
+        balanceNet,
       };
+
     });
 
     // fallback filas en cero si no hubo movimientos
@@ -795,6 +809,9 @@ export default function AdminDashboard() {
         income: 0, expense: 0, balance: 0,
         incomeCash: 0, incomeRest: 0, expenseCash: 0, expenseRest: 0,
         balanceCash: 0, balanceRest: 0,
+        bankTax: 0,
+        bankTaxNeg: 0,
+        balanceNet: 0,
       }));
     }
 
@@ -1169,6 +1186,9 @@ export default function AdminDashboard() {
   const totalBalance3M_Cash = rows3m.reduce((a, x) => a + x.balanceCash, 0);
   const totalBalance3M_Rest = rows3m.reduce((a, x) => a + x.balanceRest, 0);
   const totalBalance3M = totalBalance3M_Cash + totalBalance3M_Rest;
+  const totalBankTax3M = rows3m.reduce((a, x) => a + (x.bankTax ?? 0), 0);
+  const totalBankTax3M_Neg = -totalBankTax3M;
+  const totalBalance3M_Net = totalBalance3M + totalBankTax3M_Neg;
 
   return (
     <div className="space-y-6 p-4">
@@ -1204,39 +1224,65 @@ export default function AdminDashboard() {
                   <thead className="text-[11px] text-slate-500">
                     <tr>
                       <th className="text-left py-1">Negocio</th>
-                      <th className="text-right py-1">EFECTIVO</th>
                       <th className="text-right py-1">BANCO</th>
-                      <th className="text-right py-1">BALANCE</th>
+                      <th className="text-right py-1">IMP. (−)</th>
+                      <th className="text-right py-1">BANCO NETO</th> {/* NUEVO */}
+                      <th className="text-right py-1">EFECTIVO</th>
+
                     </tr>
                   </thead>
                   <tbody>
                     {rows3m.map((r) => {
-                      const share = totalBalance3M !== 0 ? (r.balance / totalBalance3M) * 100 : 0;
+                      const bancoNeto = (r.balanceRest ?? 0) + (r.bankTaxNeg ?? 0);
+
                       return (
                         <tr key={r.businessId} className="border-t border-slate-200 dark:border-slate-700">
                           <td className="py-1">{r.businessName}</td>
-                          <td className={`py-1 text-right tabular-nums ${r.balanceCash >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>{fmtMoney(r.balanceCash)}</td>
-                          <td className={`py-1 text-right tabular-nums ${r.balanceRest >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>{fmtMoney(r.balanceRest)}</td>
-                          <td className={`py-1 text-right tabular-nums font-semibold ${r.balance >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>{fmtMoney(r.balance)}</td>
+
+
+
+                          <td className={`py-1 text-right tabular-nums ${r.balanceRest >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>
+                            {fmtMoney(r.balanceRest)}
+                          </td>
+
+                          <td className="py-1 text-right tabular-nums text-red-600 dark:text-red-400">
+                            {fmtMoney(r.bankTaxNeg)}
+                          </td>
+
+                          <td className={`py-1 text-right tabular-nums ${bancoNeto >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>
+                            {fmtMoney(bancoNeto)}
+                          </td>
+                          <td className={`py-1 text-right tabular-nums ${r.balanceCash >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>
+                            {fmtMoney(r.balanceCash)}
+                          </td>
                         </tr>
                       );
                     })}
                   </tbody>
-
-                  {/* Totales 3M (derivados de perBusinessBalance) */}
                   <tfoot>
                     <tr className="border-t border-slate-300 dark:border-slate-600">
                       <td className="py-2 font-semibold">Total grupo</td>
-                      <td className={`py-2 text-right tabular-nums font-semibold ${totalBalance3M_Cash >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>{fmtMoney(totalBalance3M_Cash)}</td>
-                      <td className={`py-2 text-right tabular-nums font-semibold ${totalBalance3M_Rest >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>{fmtMoney(totalBalance3M_Rest)}</td>
-                      <td className={`py-2 text-right tabular-nums font-bold ${totalBalance3M >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>{fmtMoney(totalBalance3M)}</td>
-                      <td />
+
+
+                      <td className={`py-2 text-right tabular-nums font-semibold ${totalBalance3M_Rest >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>
+                        {fmtMoney(totalBalance3M_Rest)}
+                      </td>
+
+                      <td className="py-2 text-right tabular-nums font-semibold text-red-600 dark:text-red-400">
+                        {fmtMoney(totalBankTax3M_Neg)}
+                      </td>
+                      <td className={`py-2 text-right tabular-nums font-semibold ${totalBalance3M_Cash >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>
+                        {fmtMoney(totalBalance3M_Cash)}
+                      </td>
+
+                      <td className={`py-2 text-right tabular-nums font-semibold ${(totalBalance3M_Rest + totalBankTax3M_Neg) >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>
+                        {fmtMoney(totalBalance3M_Rest + totalBankTax3M_Neg)}
+                      </td>
                     </tr>
                   </tfoot>
                 </table>
               </div>
             </div>
-
           </div>
         </div>
       </section>
