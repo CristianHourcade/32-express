@@ -21,7 +21,7 @@ async function fetchAllPaginated(
   const pageSize = 1000;
   let page = 0;
   let acc: any[] = [];
-  for (;;) {
+  for (; ;) {
     const from = page * pageSize;
     const to = from + pageSize - 1;
     const { data, error } = await queryFn(from, to);
@@ -171,6 +171,8 @@ export default function ShiftsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [hasFetchedData, setHasFetchedData] = useState(false);
   const [dateRangeType, setDateRangeType] = useState<"month" | number>("month");
+  const [selectedShiftIds, setSelectedShiftIds] = useState<Set<string>>(new Set());
+  const [selectedSavedByShift, setSelectedSavedByShift] = useState<Record<string, number>>({});
 
   /* ─── local state ─── */
   const [selectedBusinessId, setSelectedBusinessId] = useState("all");
@@ -250,18 +252,55 @@ export default function ShiftsPage() {
     setSelectedShift(shift);
     setIsDetailsModalOpen(true);
   };
+  const computeGuardadoEstimado = (sh: any, shiftSales: any[]) => {
+    const paymentsByMethod = shiftSales.reduce((acc: Record<string, number>, s: any) => {
+      const method = s.paymentMethod === "mercadopago" ? "transfer" : s.paymentMethod;
+      acc[method] = (acc[method] || 0) + s.total;
+      return acc;
+    }, {} as Record<string, number>);
+
+    const efectivoVentas = paymentsByMethod["cash"] || 0;
+    return efectivoVentas + (sh.startCash || 0) - (sh.endCash || 0);
+  };
+  const handleRowToggle = (sh: any) => {
+    const shiftSales = getShiftSales(sh.id);
+    const guardado = computeGuardadoEstimado(sh, shiftSales);
+
+    setSelectedShiftIds((prev) => {
+      const next = new Set(prev);
+
+      if (next.has(sh.id)) {
+        next.delete(sh.id);
+
+        setSelectedSavedByShift((m) => {
+          const copy = { ...m };
+          delete copy[sh.id];
+          return copy;
+        });
+      } else {
+        next.add(sh.id);
+        setSelectedSavedByShift((m) => ({ ...m, [sh.id]: guardado }));
+      }
+
+      return next;
+    });
+  };
+
+  const selectedGuardadoTotal = useMemo(() => {
+    return Object.values(selectedSavedByShift).reduce((sum, v) => sum + (Number(v) || 0), 0);
+  }, [selectedSavedByShift]);
 
   const translatePaymentMethod = (m: string) =>
     ({ cash: "Efectivo", card: "Tarjeta", transfer: "Transferencia", rappi: "Rappi" } as const)[m] ||
     m;
 
   const getPaymentMethodClass = (m: string) =>
-    ({
-      cash: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300",
-      card: "bg-indigo-100 text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-300",
-      transfer: "bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300",
-      rappi: "bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-300",
-    }[m] || "bg-slate-100 text-slate-800 dark:bg-slate-700 dark:text-slate-300");
+  ({
+    cash: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300",
+    card: "bg-indigo-100 text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-300",
+    transfer: "bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300",
+    rappi: "bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-300",
+  }[m] || "bg-slate-100 text-slate-800 dark:bg-slate-700 dark:text-slate-300");
 
   /* ─── filtros y ordenación ─── */
   const monthSales = useMemo(
@@ -339,6 +378,22 @@ export default function ShiftsPage() {
 
         {/* Controles */}
         <div className="flex flex-wrap gap-3 items-center justify-end">
+          <div className="px-3 py-1.5 rounded-full border border-slate-300 dark:border-slate-600 text-sm shadow-sm bg-slate-50 dark:bg-slate-800">
+            Guardado seleccionado:{" "}
+            <span className="font-semibold text-sky-700 dark:text-sky-400">
+              ${formatPrice(selectedGuardadoTotal)}
+            </span>
+          </div>
+          <button
+            onClick={() => {
+              setSelectedShiftIds(new Set());
+              setSelectedSavedByShift({});
+            }}
+            className="text-sm px-3 py-1.5 rounded-full border border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700"
+          >
+            Limpiar selección
+          </button>
+
           {/* Selector de fechas */}
           <div className="flex items-center gap-1">
             <CalendarDays className="h-4 w-4 text-slate-400" />
@@ -443,6 +498,7 @@ export default function ShiftsPage() {
                     (s: number, v: any) => s + v.total,
                     0
                   );
+                  const isSelected = selectedShiftIds.has(sh.id);
 
                   const paymentsByMethod = shiftSales.reduce(
                     (acc: Record<string, number>, s: any) => {
@@ -464,8 +520,15 @@ export default function ShiftsPage() {
                   return (
                     <tr
                       key={sh.id}
-                      className="group border-l-4 border-transparent hover:border-sky-500 even:bg-slate-50 dark:even:bg-slate-800/40 transition-all duration-200"
+                      onClick={() => handleRowToggle(sh)}
+                      className={[
+                        "group border-l-4 transition-all duration-200 cursor-pointer",
+                        isSelected
+                          ? "border-sky-500 bg-sky-50 dark:bg-sky-900/20"
+                          : "border-transparent hover:border-sky-500 even:bg-slate-50 dark:even:bg-slate-800/40",
+                      ].join(" ")}
                     >
+
                       {/* Empleado */}
                       <td className="px-4 py-3 font-medium text-slate-900 dark:text-slate-200 whitespace-nowrap">
                         {sh.employeeName}
@@ -479,11 +542,10 @@ export default function ShiftsPage() {
                       {/* Estado (activo/completado) */}
                       <td className="px-4 py-3">
                         <span
-                          className={`inline-block rounded-full px-2 py-0.5 text-[11px] font-semibold tracking-wide shadow-sm ${
-                            sh.active
-                              ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300"
-                              : "bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300"
-                          }`}
+                          className={`inline-block rounded-full px-2 py-0.5 text-[11px] font-semibold tracking-wide shadow-sm ${sh.active
+                            ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300"
+                            : "bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300"
+                            }`}
                         >
                           {sh.active ? "Activo" : "Completado"}
                         </span>
@@ -525,18 +587,18 @@ export default function ShiftsPage() {
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2">
                           <span
-                            className={`inline-block px-2 py-0.5 rounded-full text-[11px] font-semibold ${
-                              verified
-                                ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300"
-                                : "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
-                            }`}
+                            className={`inline-block px-2 py-0.5 rounded-full text-[11px] font-semibold ${verified
+                              ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300"
+                              : "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
+                              }`}
                           >
                             {verified ? "Verificado" : "Pendiente"}
                           </span>
                           <button
-                            onClick={() =>
-                              handleToggleStatus(sh.id, verified)
-                            }
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleToggleStatus(sh.id, verified);
+                            }}
                             disabled={updatingId === sh.id}
                             className="text-xs px-2 py-1 rounded-full border border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-50"
                           >
@@ -568,7 +630,10 @@ export default function ShiftsPage() {
                       {/* Botón detalle */}
                       <td className="px-4 py-3">
                         <button
-                          onClick={() => openDetailsModal(sh)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openDetailsModal(sh);
+                          }}
                           className="p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-700 transition"
                         >
                           <FileText className="h-5 w-5 text-sky-600 dark:text-sky-400" />
@@ -752,11 +817,10 @@ function DetailsModal({
               label="Estado"
               value={
                 <span
-                  className={`inline-block px-2 py-0.5 rounded-full text-[11px] font-semibold ${
-                    (shift as any).active
-                      ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300"
-                      : "bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300"
-                  }`}
+                  className={`inline-block px-2 py-0.5 rounded-full text-[11px] font-semibold ${(shift as any).active
+                    ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300"
+                    : "bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300"
+                    }`}
                 >
                   {(shift as any).active ? "Activo" : "Completado"}
                 </span>
@@ -766,11 +830,10 @@ function DetailsModal({
               label="Verificación"
               value={
                 <span
-                  className={`inline-block px-2 py-0.5 rounded-full text-[11px] font-semibold ${
-                    (shift as any).status
-                      ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300"
-                      : "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
-                  }`}
+                  className={`inline-block px-2 py-0.5 rounded-full text-[11px] font-semibold ${(shift as any).status
+                    ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300"
+                    : "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
+                    }`}
                 >
                   {(shift as any).status ? "Verificado" : "Pendiente"}
                 </span>
