@@ -5,7 +5,8 @@ import { useDispatch, useSelector } from "react-redux";
 import type { AppDispatch, RootState } from "@/lib/redux/store";
 import { fetchBusinesses } from "@/lib/redux/slices/businessSlice";
 import { supabase } from "@/lib/supabase";
-
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
 /* ──────────────────────────────────────────────────────────────────────────
   INVENTARIO POR SUCURSAL (ENFORCED)
   - Paso 1: selección obligatoria de sucursal (bloquea la UI hasta elegir).
@@ -257,9 +258,9 @@ export default function InventoryByBranchPage() {
       const matchesSearch = !q
         ? true
         : item.name.toLowerCase().includes(q) ||
-          item.code.toLowerCase().includes(q) ||
-          (Array.isArray(item.codes_asociados) &&
-            item.codes_asociados.some((cs) => cs.toLowerCase().includes(q)));
+        item.code.toLowerCase().includes(q) ||
+        (Array.isArray(item.codes_asociados) &&
+          item.codes_asociados.some((cs) => cs.toLowerCase().includes(q)));
 
       return matchesCategory && matchesSearch;
     });
@@ -280,7 +281,88 @@ export default function InventoryByBranchPage() {
 
     return list;
   }, [inventory, searchTerm, selectedCategory, sortOrder, selectedBranchId]);
+  function exportToPDF() {
+    if (!selectedBranchId) return;
 
+    const doc = new jsPDF({ orientation: "landscape" });
+
+    doc.setFontSize(14);
+    doc.text(
+      `Inventario - ${selectedBranch?.name ?? "Sucursal"} - ${new Date().toLocaleDateString("es-AR")}`,
+      14,
+      15
+    );
+
+    const rows = filtered.map((item) => {
+      const { category } = extractCategory(item.name);
+      return [
+        category,
+        item.name,
+        item.code,
+        new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS" }).format(item.default_selling),
+      ];
+    });
+
+    autoTable(doc, {
+      startY: 22,
+      head: [["Categoría", "Nombre Completo", "Código Principal", "Precio Venta"]],
+      body: rows,
+      styles: { fontSize: 9, cellPadding: 3 },
+      headStyles: { fillColor: [79, 70, 229], textColor: 255, fontStyle: "bold" },
+      alternateRowStyles: { fillColor: [245, 245, 255] },
+      columnStyles: {
+        0: { cellWidth: 35 },
+        1: { cellWidth: 110 },
+        2: { cellWidth: 50 },
+        3: { cellWidth: 40 },
+      },
+    });
+
+    const fileName = `inventario_${(selectedBranch?.name ?? "sucursal")
+      .toLowerCase()
+      .replace(/\s+/g, "_")}_${new Date().toISOString().slice(0, 10)}.pdf`;
+
+    doc.save(fileName);
+  }
+  function exportToExcel() {
+    if (!selectedBranchId) return;
+
+    const rows = filtered.map((item) => {
+      const { category, base } = extractCategory(item.name);
+      const branchQty = item.stocks[selectedBranchId] ?? 0;
+      return {
+        Categoría: category,
+        "Nombre Completo": item.name,
+        "Código Principal": item.code,
+        "Precio Venta (ARS)": item.default_selling,
+      };
+    });
+
+    const ws = XLSX.utils.json_to_sheet(rows);
+
+    // Ancho de columnas
+    ws["!cols"] = [
+      { wch: 16 }, // Categoría
+      { wch: 30 }, // Nombre Base
+      { wch: 40 }, // Nombre Completo
+      { wch: 20 }, // Código Principal
+      { wch: 40 }, // Códigos Secundarios
+      { wch: 20 }, // Precio Compra
+      { wch: 12 }, // Margen %
+      { wch: 20 }, // Precio Venta
+      { wch: 20 }, // Stock
+      { wch: 16 }, // Búsqueda Manual
+    ];
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, selectedBranch?.name ?? "Inventario");
+
+    const fileName = `inventario_${(selectedBranch?.name ?? "sucursal")
+      .toLowerCase()
+      .replace(/\s+/g, "_")}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+
+    XLSX.writeFile(wb, fileName);
+  }
   useEffect(() => {
     setPage(1);
   }, [searchTerm, selectedCategory, sortOrder, inventory.length, selectedBranchId]);
@@ -485,7 +567,7 @@ export default function InventoryByBranchPage() {
       if (conflict) {
         alert(
           `Atención: el stock en ${selectedBranch?.name ?? selectedBranchId} cambió mientras editabas.\n` +
-            `No se guardó para evitar sobrescrituras.`
+          `No se guardó para evitar sobrescrituras.`
         );
       }
 
@@ -676,13 +758,22 @@ export default function InventoryByBranchPage() {
           <button
             onClick={openNew}
             disabled={!selectedBranchId}
-            className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium ${
-              selectedBranchId
-                ? "bg-indigo-600 text-white hover:bg-indigo-700"
-                : "bg-gray-300 text-gray-600 cursor-not-allowed"
-            }`}
+            className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium ${selectedBranchId
+              ? "bg-indigo-600 text-white hover:bg-indigo-700"
+              : "bg-gray-300 text-gray-600 cursor-not-allowed"
+              }`}
           >
             + Agregar Producto
+          </button>
+          <button
+            onClick={exportToPDF}
+            disabled={!selectedBranchId || filtered.length === 0}
+            className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium ${selectedBranchId && filtered.length > 0
+              ? "bg-emerald-600 text-white hover:bg-emerald-700"
+              : "bg-gray-300 text-gray-600 cursor-not-allowed"
+              }`}
+          >
+            ↓ Exportar Excel
           </button>
           <select
             value={selectedCategory}
@@ -758,11 +849,10 @@ export default function InventoryByBranchPage() {
               <button
                 onClick={() => setPage((p) => Math.max(1, p - 1))}
                 disabled={page <= 1}
-                className={`px-3 py-1 rounded-md border ${
-                  page <= 1
-                    ? "opacity-50 cursor-not-allowed"
-                    : "hover:bg-gray-100 dark:hover:bg-slate-700"
-                }`}
+                className={`px-3 py-1 rounded-md border ${page <= 1
+                  ? "opacity-50 cursor-not-allowed"
+                  : "hover:bg-gray-100 dark:hover:bg-slate-700"
+                  }`}
               >
                 Anterior
               </button>
@@ -772,11 +862,10 @@ export default function InventoryByBranchPage() {
               <button
                 onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
                 disabled={page >= totalPages}
-                className={`px-3 py-1 rounded-md border ${
-                  page >= totalPages
-                    ? "opacity-50 cursor-not-allowed"
-                    : "hover:bg-gray-100 dark:hover:bg-slate-700"
-                }`}
+                className={`px-3 py-1 rounded-md border ${page >= totalPages
+                  ? "opacity-50 cursor-not-allowed"
+                  : "hover:bg-gray-100 dark:hover:bg-slate-700"
+                  }`}
               >
                 Siguiente
               </button>
@@ -928,7 +1017,7 @@ export default function InventoryByBranchPage() {
                             onClick={async () => {
                               try {
                                 await navigator.clipboard.writeText(c);
-                              } catch {}
+                              } catch { }
                             }}
                             className="rounded-full p-1.5 text-[10px] leading-none bg-white/60 dark:bg-slate-800/60 hover:bg-white dark:hover:bg-slate-800 border border-slate-300 dark:border-slate-600"
                             aria-label={`Copiar ${c}`}
@@ -1002,7 +1091,7 @@ export default function InventoryByBranchPage() {
                       currency: "ARS",
                     }).format(
                       (drawerProduct.default_purchase || 0) *
-                        (1 + (drawerProduct.margin_percent || 0) / 100)
+                      (1 + (drawerProduct.margin_percent || 0) / 100)
                     )}
                   </div>
                 </div>
@@ -1069,20 +1158,18 @@ export default function InventoryByBranchPage() {
               <button
                 onClick={closeDrawer}
                 disabled={isSaving}
-                className={`px-6 py-3 border rounded-lg text-sm font-medium ${
-                  isSaving ? "bg-gray-100 cursor-not-allowed" : "hover:bg-gray-100"
-                }`}
+                className={`px-6 py-3 border rounded-lg text-sm font-medium ${isSaving ? "bg-gray-100 cursor-not-allowed" : "hover:bg-gray-100"
+                  }`}
               >
                 CANCELAR
               </button>
               <button
                 onClick={saveAll}
                 disabled={isSaving}
-                className={`px-6 py-3 rounded-lg text-sm font-semibold transition ${
-                  isSaving
-                    ? "bg-gray-400 text-white cursor-not-allowed"
-                    : "bg-green-600 text-white hover:bg-green-700"
-                }`}
+                className={`px-6 py-3 rounded-lg text-sm font-semibold transition ${isSaving
+                  ? "bg-gray-400 text-white cursor-not-allowed"
+                  : "bg-green-600 text-white hover:bg-green-700"
+                  }`}
               >
                 CONFIRMAR CAMBIOS
               </button>
@@ -1141,11 +1228,10 @@ export default function InventoryByBranchPage() {
               <button
                 onClick={handleConfirmStockModal}
                 disabled={isModalSubmitting}
-                className={`px-4 py-2 rounded-md text-white ${
-                  isModalSubmitting
-                    ? "bg-gray-400 cursor-not-allowed"
-                    : "bg-green-600 hover:bg-green-700"
-                }`}
+                className={`px-4 py-2 rounded-md text-white ${isModalSubmitting
+                  ? "bg-gray-400 cursor-not-allowed"
+                  : "bg-green-600 hover:bg-green-700"
+                  }`}
               >
                 {isModalSubmitting ? "Procesando..." : "Confirmar"}
               </button>
